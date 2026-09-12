@@ -1,0 +1,45 @@
+#!/bin/sh /etc/rc.common
+
+START=99
+USE_PROCD=0
+
+add_probe_address() {
+	local device="$1"
+	local address="$2"
+
+	ip link show dev "$device" >/dev/null 2>&1 || return 0
+	ip link set dev "$device" up >/dev/null 2>&1
+	ip address replace "$address" dev "$device" >/dev/null 2>&1
+}
+
+start() {
+	# NSS/SSDK devices can appear after netifd has already started.
+	local attempt=0
+	while [ "$attempt" -lt 30 ]; do
+		[ -d /sys/class/net/eth0 ] || [ -d /sys/class/net/eth1 ] || {
+			sleep 1
+			attempt=$((attempt + 1))
+			continue
+		}
+		break
+	done
+
+	if ip link show dev eth1 >/dev/null 2>&1 && ! ip link show dev eth1.1 >/dev/null 2>&1; then
+		ip link add link eth1 name eth1.1 type vlan id 1 >/dev/null 2>&1
+	fi
+	if ip link show dev eth0 >/dev/null 2>&1 && ! ip link show dev eth0.1 >/dev/null 2>&1; then
+		ip link add link eth0 name eth0.1 type vlan id 1 >/dev/null 2>&1
+	fi
+
+	add_probe_address eth0 '192.168.11.1/24'
+	add_probe_address eth1 '192.168.12.1/24'
+	add_probe_address eth1.1 '192.168.13.1/24'
+	add_probe_address eth0.1 '192.168.14.1/24'
+
+	{
+		date
+		ip -details link show
+		ip address show
+		ip route show
+	} > /tmp/be6500-rescue-probe.log 2>&1
+}

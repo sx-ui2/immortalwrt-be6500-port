@@ -1,0 +1,53 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR BSD-3-Clause)
+/*
+ * JDCloud ZhaoYun BE6500 — PCIe1/QCN9224 enumeration probe.
+ *
+ * Keep the boot-validated v17 wired/SSH base intact and enable only the
+ * factory-wired PCIe1 x2 controller.  MHI, CNSS and every Wi-Fi consumer stay
+ * disabled, so this image establishes endpoint enumeration before firmware
+ * loading or radio driver probing can obscure the failure boundary.
+ */
+#include "ipq5332-jdcloud-be6500-dsa-preserve-initramfs.dts"
+
+/ {
+	model = "JDCloud ZhaoYun BE6500 (6.6 PCIe1 enumeration probe)";
+	be6500,port-stage = "pcie1-enumeration-probe";
+};
+
+&pcie1_phy_x2 {
+	status = "okay";
+};
+
+&pcie1 {
+	pinctrl-0 = <&jd_pcie1_probe_state>;
+	pinctrl-names = "default";
+	linux,pci-domain = <1>;
+	num-lanes = <2>;
+	perst-gpios = <&tlmm 47 GPIO_ACTIVE_LOW>;
+	status = "okay";
+
+	pcie1_rp {
+		reg = <0 0 0 0 0>;
+
+		qcom,mhi@1 {
+			status = "disabled";
+		};
+	};
+};
+
+&tlmm {
+	jd_pcie1_probe_state: pcie1-probe-state {
+		pins = "gpio47";
+		function = "gpio";
+		drive-strength = <8>;
+		bias-pull-up;
+	};
+};
+
+/* The endpoint may enumerate, but no radio driver may bind in this stage. */
+&wifi0 { status = "disabled"; };
+&wifi1 { status = "disabled"; };
+&wifi2 { status = "disabled"; };
+&wifi3 { status = "disabled"; };
+&wifi4 { status = "disabled"; };
+&wifi5 { status = "disabled"; };

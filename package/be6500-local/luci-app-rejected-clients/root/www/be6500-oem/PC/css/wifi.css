@@ -1,0 +1,116 @@
+option:hover {
+  background-color: red;
+}
+.switch_smart_div,
+.smart_gaming_div,
+.mode_switch,
+.mesh_mode_div,
+#set_wifi_multi_frequency,
+#wifi5_compatible_content,
+.wifi_2g_channel,
+.wifi_5g_channel,
+.wifi_52g_channel {
+  display: none;
+}
+
+.mesh_mode_desc {
+  padding: 0px 0px 0 0;
+  line-height: 17px;
+  text-align: left;
+  font-family: PingFang SC;
+  font-style: normal;
+  font-size: 12px;
+  width: 80%;
+  color: #999999;
+}
+
+.modify_wifi_png_com {
+  text-align: center;
+}
+.modify_wifi_p {
+  color: #000;
+}
+.exit-mesh-btn {
+  min-width: 72px;
+  height: 21px;
+  line-height: 17px;
+  background: #FFFFFF;
+  border: 1px solid #4762FE;
+  border-radius: 4px;
+  font-family: 'PingFang SC';
+  font-style: normal;
+  font-weight: 500;
+  font-size: 12px;
+  color: #4762FE;
+  margin: 0px 10px;
+}
+.loading {
+  left: 0px!important;
+}
+.btn-disable,
+.no-btn-disable {
+  font-weight: normal!important;
+  box-shadow: none!important;
+  border: 1px solid #DDDDDD!important;
+  pointer-events: none;
+}
+.btn-disable {
+  background: #EEEEEE!important;
+  color: #D0D0D0!important;
+}
+
+.no-btn-disable {
+  background: #f9f9f9!important;
+  color: #999!important;
+}
+.no-btn-disable .select_txt {
+  font-weight: normal!important;
+  color: #999!important;
+}
+
+.modeSwitchCountDown .mode_switch_Div {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  padding: 30px 0;
+}
+.modeSwitchCountDown .change_mode_switch_count_down {
+  position: relative;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  width: 108px;
+  height: 113px;
+  margin-bottom: 25px;
+}
+.modeSwitchCountDown .change_mode_switch_count_down img {
+  width: 100%;
+  height: 100%;
+}
+.modeSwitchCountDown .change_mode_switch_count_down .mode_switch_count_down_num {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  font-weight: 500;
+  font-size: 30px;
+  color: #000;
+}
+.modeSwitchCountDown .mode_switch_count_down_text {
+  margin-top: 10px;
+  color: #000;
+}
+
+/* wifi模式切换 */
+.mode_switch .mode_switch_desc .form_left {
+  height: 28px;
+  line-height: 28px;
+}
+
+.multi_frequency_Div,
+.limit_points_Div {
+  padding: 30px 35px 20px;
+  text-align: center; 
+  color: #333;
+}

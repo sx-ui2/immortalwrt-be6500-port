@@ -1,0 +1,94 @@
+From 5b86d15a61c546cf94242ae63b7d5baeb1700005 Mon Sep 17 00:00:00 2001
+From: BE6500 bring-up <be6500@example.invalid>
+Date: Wed, 2 Sep 2026 15:20:00 +0800
+Subject: [PATCH] net: dsa: qca8k: trace and validate QCA8386 MHT RMW
+
+The v14 RAM test reaches the first forwarding-membership update but does not
+create any DSA user netdev before the hardware watchdog resets the board.  Add
+phase markers around every Clause 22 transaction in the QCA8386 MHT
+read-modify-write path so the exact failing transaction is observable.
+
+The QSDK-derived path stored negative MDIO errors in u16 values and continued
+with a corrupted write.  Preserve and return each MDIO error instead.  This is
+still a RAM-test diagnostic patch, not a production declaration of support.
+---
+ drivers/net/dsa/qca/qca8k-8xxx.c | 62 +++++++++++++++++++++++++++++---
+ 1 file changed, 57 insertions(+), 5 deletions(-)
+
+diff --git a/drivers/net/dsa/qca/qca8k-8xxx.c b/drivers/net/dsa/qca/qca8k-8xxx.c
+index 4e8d0f11..1c97d3bc 100644
+--- a/drivers/net/dsa/qca/qca8k-8xxx.c
++++ b/drivers/net/dsa/qca/qca8k-8xxx.c
+@@ -418,31 +418,63 @@ qca8k_regmap_update_bits_mii(struct qca8k_priv *priv, uint32_t reg,
+ 	if (priv->switch_id == QCA8K_ID_QCA8386) {
+ 		u16 switch_phy_id, lo, hi;
+ 		mht_split_addr(reg, &r1, &r2, &page, &switch_phy_id);
++		dev_info(priv->dev,
++			 "trace mht-rmw: begin reg %#x page %#x switch-phy %#x r2 %#x r1 %#x\n",
++			 reg, page, switch_phy_id, r2, r1);
+ 
+ 		mutex_lock_nested(&bus->mdio_lock, MDIO_MUTEX_NESTED);
+ 		if (priv->erp_standby) {
+ 			mutex_unlock(&bus->mdio_lock);
+ 			return -EIO;
+ 		}
+-		bus->write(bus, 0x18 | (switch_phy_id >> 5), switch_phy_id & 0x1f, page);
++		ret = bus->write(bus, 0x18 | (switch_phy_id >> 5),
++				 switch_phy_id & 0x1f, page);
++		dev_info(priv->dev, "trace mht-rmw: read page-select result %d\n", ret);
++		if (ret < 0)
++			goto qca8386_unlock;
+ 		udelay(100);
+-		lo = bus->read(bus, 0x10 | r2, r1);
+-		hi = bus->read(bus, 0x10 | r2, r1 + 2);
++		ret = bus->read(bus, 0x10 | r2, r1);
++		dev_info(priv->dev, "trace mht-rmw: low read result %d\n", ret);
++		if (ret < 0)
++			goto qca8386_unlock;
++		lo = ret;
++
++		ret = bus->read(bus, 0x10 | r2, r1 + 2);
++		dev_info(priv->dev, "trace mht-rmw: high read result %d\n", ret);
++		if (ret < 0)
++			goto qca8386_unlock;
++		hi = ret;
+ 		val = (hi << 16) | lo;
+ 
+ 		val &= ~mask;
+ 		val |= write_val;
+ 
+ 		lo = val & 0xffff;
+ 		hi = (u16) (val >> 16);
+ 
+-		bus->write(bus, 0x18 | (switch_phy_id >> 5), switch_phy_id & 0x1f, page);
++		ret = bus->write(bus, 0x18 | (switch_phy_id >> 5),
++				 switch_phy_id & 0x1f, page);
++		dev_info(priv->dev, "trace mht-rmw: write page-select result %d\n", ret);
++		if (ret < 0)
++			goto qca8386_unlock;
+ 		udelay(100);
+-		bus->write(bus, 0x10 | r2, r1, lo);
+-		bus->write(bus, 0x10 | r2, r1 + 2, hi);
++		ret = bus->write(bus, 0x10 | r2, r1, lo);
++		dev_info(priv->dev, "trace mht-rmw: low write result %d\n", ret);
++		if (ret < 0)
++			goto qca8386_unlock;
++
++		ret = bus->write(bus, 0x10 | r2, r1 + 2, hi);
++		dev_info(priv->dev, "trace mht-rmw: high write result %d\n", ret);
++		if (ret < 0)
++			goto qca8386_unlock;
++
++		dev_info(priv->dev, "trace mht-rmw: complete reg %#x\n", reg);
++		ret = 0;
++
++qca8386_unlock:
+ 		mutex_unlock(&bus->mdio_lock);
+ 
+-		return 0;
++		return ret;
+ 	}
+ 
+ 	qca8k_split_addr(reg, &r1, &r2, &page);
+-- 
+2.50.1

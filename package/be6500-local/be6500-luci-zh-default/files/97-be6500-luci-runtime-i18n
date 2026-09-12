@@ -1,0 +1,19 @@
+#!/bin/sh
+
+[ "$(cat /tmp/sysinfo/board_name 2>/dev/null)" = "jdcloud,be6500" ] || exit 0
+
+wireless_js=/www/luci-static/resources/view/network/wireless.js
+[ -f "$wireless_js" ] || exit 0
+
+# luci-mod-network used the raw driver mode here even though network.js
+# already provides a localized accessor.  It also treated the driver's
+# literal "None" as a translated value.  Correct both display paths while
+# keeping the upstream page and form implementation intact.
+sed -i \
+	-e 's/radioNet\.getActiveMode()/radioNet.getActiveModeI18n()/g' \
+	-e "s/radioNet\.getActiveEncryption() ?? _('None')/(radioNet.getActiveEncryption() == 'None' ? _('None') : (radioNet.getActiveEncryption() ?? _('None')))/g" \
+	-e "s/radioNet\.getActiveEncryption()??_('None')/(radioNet.getActiveEncryption()=='None'?_('None'):(radioNet.getActiveEncryption()??_('None')))/g" \
+	"$wireless_js"
+
+rm -rf /tmp/luci-indexcache /tmp/luci-modulecache
+exit 0

@@ -1,0 +1,210 @@
+.smart_set_network .desc {
+  margin-left: 45px;
+}
+.smart_set_network .network-port,
+.smart_set_network .iptv_content,
+.smart_set_network .iptv_content .self_iptv_module,
+.smart_set_network .network_content .self_network_module,
+.smart_set_network .wo-link,
+.smart_set_network .game-network-card,
+.smart_set_network .game_content,
+.smart_set_network .self_game_module,
+.smart_set_network .easy-mesh,
+.smart_set_network .easy_mesh_content {
+  display: none;
+}
+.smart_set_network .seniorManagement_content_div {
+  display: flex;
+  align-items: center;
+  margin-bottom: 30px;
+}
+.smart_set_network .seniorManagement_content_div label {
+  width: 100px;
+  height: auto;
+  font-weight: 400;
+  line-height: normal;
+}
+.smart_set_network .seniorManagement_content_div .IPaddrIpt {
+  width: 150px;
+}
+.smart_set_network .custom_network_port,
+.smart_set_network .custom_iptv_port,
+.smart_set_network .custom_game_port,
+.smart_set_network .easy_mesh_content  {
+  width: 432px;
+}
+.smart_set_network .custom_network_port .network_active,
+.smart_set_network .custom_iptv_port .iptv_active,
+.smart_set_network .custom_game_port .game_active {
+  font-weight: 600;
+  color: #4762FE!important;
+}
+.smart_set_network .custom_network_port .network_active_disable,
+.smart_set_network .custom_iptv_port .iptv_active_disable,
+.smart_set_network .custom_game_port .game_active_disable {
+  font-weight: 600;
+  color: #D0D0D0!important;
+}
+.smart_set_network .custom_network_port .self_network_title,
+.smart_set_network .custom_iptv_port .self_iptv_title,
+.smart_set_network .custom_game_port .self_game_title {
+  margin-top: 50px;
+  color: #999999;
+}
+.smart_set_network .custom_network_port .self_network_module .self_network_text,
+.smart_set_network .custom_iptv_port .self_iptv_module .self_iptv_text,
+.smart_set_network .custom_game_port .self_game_module .self_game_text {
+  display: flex;
+  justify-content: space-between;
+  width: 100%;
+  margin: 34px 0 20px 0;
+  padding: 0 20px;
+  box-sizing: border-box;
+}
+.smart_set_network .custom_network_port .self_network_module .self_network_text span,
+.smart_set_network .custom_iptv_port .self_iptv_module .self_iptv_text span,
+.smart_set_network .custom_game_port .self_game_module .self_game_text span {
+  display: inline-block;
+  width: 90px;
+  text-align: center;
+  color: #D0D0D0;
+}
+.smart_set_network .custom_network_port .self_network_module .self_network_text span {
+  color: #333333;
+}
+.smart_set_network .custom_network_port .self_network_module .self_network_img,
+.smart_set_network .custom_iptv_port .self_iptv_module .self_iptv_img,
+.smart_set_network .custom_game_port .self_game_module .self_game_img {
+  display: flex;
+  justify-content: space-between;
+  width: 100%;
+  border: 1px solid #DDDDDD;
+  border-radius: 4px;
+  padding: 10px 20px;
+  box-sizing: border-box;
+}
+.smart_set_network .custom_network_port .self_network_module .self_network_img div {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  font-size: 12px;
+}
+.smart_set_network .custom_network_port .zhaoyun_network_module .network_img_btn,
+.smart_set_network .custom_network_port .houyi_network_module .network_img_btn,
+.smart_set_network .custom_network_port .nezha_network_module .network_img_btn,
+.smart_set_network .custom_network_port .baili_network_module .network_img_btn,
+.smart_set_network .custom_iptv_port .zhaoyun_iptv_module img,
+.smart_set_network .custom_iptv_port .houyi_iptv_module img,
+.smart_set_network .custom_iptv_port .nezha_iptv_module img,
+.smart_set_network .custom_iptv_port .baili_iptv_module img,
+.smart_set_network .custom_game_port .zhaoyun_game_module img,
+.smart_set_network .custom_game_port .houyi_game_module img,
+.smart_set_network .custom_game_port .nezha_game_module img,
+.smart_set_network .custom_game_port .baili_game_module img {
+  width: 90px;
+  transform: rotate(180deg);
+}
+.smart_set_network .custom_network_port .yase_network_module .network_img_btn,
+.smart_set_network .custom_network_port .ydn_network_module .network_img_btn,
+.smart_set_network .custom_network_port .luban_network_module .network_img_btn,
+.smart_set_network .custom_iptv_port .yase_iptv_module img,
+.smart_set_network .custom_iptv_port .ydn_iptv_module img,
+.smart_set_network .custom_iptv_port .luban_iptv_module img,
+.smart_set_network .custom_iptv_port .taiyiplus_iptv_module img,
+.smart_set_network .custom_game_port .yase_game_module img,
+.smart_set_network .custom_game_port .ydn_game_module img,
+.smart_set_network .custom_game_port .luban_game_module img, 
+.smart_set_network .custom_game_port .taiyiplus_game_module img {
+  width: 90px;
+  transform: rotate(0deg);
+}
+.smart_set_network .custom_network_port .self_network_module .self_network_img .network_icon_btn {
+  display: none;
+  width: 15px;
+  margin-top: 3px;
+  transform: rotate(0);
+  cursor: pointer;
+}
+.smart_set_network .iptv_save_btn,
+.smart_set_network .iptv_save_btn_disable,
+.smart_set_network .game_save_btn,
+.smart_set_network .game_save_btn_disable,
+.smart_set_network .easy_mesh_btn  {
+  width: 432px;
+  height: 46px;
+  margin-top: 30px;
+  text-align: center;
+  border: none;
+  box-sizing: border-box;
+  border-radius: 4px;
+  line-height: 46px;
+  background: #4762FE;
+  color: white;
+  outline: none;
+}
+.smart_set_network .iptv_save_btn_disable,
+.smart_set_network .game_save_btn_disable {
+  background: #EEEEEE!important;
+  color: #D0D0D0!important;
+  pointer-events: none;
+}
+.smart_set_network .off_btn {
+  width: 55px;
+}
+.iptv_text_btn,
+.game_text_btn,
+.iptv_img_btn,
+.game_img_btn  {
+  cursor: pointer;
+}
+.smart_set_network .errNo_tip {
+  padding-left: 10px;
+}
+.easy_mesh_content .self_easy_mesh_module {
+  width: 100%;
+  padding: 20px;
+  box-sizing: border-box;
+  border: 1px solid #DDDDDD;
+}
+.self_easy_mesh_module >div {
+  display: flex;
+  align-items: center;
+  height: 40px;
+}
+.self_easy_mesh_module input {
+  margin: 0;
+}
+.self_easy_mesh_module label {
+  margin-left: 12px;
+  margin-bottom: 0;
+  font-weight: 400;
+  font-size: 14px;
+  color: #333333;
+}
+#mesh-countdown-dialog .proDialog_content {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+}
+#mesh-countdown-dialog .change_mesh_time {
+  position: relative;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  width: 108px;
+  height: 113px;
+  margin-bottom: 25px;
+}
+#mesh-countdown-dialog .change_mesh_time img {
+  width: 100%;
+  height: 100%;
+}
+#mesh-countdown-dialog .change_mesh_time .mesh_time_num {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  font-weight: 500;
+  font-size: 30px;
+}

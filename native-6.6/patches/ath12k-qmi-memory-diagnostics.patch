@@ -1,0 +1,20 @@
+--- a/drivers/net/wireless/ath/ath12k/qmi.c
++++ b/drivers/net/wireless/ath/ath12k/qmi.c
+@@ -4964,7 +4964,7 @@ static int ath12k_qmi_assign_target_mem_chunk(struct ath12k_base *ab,
+ 
+ 	return 0;
+ print_err:
+-	ath12k_dbg(ab, ATH12K_DBG_QMI, "failed to assign mem type %d req size %d avail size %u\n",
++	ath12k_err(ab, "failed to assign mem type %d req size %d avail size %u\n",
+ 		   ab->qmi.target_mem[i].type,
+ 		   ab->qmi.target_mem[i].size,
+ 		   avail_sz);
+@@ -5137,7 +5137,7 @@ static int ath12k_qmi_assign_target_mem_chunk(struct ath12k_base *ab,
+ 
+ 	return 0;
+ print_err:
+-	ath12k_dbg(ab, ATH12K_DBG_QMI, "failed to assign mem type %d req size %d avail size %u\n",
++	ath12k_err(ab, "failed to assign mem type %d req size %d avail size %u\n",
+ 		   ab->qmi.target_mem[i].type,
+ 		   ab->qmi.target_mem[i].size,
+ 		   avail_sz);

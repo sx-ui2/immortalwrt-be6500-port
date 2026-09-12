@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0,maximum-scale=1.0, user-scalable=no" />
+<meta name="apple-mobile-web-app-title" content="京东路由">
+<meta http-equiv="pragma" content="no-cache">
+<meta http-equiv="cache-control" content="no-cache">
+<meta http-equiv="expires" content="0">
+<link href="../../P_IMG/icon.png" rel="icon" type="image/x-icon" />
+<link rel="stylesheet" type="text/css" href="../../bootstrap/css/bootstrap.min.css" />
+<link rel="stylesheet" type="text/css" href="../css/deviceList.css?v=20260824-3" />
+<script type="text/javascript" charset="utf-8" src="../../Public_JS/jquery.min.js">
+</script>
+<script type="text/javascript" src="../../Public_JS/jquery.cookie.js">
+</script>
+<script type="text/javascript" charset="utf-8" src="../../bootstrap/js/bootstrap.min.js">
+</script>
+<script type="text/javascript" charset="utf-8" src="../../Public_JS/common.js">
+</script>
+<script type="text/javascript" charset="utf-8" src="../../Public_JS/iframe_height.js">
+</script>
+<script src="../../Public_JS/echarts.min.js">
+</script>
+<title>设备列表</title>
+<script defer="defer" src="../../manifest.eb04e68286dcd0effaac.js?b38c3baab635ff1dcf3d">
+</script>
+<script defer="defer" src="../../PC/management/deviceList.249f865208c7794ddb13.js?v=20260824-3">
+</script>
+<script defer="defer" src="../../PC/management/device-columns.20260824.js?v=3">
+</script>
+</head>
+<body>
+<div class="box device_wrapper">
+<div class="title">
+<div class="text">设备列表</div>
+<div class="device-title-right">
+<div class="to_list_btn">
+<img src="../../P_IMG/device-list-active.png" alt="">
+<p class="device-title-right-active">列表模式</p>
+</div>
+<span>
+</span>
+<div class="to_topol_btn">
+<img src="../../P_IMG/device-tree.png" alt="">
+<p>拓扑图模式</p>
+</div>
+</div>
+</div>
+<div class="topol-com-wrap" data-page="1">
+<div class="topol-com" id="topol-com" style="width: 1100px; height:480px;">
+</div>
+<img class="arrow_left" src="../../P_IMG/left-arrow.png" alt="">
+<img class="arrow_right" src="../../P_IMG/right-arrow.png" alt="">
+</div>
+<div class="list-com">
+<div class="online">
+<div style="font-weight: 550;">在线设备</div>
+<div class="table online_table">
+<ul class="head">
+<li>设备名称</li>
+<li>MAC/IP</li>
+<li class="identity-type-head">设备类型</li>
+<li class="identity-vendor-head">品牌 / 厂商</li>
+<li>状态</li>
+<li>实时速度</li>
+<li>操作</li>
+</ul>
+</div>
+</div>
+<div class="offline">
+<div style="font-weight: 550;">离线设备</div>
+<div class="table offline_table">
+<ul class="head">
+<li>设备名称</li>
+<li>MAC/IP</li>
+<li class="identity-type-head">设备类型</li>
+<li class="identity-vendor-head">品牌 / 厂商</li>
+<li>状态</li>
+<li>实时速度</li>
+<li>操作</li>
+</ul>
+</div>
+</div>
+<div class="mask">
+</div>
+<div class="pop-ups">
+<div class="top">
+<div class="left">设备信息</div>
+<div class="right">
+<img src="../../P_IMG/off.png" class="off">
+</div>
+</div>
+<div class="main">
+<div class="active" style="padding-bottom: 0;">
+<span>设备名</span>
+<input style="width: 350px;" id="uname" maxlength="63" class="form-control ipt requireIndependent isDName" type="text" />
+<input type="hidden" id="uid" />
+<input type="hidden" id="oldName" />
+</div>
+<div class="active" id="permitInternet">
+<span>允许联网</span>
+<div class="switch" id="network_enable" value="1">
+<img src="../../P_IMG/turn-on.png">
+</div>
+</div>
+<div class="active limit">
+<span>限速</span>
+<div class="switch" id="enable" value="1">
+<img src="../../P_IMG/turn-on.png">
+</div>
+</div>
+<div class="speed">
+<div class="active" id="uploadCom">
+<span>上传速度</span>
+<input style="margin-right: 20px;" id="uploadSpeed" maxlength="8" class="form-control ipt requireIndependent isNaNSpeed" type="text" value="0" />KB/S						</div>
+<div class="active" id="downloadCom">
+<span>下载速度</span>
+<input style="margin-right: 20px;" id="downloadSpeed" maxlength="8" class="form-control ipt requireIndependent isNaNSpeed" type="text" value="0" />KB/S						</div>
+</div>
+<div class="active" style="text-align: center;">
+<button type="button" id="save" class="button">保存</button>
+</div>
+</div>
+</div>
+</div>
+</div>
+</body>
+</html>

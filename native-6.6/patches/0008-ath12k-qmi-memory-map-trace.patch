@@ -1,0 +1,19 @@
+--- a/drivers/net/wireless/ath/ath12k/qmi.c
++++ b/drivers/net/wireless/ath/ath12k/qmi.c
+@@ -4065,11 +4065,11 @@ int ath12k_qmi_respond_fw_mem_request(struct ath12k_base *ab, void *data)
+ 			req->mem_seg[idx].addr = ab->qmi.target_mem[i].paddr;
+ 			req->mem_seg[idx].size = ab->qmi.target_mem[i].size;
+ 			req->mem_seg[idx].type = ab->qmi.target_mem[i].type;
+-			ath12k_dbg(ab, ATH12K_DBG_QMI,
+-				   "qmi req mem_seg[%d] %pad %u %u\n", idx,
+-				   &ab->qmi.target_mem[i].paddr,
+-				   ab->qmi.target_mem[i].size,
+-				   ab->qmi.target_mem[i].type);
++			ath12k_info(ab,
++				    "QMI memory response segment[%d]: addr=%pad size=%u type=%u\n",
++				    idx, &ab->qmi.target_mem[i].paddr,
++				    ab->qmi.target_mem[i].size,
++				    ab->qmi.target_mem[i].type);
+ 			idx++;
+ 		}
+ 	}

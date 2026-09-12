@@ -1,0 +1,70 @@
+--- a/Makefile
++++ b/Makefile
+@@ -38 +38 @@
+-PKG_BUILD_ID:=$(shell date | $(MKHASH) md5)
++PKG_BUILD_ID:=qcn92xx-stage1
+@@ -192,11 +192,7 @@
+ 	$(INSTALL_BIN) ./files/etc/init.d/ath11k_nss_enable.sh $(1)/etc/init.d
+ 	$(INSTALL_BIN) ./files/etc/init.d/ath11k_uboot_mod_params.sh $(1)/etc/init.d
+ 	$(INSTALL_BIN) ./files/etc/init.d/qca-nss-pbuf $(1)/etc/init.d
+ 	$(INSTALL_BIN) ./files/etc/init.d/diag_socket_app $(1)/etc/init.d
+-	$(INSTALL_DATA) $(EXTERNAL_HOSTAP_FILE_DIR)/files/dpp-hostapd-event-update.sh $(1)/lib/netifd/dpp-hostapd-event-update
+-	chmod 0755 $(1)/lib/netifd/dpp-hostapd-event-update
+-	$(INSTALL_DATA) $(EXTERNAL_HOSTAP_FILE_DIR)/files/dpp-supplicant-event-update.sh $(1)/lib/netifd/dpp-supplicant-event-update
+-	chmod 0755 $(1)/lib/netifd/dpp-supplicant-event-update
+ 	$(INSTALL_BIN) ./files/etc/init.d/ath12k_dyn_dbg_enable.sh $(1)/etc/init.d
+ 	$(INSTALL_BIN) ./files/etc/init.d/ath12k_dyn_module_add.sh $(1)/etc/init.d
+ 	$(INSTALL_CONF) ./files/ini/*.ini $(1)/ini/
+@@ -241,9 +237,5 @@
+ ifeq (y, $(filter y, $(CONFIG_TARGET_echo) $(CONFIG_TARGET_sdx85)))
+   DEPENDS+= +kmod-cfg80211 +kmod-crypto-cmac +kmod-crypto-ccm +kmod-crypto-gcm +hostapd-common
+ else
+-  DEPENDS+= +kmod-cfg80211 +kmod-crypto-cmac +kmod-crypto-ccm +kmod-crypto-gcm +hostapd-common \
+-	+kmod-qca-nss-ppe \
+-	+kmod-qca-nss-ppe-vp \
+-	+kmod-qca-nss-ppe-ds \
+-	+kmod-qca-nss-wifi-plugins
++  DEPENDS+= +kmod-cfg80211 +kmod-crypto-cmac +kmod-crypto-ccm +kmod-crypto-gcm +hostapd-common
+ endif
+--- a/ath.mk
++++ b/ath.mk
+@@ -1,6 +1,2 @@
+ PKG_DRIVERS += \
+-	ath ath12k carl9170 owl-loader ar5523 wil6210
+-
+-ifneq ($(CONFIG_KERNEL_IPQ_MEM_PROFILE),256)
+-PKG_DRIVERS += ath11k ath11k-ahb ath11k-pci
+-endif
++	ath ath12k
+@@ -46,8 +42,9 @@
+ config-$(CONFIG_ATH_USER_REGD) += ATH_USER_REGD ATH_REG_DYNAMIC_USER_REG_HINTS
+ config-$(CONFIG_ATH11K_THERMAL) += ATH11K_THERMAL
+ 
+ config-$(CONFIG_TARGET_ipq53xx) += ATH12K_AHB ATH12K_POWER_OPTIMIZATION
++config-$(CONFIG_TARGET_qualcommax_ipq53xx) += ATH12K_AHB ATH12K_POWER_OPTIMIZATION
+ config-$(CONFIG_TARGET_ipq54xx) += ATH12K_AHB
+ 
+ config-$(call config_package,ath11k) += ATH11K ATH11K_AHB ATH11K_PCI
+ config-$(call config_package,ath12k) += ATH12K
+@@ -175 +169,0 @@
+-DEPENDS+= +PACKAGE_kmod-qca-debug-uio:kmod-qca-debug-uio
+@@ -178,3 +172,0 @@
+-ifneq ($(CONFIG_KERNEL_IPQ_MEM_PROFILE),256)
+-  FILES+=$(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/wifi8/ath12k_wifi8.ko
+-endif
+@@ -189,5 +179,5 @@
+ ifeq ($(CONFIG_PACKAGE_MAC80211_ATHDEBUG),y)
+   FILES+=$(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/ath_debug/ath_debug.ko
+ endif
+-  AUTOLOAD:=$(call AutoProbe,ath12k ath12k_wifi7 ath_debug)
++  AUTOLOAD:=$(call AutoProbe,ath12k ath12k_wifi7)
+ endef
+@@ -200,7 +190,7 @@
+ define KernelPackage/ath12k/config
+ 	config PACKAGE_ATH12K_SAWF
+ 		bool "SAWF and Telemetry support in ATH12K"
+-		default y
++		default n
+ 		help
+ 			This option enables support for SAWF and Telemetry
+ 			in ATH12K.

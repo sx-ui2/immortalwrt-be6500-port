@@ -1,0 +1,57 @@
+
+config interface 'loopback'
+	option device 'lo'
+	option proto 'static'
+	option ipaddr '127.0.0.1'
+	option netmask '255.0.0.0'
+
+config globals 'globals'
+	option ula_prefix 'fdca:6500:6500::/48'
+
+config device
+	option name 'br-lan'
+	option type 'bridge'
+	list ports 'eth1'
+	option igmp_snooping '0'
+
+config interface 'lan'
+	option device 'br-lan'
+	option proto 'static'
+	option ipaddr '192.168.1.1'
+	option netmask '255.255.255.0'
+	option ip6assign '60'
+
+config interface 'wan'
+	option device 'eth0'
+	option proto 'dhcp'
+	option auto '1'
+	option defaultroute '1'
+	option delegate '1'
+	option metric '10'
+	option be6500_vlan_mode 'untagged'
+	option mtu '1500'
+	option ipv6 'auto'
+
+config interface 'wan6'
+	option device '@wan'
+	option proto 'dhcpv6'
+	option reqaddress 'try'
+	option reqprefix 'auto'
+	option delegate '1'
+	option disabled '0'
+	option auto '1'
+	option metric '10'
+	option be6500_type 'native'
+	option be6500_fw_enable '1'
+
+config switch 'switch1'
+	option name 'switch1'
+	option reset '1'
+	option enable_vlan '1'
+
+config switch_vlan 'vlan1'
+	option device 'switch1'
+	option vlan '1'
+	option vid '1'
+	option ports '1 2 3 0'
+

@@ -1,0 +1,25 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR BSD-3-Clause)
+/*
+ * RAM-only DSA probe diagnostic that preserves the live QWRT switch state.
+ *
+ * QCA8386 DSA and PHY nodes are enabled and SSDK MHT remains disabled.  The
+ * late MDIO insertion performs no GPIO reset, clock/EPHY fixup, or PHY/UNIPHY
+ * address rewrite.  This isolates qca8k identification/registration from the
+ * pre-initialisation writes observed in v5.  It is never flashable.
+ */
+#include "ipq5332-jdcloud-be6500-mdio-staged-initramfs.dts"
+
+/ {
+	be6500,dsa-preserve;
+};
+
+&mdio {
+	/delete-property/ phy-reset-gpio;
+	/delete-property/ mdio_clk_fixup;
+	/delete-property/ phyaddr_fixup;
+	/delete-property/ uniphyaddr_fixup;
+};
+
+&jd_mht {
+	status = "disabled";
+};

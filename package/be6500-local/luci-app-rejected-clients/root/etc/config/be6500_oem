@@ -1,0 +1,71 @@
+config settings 'access'
+	option enabled '1'
+	option policy 'deny'
+
+config settings 'guest_qos'
+	option enabled '0'
+	option upload '0'
+	option download '0'
+
+config settings 'qos'
+	option mode '0'
+
+config settings 'led'
+	option enabled '1'
+	option policy 'auto'
+	option color 'blue'
+	option effect 'steady'
+
+config led_rule
+	option state 'booting'
+	option color 'blue'
+	option effect 'slow'
+	option enabled '1'
+
+config led_rule
+	option state 'upgrading'
+	option color 'blue'
+	option effect 'fast'
+	option enabled '1'
+
+config led_rule
+	option state 'overheat'
+	option color 'red'
+	option effect 'fast'
+	option enabled '1'
+
+config led_rule
+	option state 'wps'
+	option color 'blue'
+	option effect 'fast'
+	option enabled '1'
+
+config led_rule
+	option state 'wifi_off'
+	option color 'red'
+	option effect 'slow'
+	option enabled '1'
+
+config led_rule
+	option state 'offline'
+	option color 'red'
+	option effect 'steady'
+	option enabled '1'
+
+config led_rule
+	option state 'online'
+	option color 'blue'
+	option effect 'steady'
+	option enabled '1'
+
+config led_rule
+	option state 'usb'
+	option color 'green'
+	option effect 'steady'
+	option enabled '1'
+
+config led_rule
+	option state 'plugin'
+	option color 'green'
+	option effect 'steady'
+	option enabled '1'

@@ -1,0 +1,75 @@
+--- a/drivers/net/wireless/ath/ath12k/mhi.c
++++ b/drivers/net/wireless/ath/ath12k/mhi.c
+@@ -9,6 +9,7 @@
+ #include <linux/firmware.h>
+ #include <linux/of.h>
+ #include <linux/of_address.h>
++#include <linux/init.h>
+ 
+ #include "core.h"
+ #include "debug.h"
+@@ -26,6 +27,24 @@
+ #define OTP_VALID_DUALMAC_BOARD_ID_MASK		0x1000
+ #define MHI_CB_INVALID	0xff
+ 
++static bool ath12k_be6500_singlemac_requested(struct ath12k_base *ab)
++{
++	static const char option[] = "cnss2.bdf_pci1=";
++	const char *value;
++
++	if (ab->hw_rev != ATH12K_HW_QCN9274_HW20 ||
++	    !of_machine_is_compatible("jdcloud,be6500"))
++		return false;
++
++	value = strstr(saved_command_line, option);
++	if (!value)
++		return false;
++
++	value += sizeof(option) - 1;
++	return !strncmp(value, "0x2", 3) &&
++	       (value[3] == '\0' || value[3] == ' ');
++}
++
+ void ath12k_mhi_set_mhictrl_reset(struct ath12k_base *ab)
+ {
+	 u32 val;
+@@ -294,7 +313,11 @@ int ath12k_mhi_register(struct ath12k_pci
+ 	mhi_ctrl->reg_len = ab->mem_len;
+ 	mhi_ctrl->rddm_size = ab->hw_params->rddm_size ?: ATH12K_PCI_FW_RDDM_SZ;
+ 	if (ab->hw_params->otp_board_id_register) {
+-		if (!of_property_read_u32(ab->dev->of_node, "qcom,board_id", &board_id) &&
++		if (ath12k_be6500_singlemac_requested(ab)) {
++			board_id = 0x2;
++			ath12k_info(ab, "JDC-BE6500 single-MAC firmware selected by boot mode\n");
++		} else if (!of_property_read_u32(ab->dev->of_node,
++					      "qcom,board_id", &board_id) &&
+ 		    board_id != ATH12K_BOARD_ID_DEFAULT) {
+ 			board_id = u32_get_bits(board_id, OTP_BOARD_ID_MASK);
+ 		} else {
+--- a/drivers/net/wireless/ath/ath12k/core.c
++++ b/drivers/net/wireless/ath/ath12k/core.c
+@@ -1043,7 +1043,14 @@ static int ath12k_core_fetch_board_data(s
+ 		goto success;
+ 
+ 	bd_api = 1;
+-	ret = ath12k_core_fetch_board_data_api_1(ab, bd, ATH12K_DEFAULT_BOARD_FILE);
++	if (ab->hw_rev == ATH12K_HW_QCN9274_HW20 &&
++	    of_machine_is_compatible("jdcloud,be6500") && !ab->is_dualmac) {
++		ath12k_info(ab, "JDC-BE6500 single-MAC board data selected\n");
++		ret = ath12k_core_fetch_board_data_api_1(ab, bd,
++							 "board-single.bin");
++	} else {
++		ret = ath12k_core_fetch_board_data_api_1(ab, bd, ATH12K_DEFAULT_BOARD_FILE);
++	}
+ 	if (ret) {
+ 		ath12k_core_create_firmware_path(ab, filename,
+ 						 filepath, sizeof(filepath));
+--- a/drivers/net/wireless/ath/ath12k/reg.c
++++ b/drivers/net/wireless/ath/ath12k/reg.c
+@@ -399,6 +399,7 @@ static void ath12k_reg_update_chan_list(struct ath12k *ar)
+ 	 */
+ 	if (ab->qmi.target.board_id == 0x1008 &&
++	    ab->is_dualmac &&
+ 	    supported_bands & WMI_HOST_WLAN_5GHZ_CAP &&
+ 	    !ar->supports_6ghz) {
+ 		if (ar->pdev->pdev_id == 1) {

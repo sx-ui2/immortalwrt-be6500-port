@@ -1,0 +1,4 @@
+
+config control 'settings'
+	option mode 'off'
+

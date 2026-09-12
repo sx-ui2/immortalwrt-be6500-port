@@ -1,0 +1,43 @@
+#!/bin/sh
+
+# The sysupgrade archive is extracted during preinit, but is intentionally
+# retained until /etc/init.d/done (S95). UCI defaults run earlier from
+# /etc/init.d/boot (S10), so either archive is an authoritative indication
+# that this boot restored a preserved configuration.
+#
+# Never replace that restored configuration with the image snapshot. A clean
+# installation (including `sysupgrade -n`) has no restore archive and receives
+# the validated defaults below.
+sysupgrade_archive="${BE6500_SYSUPGRADE_ARCHIVE:-/sysupgrade.tgz}"
+sysupgrade_tar="${BE6500_SYSUPGRADE_TAR:-/tmp/sysupgrade.tar}"
+
+if [ -f "$sysupgrade_archive" ] || [ -f "$sysupgrade_tar" ]; then
+	logger -t be6500-current-config \
+		"preserved sysupgrade configuration detected; keeping /etc/config" 2>/dev/null || true
+	exit 0
+fi
+
+# A preserved configuration may already be present even after the upgrade
+# helper has removed its temporary archive.  The BE6500 profile is our stable
+# marker for that case; never replace it with the packaged snapshot.
+if uci -q get wireless.main >/dev/null 2>&1 &&
+	uci -q get wireless.radio2 >/dev/null 2>&1; then
+	logger -t be6500-current-config \
+		"existing BE6500 wireless profile detected; keeping /etc/config" 2>/dev/null || true
+	exit 0
+fi
+
+default_dir="${BE6500_CURRENT_CONFIG_DEFAULT_DIR:-/usr/share/be6500-current-config}"
+config_dir="${BE6500_CURRENT_CONFIG_DIR:-/etc/config}"
+
+[ -d "$default_dir" ] || exit 0
+mkdir -p "$config_dir" || exit 1
+
+# Restore the validated runtime snapshot after all owning packages have been
+# installed, avoiding opkg file ownership conflicts during image assembly.
+for source_file in "$default_dir"/*; do
+	[ -f "$source_file" ] || continue
+	cp -f "$source_file" "$config_dir/${source_file##*/}" || exit 1
+done
+
+exit 0

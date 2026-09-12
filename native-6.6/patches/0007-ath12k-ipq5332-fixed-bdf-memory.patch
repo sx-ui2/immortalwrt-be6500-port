@@ -1,0 +1,37 @@
+--- a/drivers/net/wireless/ath/ath12k/qmi.c
++++ b/drivers/net/wireless/ath/ath12k/qmi.c
+@@ -4813,9 +4813,33 @@ static int ath12k_qmi_assign_target_mem_chunk(struct ath12k_base *ab,
+ 	for (i = 0, idx = 0; i < ab->qmi.mem_seg_count; i++) {
+ 		struct target_mem_chunk *mlo_chunk;
++		u32 fixed_bdf_addr;
+ 
+ 		switch (ab->qmi.target_mem[i].type) {
++		case BDF_MEM_REGION_TYPE:
++			/* IPQ5332 factory firmware consumes the BDF from the fixed
++			 * address advertised by the board DTS.  Older QSDK did this
++			 * explicitly; treating BDF as sequential HOST_DDR moves it
++			 * and causes the WCSS protection domain to abort.
++			 */
++			if (!of_property_read_u32_index(ab->dev->of_node,
++							"qcom,bdf-addr", 0,
++							&fixed_bdf_addr)) {
++				ab->qmi.target_mem[idx].paddr = fixed_bdf_addr;
++				ab->qmi.target_mem[idx].v.ioaddr =
++					ioremap(fixed_bdf_addr,
++						ab->qmi.target_mem[i].size);
++				if (!ab->qmi.target_mem[idx].v.ioaddr) {
++					ret = -EIO;
++					goto out;
++				}
++				ab->qmi.target_mem[idx].size =
++					ab->qmi.target_mem[i].size;
++				ab->qmi.target_mem[idx].type = BDF_MEM_REGION_TYPE;
++				idx++;
++				break;
++			}
++			fallthrough;
+ 		case CALDB_MEM_REGION_TYPE:
+ 		case HOST_DDR_REGION_TYPE:
+-		case BDF_MEM_REGION_TYPE:
+ 		case M3_DUMP_REGION_TYPE:
+ 		case PAGEABLE_MEM_REGION_TYPE:

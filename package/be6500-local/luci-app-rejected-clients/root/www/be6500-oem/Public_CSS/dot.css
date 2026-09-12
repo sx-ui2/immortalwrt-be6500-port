@@ -1,0 +1,235 @@
+@keyframes warn {
+    0% {
+        transform: scale(0.3);
+        -webkit-transform: scale(0.3);
+        opacity: 0.0;
+    }
+    25% {
+        transform: scale(0.3);
+        -webkit-transform: scale(0.3);
+        opacity: 0.1;
+    }
+    50% {
+        transform: scale(0.5);
+        -webkit-transform: scale(0.5);
+        opacity: 0.3;
+    }
+    75% {
+        transform: scale(0.8);
+        -webkit-transform: scale(0.8);
+        opacity: 0.5;
+    }
+    100% {
+        transform: scale(1);
+        -webkit-transform: scale(1);
+        opacity: 0.0;
+    }
+}
+
+@keyframes warn1 {
+    0% {
+        transform: scale(0.3);
+        -webkit-transform: scale(0.3);
+        opacity: 0.0;
+    }
+    25% {
+        transform: scale(0.3);
+        -webkit-transform: scale(0.3);
+        opacity: 0.1;
+    }
+    50% {
+        transform: scale(0.3);
+        -webkit-transform: scale(0.3);
+        opacity: 0.3;
+    }
+    75% {
+        transform: scale(0.5);
+        -webkit-transform: scale(0.5);
+        opacity: 0.5;
+    }
+    100% {
+        transform: scale(0.8);
+        -webkit-transform: scale(0.8);
+        opacity: 0.0;
+    }
+}
+
+@keyframes warn2 {
+    0% {
+        transform: scale(0.3);
+        -webkit-transform: scale(0.3);
+        opacity: 0.0;
+    }
+    25% {
+        transform: scale(0.3);
+        -webkit-transform: scale(0.3);
+        opacity: 0.1;
+    }
+    50% {
+        transform: scale(0.3);
+        -webkit-transform: scale(0.3);
+        opacity: 0.3;
+    }
+    75% {
+        transform: scale(0.3);
+        -webkit-transform: scale(0.3);
+        opacity: 0.5;
+    }
+    100% {
+        transform: scale(0.5);
+        -webkit-transform: scale(0.5);
+        opacity: 0.0;
+    }
+}
+
+body {
+    overflow: hidden;
+}
+
+/* 保持大小不变的小圆圈  */
+
+.dot {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    -webkit-border-radius: 50%;
+    -moz-border-radius: 50%;
+    border-radius: 50%;
+    z-index: 2;
+    opacity: 0.3;
+    background: #94DAFA;
+}
+
+/* 产生动画（向外扩散变大）的圆圈  */
+
+.pulse {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    -webkit-border-radius: 50%;
+    -moz-border-radius: 50%;
+    border-radius: 50%;
+    background: #94DAFA;
+    opacity: 0;
+    -webkit-animation: warn 2s ease-out;
+    -moz-animation: warn 2s ease-out;
+    animation: warn 2s ease-out;
+    -webkit-animation-iteration-count: infinite;
+    -moz-animation-iteration-count: infinite;
+    animation-iteration-count: infinite;
+}
+
+.pulse1 {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    background: #94DAFA;
+    -webkit-border-radius: 50%;
+    -moz-border-radius: 50%;
+    border-radius: 50%;
+    opacity: 0.2;
+    -webkit-animation: warn1 2s ease-out;
+    -moz-animation: warn1 2s ease-out;
+    animation: warn1 2s ease-out;
+    -webkit-animation-iteration-count: infinite;
+    -moz-animation-iteration-count: infinite;
+    animation-iteration-count: infinite;
+}
+
+.pulse2 {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    -webkit-border-radius: 50%;
+    -moz-border-radius: 50%;
+    border-radius: 50%;
+    opacity: 0.3;
+    background: #94DAFA;
+    -webkit-animation: warn2 2s ease-out;
+    -moz-animation: warn2 2s ease-out;
+    animation: warn2 2s ease-out;
+    -webkit-animation-iteration-count: infinite;
+    -moz-animation-iteration-count: infinite;
+    animation-iteration-count: infinite;
+}
+
+@media screen and (min-width: 320px) and (max-width: 560px) {
+    .dot {
+        width: 140px;
+        height: 140px;
+        margin-left: -70px;
+        margin-top: -70px;
+    }
+    .pulse {
+        width: 1000px;
+        height: 1000px;
+        margin-left: -500px;
+        margin-top: -500px;
+    }
+    .pulse1 {
+        width: 800px;
+        height: 800px;
+        margin-left: -400px;
+        margin-top: -400px;
+    }
+    .pulse2 {
+        width: 600px;
+        height: 600px;
+        margin-left: -300px;
+        margin-top: -300px;
+    }
+}
+
+@media screen and (min-width: 560px) and (max-width: 1080px) {
+    .dot {
+        width: 200px;
+        height: 200px;
+        margin-left: -100px;
+        margin-top: -100px;
+    }
+    .pulse {
+        width: 1500px;
+        height: 1500px;
+        margin-left: -750px;
+        margin-top: -750px;
+    }
+    .pulse1 {
+        width: 1300px;
+        height: 1300px;
+        margin-left: -650px;
+        margin-top: -650px;
+    }
+    .pulse2 {
+        width: 1000px;
+        height: 1000px;
+        margin-left: -500px;
+        margin-top: -500px;
+    }
+}
+
+@media screen and (min-width: 1080px) {
+    .dot {
+        width: 300px;
+        height: 300px;
+        margin-left: -150px;
+        margin-top: -150px;
+    }
+    .pulse {
+        width: 2000px;
+        height: 2000px;
+        margin-left: -1000px;
+        margin-top: -1000px;
+    }
+    .pulse1 {
+        width: 1500px;
+        height: 1500px;
+        margin-left: -750px;
+        margin-top: -750px;
+    }
+    .pulse2 {
+        width: 1000px;
+        height: 1000px;
+        margin-left: -500px;
+        margin-top: -500px;
+    }
+}

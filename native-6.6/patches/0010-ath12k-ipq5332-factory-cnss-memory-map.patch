@@ -1,0 +1,48 @@
+--- a/drivers/net/wireless/ath/ath12k/qmi.c
++++ b/drivers/net/wireless/ath/ath12k/qmi.c
+@@ -4842,8 +4842,19 @@
+ 			}
+ 			fallthrough;
+ 		case CALDB_MEM_REGION_TYPE:
++			if (ab->qmi.target_mem[i].type == CALDB_MEM_REGION_TYPE &&
++			    of_device_is_compatible(ab->dev->of_node,
++						    "qcom,ipq5332-wifi")) {
++				ab->qmi.target_mem[idx].paddr = 0;
++				ab->qmi.target_mem[idx].v.ioaddr = NULL;
++				ab->qmi.target_mem[idx].size =
++					ab->qmi.target_mem[i].size;
++				ab->qmi.target_mem[idx].type = CALDB_MEM_REGION_TYPE;
++				idx++;
++				break;
++			}
++			fallthrough;
+ 		case HOST_DDR_REGION_TYPE:
+-		case M3_DUMP_REGION_TYPE:
+ 		case PAGEABLE_MEM_REGION_TYPE:
+ 			host_fw_req_total += ab->qmi.target_mem[i].size;
+ 			if ((ab->qmi.target_mem[i].type == CALDB_MEM_REGION_TYPE &&
+@@ -4876,6 +4887,24 @@
+ 			ab->qmi.target_mem[idx].type = ab->qmi.target_mem[i].type;
+ 			idx++;
+ 			break;
++		case M3_DUMP_REGION_TYPE:
++			rmem = ath12k_core_get_reserved_mem_by_name(ab,
++							      "m3-dump-mem");
++			if (!rmem || rmem->size < ab->qmi.target_mem[i].size) {
++				ret = -EINVAL;
++				goto out;
++			}
++			ab->qmi.target_mem[idx].paddr = rmem->base;
++			ab->qmi.target_mem[idx].v.ioaddr =
++				ioremap(rmem->base, ab->qmi.target_mem[i].size);
++			if (!ab->qmi.target_mem[idx].v.ioaddr) {
++				ret = -EIO;
++				goto out;
++			}
++			ab->qmi.target_mem[idx].size = ab->qmi.target_mem[i].size;
++			ab->qmi.target_mem[idx].type = M3_DUMP_REGION_TYPE;
++			idx++;
++			break;
+ 		case MLO_GLOBAL_MEM_REGION_TYPE:
+ 			if (!ab->qmi.target_mem[i].size) {
+ 				ab->qmi.target_mem[idx].paddr = 0;

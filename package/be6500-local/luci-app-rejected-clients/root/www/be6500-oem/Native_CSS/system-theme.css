@@ -1,0 +1,1007 @@
+:root {
+  color-scheme: var(--be-color-scheme, light);
+}
+
+html,
+body {
+  background: var(--be-bg) !important;
+  color: var(--be-text) !important;
+  transition: none !important;
+}
+
+body > .block,
+.native-page {
+  background: transparent !important;
+  color: var(--be-text) !important;
+}
+
+.native-card,
+.native-router,
+.native-management,
+.native-advanced,
+.seniorManagement_Box,
+.box {
+  background: var(--be-section) !important;
+  color: var(--be-text) !important;
+}
+
+/* Keep the OEM Wi-Fi sections flat. The surrounding LuCI page already
+   supplies the page surface; a second card layer leaves large white panels
+   behind the controls, especially in dark themes. */
+.mesh_mode_div,
+.smart_gaming_div,
+.mode_switch,
+.multi_frequency,
+.wifi_settings,
+#set_wifi5_compatible {
+  background: transparent !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  margin-bottom: 18px;
+  padding: 1px 24px 24px;
+}
+
+/* The factory bundle hides this section until every auxiliary startup RPC
+ * succeeds.  Mode selection is independent, so keep it available when an
+ * unrelated mesh/gaming query is unavailable on ImmortalWrt. */
+.mode_switch {
+    display: block !important;
+}
+
+/* The factory Wi-Fi screen uses bitmap switches instead of the native
+   checkbox component. Preserve its original white track and geometry while
+   mapping only the active blue artwork to the system success green. */
+body > .block img[src$="/turn-on.png"],
+body > .block img[src$="turn-on.png"] {
+  filter: hue-rotate(272deg) saturate(58%) brightness(144%) !important;
+  transition: none !important;
+}
+
+body > .block img[src$="/turn-off.png"],
+body > .block img[src$="turn-off.png"],
+body > .block img[src$="/turn-on-disable.png"],
+body > .block img[src$="turn-on-disable.png"] {
+  filter: none !important;
+  transition: none !important;
+}
+
+.native-card,
+.seniorManagement_Box,
+.box,
+.pop-ups .main,
+.pop-ups .top,
+.native-modal,
+.native-table,
+.native-table-row,
+.native-device-group,
+.ipv4_info,
+.ipv6_info {
+  border-color: var(--be-border) !important;
+  box-shadow: var(--be-shadow) !important;
+}
+
+.native-section,
+.native-status,
+.native-internet-info,
+.native-ipv6-empty,
+.native-table-head,
+.native-table-row,
+.native-device-group,
+.native-modal-head,
+.native-modal-body,
+.seniorManagement_top,
+.title,
+.pop-ups .top,
+.pop-ups .main,
+.ipv4_info,
+.ipv6_info,
+.ipv4_info_title,
+.ipv6_info_title,
+.ipv4_info_content,
+.ipv6_info_content {
+  background-color: var(--be-section-alt) !important;
+  color: var(--be-text) !important;
+}
+
+h1, h2, h3, h4, h5, h6,
+label,
+.title-one,
+.title-two,
+.title .text,
+.seniorManagement_top,
+.form_left,
+.form_left span,
+.form_right,
+.native-page-title,
+.native-section-title,
+.native-table-head,
+.native-table-row,
+.native-table-row b,
+.native-modal-head,
+.native-device-group h3,
+.ipv4_info_title,
+.ipv6_info_title,
+.ipv4_info_item_right,
+.ipv6_info_item_right,
+.select_txt,
+.option a {
+  color: var(--be-text) !important;
+}
+
+.mesh_mode_desc,
+.mode_switch_desc span,
+.multi_frequency_desc span,
+.encrypt_wpa3_desc,
+.wifi5_compatible_desc,
+.native-help,
+.native-empty,
+.native-table-row small,
+.ipv4_info_item_left,
+.ipv6_info_item_left,
+.native-device-tools,
+.tip_name,
+.wifi-hide {
+  color: var(--be-text) !important;
+  opacity: .68;
+}
+
+input,
+select,
+textarea,
+.form-control,
+.select_box,
+.native-select-face,
+.native-select-options,
+.native-select-options button,
+.native-password,
+.native-password input {
+  background: var(--be-input) !important;
+  color: var(--be-input-text) !important;
+  border: var(--be-input-border, 1px solid var(--be-border, rgba(127,127,127,.35))) !important;
+}
+
+.be-select-source {
+  display: none !important;
+}
+
+select.be-native-select {
+  display: block !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  height: 46px !important;
+  min-height: 46px !important;
+  padding: 0 12px !important;
+  border: var(--be-input-border, 1px solid var(--be-border, rgba(127,127,127,.35))) !important;
+  border-radius: 4px !important;
+  background: var(--be-input) !important;
+  color: var(--be-input-text) !important;
+  font: inherit !important;
+  line-height: 46px !important;
+  box-shadow: none !important;
+  color-scheme: var(--be-color-scheme) !important;
+  -webkit-appearance: menulist !important;
+  appearance: auto !important;
+  background-image: none !important;
+}
+
+select.be-native-select:focus {
+  border-color: var(--be-active) !important;
+  outline: 1px solid var(--be-active) !important;
+  outline-offset: 0 !important;
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: var(--be-input-text) !important;
+  opacity: .55;
+}
+
+.select_box .option,
+.native-select-options,
+.native-select-options button {
+  background: var(--be-section) !important;
+  color: var(--be-text) !important;
+}
+
+.select_box .option {
+  border: 1px solid var(--be-border) !important;
+  box-shadow: var(--be-shadow) !important;
+  scrollbar-color: var(--be-border) transparent;
+}
+
+.select_box .option a,
+.select_box .option .ssid_name,
+.select_box .option span {
+  background: var(--be-section) !important;
+  border-color: var(--be-border) !important;
+  color: var(--be-text) !important;
+}
+
+.select_box .triangle {
+  border-bottom-color: var(--be-section) !important;
+}
+
+.select_box .option a:hover,
+.select_box .option a:focus,
+.select_box .option a.active,
+.select_box .option a.selected,
+.native-select-options button:hover,
+.native-select-options button:focus,
+.native-select-options button.selected {
+  background: var(--be-input) !important;
+  color: var(--be-active) !important;
+}
+
+.partition_line,
+.native-section,
+.native-row,
+.native-table,
+.native-table-head,
+.native-table-row,
+.native-device-group,
+.native-modal-head,
+table,
+thead,
+tbody,
+tr,
+th,
+td,
+hr {
+  border-color: var(--be-border) !important;
+}
+
+.btn-primary,
+.native-primary,
+.button,
+.right-btn,
+.device-edit,
+.edit {
+  background: var(--be-active) !important;
+  border-color: var(--be-active) !important;
+  color: var(--be-button-text) !important;
+}
+
+.native-secondary,
+.left-btn,
+.exit-mesh-btn {
+  background: var(--be-input) !important;
+  border-color: var(--be-border) !important;
+  color: var(--be-text) !important;
+}
+
+/* OEM confirmation dialogs are content-box elements in the factory CSS.
+   Once the inner header/body are themed, the untouched white padding on the
+   outer element becomes a large white frame. Theme the actual dialog shell
+   and use border-box sizing so it remains compact in both themes. */
+.pop-ups {
+  box-sizing: border-box !important;
+  width: min(560px, calc(100vw - 32px)) !important;
+  max-width: calc(100vw - 32px) !important;
+  padding: 0 !important;
+  overflow: hidden !important;
+  background: var(--be-section) !important;
+  color: var(--be-text) !important;
+  border: 1px solid var(--be-border) !important;
+  border-radius: 14px !important;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, .28) !important;
+}
+
+.pop-ups .top {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  min-height: 64px !important;
+  padding: 18px 22px !important;
+  background: var(--be-section) !important;
+  border-bottom: 1px solid var(--be-border) !important;
+  box-shadow: none !important;
+  font-size: 18px !important;
+}
+
+.pop-ups .top .left,
+.pop-ups .top .right {
+  float: none !important;
+  color: var(--be-text) !important;
+}
+
+.pop-ups .top .right img {
+  display: block !important;
+  width: 22px !important;
+  height: 22px !important;
+  opacity: .72;
+}
+
+.pop-ups .main {
+  padding: 0 22px 22px !important;
+  background: var(--be-section) !important;
+  color: var(--be-text) !important;
+  box-shadow: none !important;
+}
+
+.pop-ups .main .mode_switch_Div,
+.pop-ups .main .multi_frequency_Div,
+.pop-ups .main .limit_points_Div {
+  padding: 26px 8px 14px !important;
+  color: var(--be-text) !important;
+}
+
+.pop-ups .main p,
+.pop-ups .main span,
+.pop-ups .mode_switch_confirm_text {
+  margin-bottom: 0 !important;
+  color: var(--be-text) !important;
+  line-height: 1.7 !important;
+  opacity: .86;
+}
+
+.pop-ups .main .active {
+  display: flex !important;
+  justify-content: center !important;
+  gap: 12px !important;
+  padding: 14px 0 0 !important;
+}
+
+.pop-ups .main .active .left-btn,
+.pop-ups .main .active .right-btn {
+  flex: 1 1 0 !important;
+  width: auto !important;
+  max-width: 220px !important;
+  height: 46px !important;
+  margin: 0 !important;
+}
+
+.native-message.native-success,
+.native-status,
+.status-dot.online {
+  color: var(--be-active) !important;
+}
+
+.native-device-tools button.active,
+.native-select.open .native-select-face,
+.select_box:hover,
+input:focus,
+select:focus,
+textarea:focus {
+  border-color: var(--be-active) !important;
+}
+
+code {
+  background: var(--be-input) !important;
+  color: var(--be-input-text) !important;
+}
+
+/* pages.js builds every non-Wi-Fi screen after the original document has
+   loaded. Its OEM-compatible stylesheet intentionally contains hard-coded
+   light colours, so these rules must stay at the end of the cascade. */
+.native-page {
+  min-height: 100vh !important;
+  background: transparent !important;
+}
+
+.native-page .native-card {
+  background: transparent !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  color: var(--be-text) !important;
+  overflow: visible;
+}
+
+/* LuCI owns the page surface. Keep the router pages structural only, so the
+   active system theme supplies all colours instead of drawing an OEM card. */
+.native-page .native-router,
+.native-page .native-management,
+.native-page .native-advanced,
+.native-page .native-settings-panel,
+.native-page .native-section,
+.native-page .native-list,
+.native-page .native-table,
+.native-page .native-access-list,
+.native-page .native-hosts-box,
+.native-page .native-device-group,
+.native-page .native-internet-info,
+.native-page .native-wan-info > div,
+.native-page .ipv4_info,
+.native-page .ipv6_info,
+body > .block,
+.mesh_mode_div,
+.smart_gaming_div,
+.mode_switch,
+.multi_frequency,
+.wifi_settings,
+#set_wifi5_compatible {
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.native-page .native-settings-panel,
+.native-page .native-section,
+.native-page .native-list,
+.native-page .native-table,
+.native-page .native-access-list,
+.native-page .native-hosts-box,
+.native-page .native-device-group,
+.native-page .native-internet-info,
+.native-page .native-wan-info > div,
+.native-page .ipv4_info,
+.native-page .ipv6_info {
+  border-left: 0 !important;
+  border-right: 0 !important;
+  border-radius: 0 !important;
+}
+
+.native-page .native-router,
+.native-page .native-management,
+.native-page .native-advanced {
+  width: calc(100% - 40px) !important;
+  max-width: 1180px !important;
+  margin: 20px auto !important;
+  padding: 32px 36px !important;
+}
+
+.native-page .native-section,
+.native-page .native-settings-panel,
+.native-page .native-list,
+.native-page .native-table,
+.native-page .native-device,
+.native-page .native-list-row,
+.native-page .native-table-head,
+.native-page .native-table-row,
+.native-page .native-access-list,
+.native-page .native-hosts-box,
+.native-page .native-wan-info > div,
+.native-page .ipv4_info,
+.native-page .ipv6_info {
+  background: var(--be-section-alt) !important;
+  border-color: var(--be-border) !important;
+  color: var(--be-text) !important;
+}
+
+.native-page .native-card > .title,
+.native-page .native-card > h1,
+.native-page .native-advanced > .seniorManagement_top,
+.native-page .native-section h2,
+.native-page .native-section-title,
+.native-page .native-toolbar,
+.native-page .native-access-list,
+.native-page .native-hosts-box > div,
+.native-page .native-wan-info > div,
+.native-page .native-table-head,
+.native-page .native-table-row,
+.native-page .native-list-row,
+.native-page .native-device {
+  border-color: var(--be-border) !important;
+}
+
+.native-page .native-card > .title,
+.native-page .native-card > h1,
+.native-page .native-advanced > .seniorManagement_top,
+.native-page .native-section h2,
+.native-page .native-section-title,
+.native-page .native-page-title,
+.native-page .native-device-main strong,
+.native-page .native-list-row span,
+.native-page .native-wan-info h3,
+.native-page .native-wan-info p,
+.native-page .native-table-row,
+.native-page .native-modal-head,
+.native-page .native-access-list h3,
+.native-page .native-nat-options button,
+.native-page .native-internet-info .ipv4_info_title,
+.native-page .native-internet-info .ipv6_info_title,
+.native-page .native-internet-info .ipv4_info_item_right,
+.native-page .native-internet-info .ipv6_info_item_right,
+.native-page .native-internet-info .ipv6_info_empty {
+  color: var(--be-text) !important;
+}
+
+.native-page .native-settings-panel {
+  background: var(--be-section-alt) !important;
+  border-color: var(--be-border) !important;
+  box-shadow: var(--be-shadow) !important;
+}
+
+.native-page .native-settings-panel h2,
+.native-page .native-meta > div {
+  border-color: var(--be-border) !important;
+  color: var(--be-text) !important;
+}
+
+.native-page .native-info,
+.native-page .native-log,
+.native-page .native-status {
+  background: var(--be-input) !important;
+  border-color: var(--be-border) !important;
+  color: var(--be-text) !important;
+}
+
+.native-page .native-value,
+.native-page .native-meta span {
+  color: var(--be-text) !important;
+}
+
+.native-page .native-meta small {
+  color: var(--be-text) !important;
+  opacity: .68;
+}
+
+.native-page .native-row > div:first-child span,
+.native-page .native-row > label,
+.native-page .native-control,
+.native-page .native-toggle b,
+.native-page .native-help,
+.native-page .native-toolbar,
+.native-page .native-table,
+.native-page .native-table-row code,
+.native-page .native-table-row small,
+.native-page .native-device-main code,
+.native-page .native-device-main small,
+.native-page .native-list-row code,
+.native-page .native-advanced-description,
+.native-page .native-access-label,
+.native-page .native-nat-options > span,
+.native-page .native-wan-info p b,
+.native-page .native-internet-info .ipv4_info_item_left,
+.native-page .native-internet-info .ipv6_info_item_left {
+  color: var(--be-text) !important;
+  opacity: .68;
+}
+
+.native-page .native-control > input,
+.native-page .native-control > textarea,
+.native-page .native-control select,
+.native-page .native-grid input,
+.native-page .native-grid select,
+.native-page .native-device-fields input,
+.native-page .native-password,
+.native-page .native-password > input,
+.native-page .native-password > button,
+.native-page .native-select-face,
+.native-page .native-select-options,
+.native-page .native-select-options button,
+.native-page .native-plain-select,
+.native-page .native-hosts-box textarea {
+  background-color: var(--be-input) !important;
+  border-color: var(--be-border) !important;
+  color: var(--be-input-text) !important;
+}
+
+.native-page .native-select-options {
+  box-shadow: var(--be-shadow) !important;
+}
+
+.native-page .native-select-options button:hover,
+.native-page .native-select-options button:focus,
+.native-page .native-select-options button.selected {
+  background: var(--be-section-alt) !important;
+  color: var(--be-active) !important;
+}
+
+.native-page .native-secondary,
+.native-page .native-hand-button,
+.native-page .native-access-actions button,
+.native-page .native-table-row .edit {
+  background: var(--be-input) !important;
+  border-color: var(--be-border) !important;
+  color: var(--be-text) !important;
+}
+
+.native-page .native-scan-control {
+  display: grid !important;
+  grid-template-columns: 20rem 5.5rem !important;
+  align-items: center !important;
+  width: calc(20rem + 5.5rem + 10px) !important;
+  max-width: none !important;
+  gap: 10px !important;
+}
+
+.native-page .native-scan-control > select {
+  box-sizing: border-box !important;
+  width: 100% !important;
+  min-width: 0 !important;
+}
+
+.native-page .native-scan-control > button {
+  box-sizing: border-box !important;
+  width: 5.5rem !important;
+  min-width: 5.5rem !important;
+  white-space: nowrap !important;
+}
+
+@media (max-width: 700px) {
+  .native-page .native-scan-control {
+    width: 100% !important;
+    grid-template-columns: minmax(0, 1fr) 5.5rem !important;
+  }
+}
+
+.native-page .native-scan-detail {
+  margin: 9px 0 0 !important;
+  color: var(--be-muted) !important;
+  font-size: 13px !important;
+  line-height: 1.55 !important;
+}
+
+.native-page .native-led-rules {
+  margin: .75rem 0 0 22% !important;
+  max-width: 44rem !important;
+}
+
+.native-page .native-led-rule-head,
+.native-page .native-led-rule {
+  display: grid !important;
+  grid-template-columns: minmax(8rem, 1fr) minmax(9rem, 1.25fr) minmax(8rem, 1fr) 2.8rem auto !important;
+  align-items: center !important;
+  gap: .5rem !important;
+  padding: .55rem .6rem !important;
+}
+
+.native-page .native-led-rule.is-dragging { opacity: .45 !important; }
+.native-page .native-led-rule.is-drag-over { background: var(--be-section-alt) !important; box-shadow: inset 0 3px 0 var(--be-active) !important; }
+.native-page .native-led-rule .led-rule-drag {
+  width: 2.8rem !important;
+  min-width: 2.8rem !important;
+  align-self: stretch !important;
+  border: 1px solid var(--be-border) !important;
+  border-radius: var(--border-radius, .25rem) !important;
+  background: var(--be-section) !important;
+  color: var(--be-muted) !important;
+  cursor: grab !important;
+  padding: .4rem !important;
+  font-size: 1.2rem !important;
+  line-height: 1 !important;
+  touch-action: none !important;
+}
+.native-page .native-led-rule .led-rule-drag:active { cursor: grabbing !important; }
+
+.native-page .native-led-rule-head {
+  color: var(--be-muted) !important;
+  font-weight: 600 !important;
+  background: var(--be-section) !important;
+  border-top: 1px solid var(--be-border) !important;
+  border-bottom: 1px solid var(--be-border) !important;
+}
+
+.native-page #led-rule-list { border-bottom: 1px solid var(--be-border) !important; }
+.native-page .native-led-rule { border-bottom: 1px solid var(--be-border) !important; }
+.native-page .native-led-rule:nth-child(even) { background: var(--be-section-alt) !important; }
+.native-page .native-led-rule:hover { background: var(--be-hover, var(--be-section-alt)) !important; }
+
+.native-page .native-led-rule select {
+  width: 100% !important;
+  min-width: 0 !important;
+  margin: 0 !important;
+}
+
+.native-page .led-rule-colors { position: relative !important; min-width: 0 !important; }
+.native-page .led-rule-colors summary { box-sizing: border-box !important; min-height: 2.4rem !important; padding: .45rem 2rem .45rem .7rem !important; border: 1px solid var(--be-border) !important; border-radius: 4px !important; background: var(--be-input) !important; color: var(--be-text) !important; cursor: pointer !important; white-space: nowrap !important; overflow: hidden !important; text-overflow: ellipsis !important; }
+.native-page .led-rule-colors summary::marker { content: '' !important; }
+.native-page .led-rule-colors summary:after { content: '▾'; position: absolute; right: .7rem; }
+.native-page .led-rule-colors > div { display: none; position: absolute; z-index: 30; top: calc(100% + 2px); left: 0; min-width: 100%; padding: .3rem 0; border: 1px solid var(--be-border); background: var(--be-input); box-shadow: 0 5px 15px rgba(0,0,0,.25); }
+.native-page .led-rule-colors[open] > div { display: block; }
+.native-page .led-rule-colors label { display: flex; align-items: center; gap: .55rem; padding: .45rem .7rem; cursor: pointer; white-space: nowrap; }
+.native-page .led-rule-colors label:hover { background: var(--be-hover); }
+
+.native-page .native-led-rule button,
+.native-page #led-rule-add {
+  width: auto !important;
+  min-width: 0 !important;
+  height: auto !important;
+  min-height: 0 !important;
+  padding: .5em .8em !important;
+  line-height: normal !important;
+}
+
+.native-page .native-led-rule button.led-rule-drag {
+  width: 2.8rem !important;
+  min-width: 2.8rem !important;
+  padding: .4rem !important;
+  line-height: 1 !important;
+}
+
+@media(max-width:700px) {
+  .native-page .native-led-rules { margin-left: 0 !important; }
+  .native-page .native-led-rule-head { display: none !important; }
+  .native-page .native-led-rule { grid-template-columns: 1fr auto auto !important; padding: .75rem 0 !important; border-bottom: 1px solid var(--be-border) !important; }
+  .native-page .native-led-rule > .led-rule-state,
+  .native-page .native-led-rule > .led-rule-colors,
+  .native-page .native-led-rule > .led-rule-mode { grid-column: 1 / -1 !important; }
+  .native-page .native-led-rule button { justify-self: start !important; }
+}
+
+.native-page .native-primary,
+.native-page .native-add-button {
+  background: var(--be-active) !important;
+  border-color: var(--be-active) !important;
+  color: var(--be-button-text) !important;
+}
+
+.native-page .native-danger {
+  background: var(--be-section) !important;
+  border-color: var(--be-active) !important;
+  color: var(--be-active) !important;
+}
+
+.native-page .native-status,
+.native-page .native-warning {
+  background: var(--be-input) !important;
+  border: 1px solid var(--be-border) !important;
+}
+
+.native-page .native-modal {
+  background: var(--be-section) !important;
+  border-color: var(--be-border) !important;
+  box-shadow: var(--be-shadow) !important;
+  color: var(--be-text) !important;
+}
+
+.native-page .native-access-options button {
+  background: var(--be-input) !important;
+  border-color: var(--be-border) !important;
+  color: var(--be-text) !important;
+}
+
+.native-page .native-access-options button.active,
+.native-page .native-nat-options button.active {
+  border-color: var(--be-active) !important;
+  color: var(--be-active) !important;
+}
+
+.native-page .native-access-options button i,
+.native-page .native-nat-options button i {
+  background: transparent !important;
+  border-color: var(--be-border) !important;
+  box-shadow: none !important;
+}
+
+.native-page .native-access-options button.active i,
+.native-page .native-nat-options button.active i {
+  background: var(--be-section) !important;
+  border: 5px solid var(--be-active) !important;
+}
+
+.native-page .native-toggle span {
+  display: inline-block !important;
+  position: relative !important;
+  flex: 0 0 46px !important;
+  width: 46px !important;
+  height: 24px !important;
+  border: 0 !important;
+  border-radius: 999px !important;
+  background: var(--be-border) !important;
+  box-shadow: none !important;
+  transition: background-color .18s ease !important;
+}
+
+.native-page .native-toggle span::after {
+  content: "" !important;
+  position: absolute !important;
+  top: 2px !important;
+  left: 2px !important;
+  width: 20px !important;
+  height: 20px !important;
+  border-radius: 50% !important;
+  background: var(--be-section) !important;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, .22) !important;
+  transition: transform .18s ease, background-color .18s ease !important;
+}
+
+.native-page .native-toggle input:checked + span {
+  background: var(--be-border) !important;
+}
+
+.native-page .native-toggle input:checked + span::after {
+  left: 2px !important;
+  background: #45c485 !important;
+  transform: translateX(22px) !important;
+}
+
+.native-page .native-toggle input:focus-visible + span {
+  outline: 2px solid var(--be-active) !important;
+  outline-offset: 2px !important;
+}
+
+.native-page .native-inline-choice .native-toggle span {
+  flex-basis: 16px !important;
+  width: 16px !important;
+  height: 16px !important;
+  border: 1px solid var(--be-border) !important;
+  border-radius: 3px !important;
+  background: var(--be-input) !important;
+}
+
+.native-page .native-inline-choice .native-toggle span::after {
+  top: 1px !important;
+  left: 4px !important;
+  width: 5px !important;
+  height: 9px !important;
+  border: 0 !important;
+  border-right: 2px solid var(--be-button-text) !important;
+  border-bottom: 2px solid var(--be-button-text) !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  opacity: 0 !important;
+  transform: rotate(45deg) !important;
+}
+
+.native-page .native-inline-choice .native-toggle input:checked + span {
+  border-color: var(--be-active) !important;
+  background: var(--be-active) !important;
+}
+
+.native-page .native-inline-choice .native-toggle input:checked + span::after {
+  opacity: 1 !important;
+  transform: rotate(45deg) !important;
+}
+
+/* Keep two-column settings cards self-contained. The inherited Bootstrap
+   column width made the form control exceed the panel's inner edge. */
+.native-page .native-settings-grid,
+.native-page .native-settings-panel,
+.native-page .native-settings-panel .native-row,
+.native-page .native-settings-panel .native-control,
+.native-page .native-settings-panel input,
+.native-page .native-settings-panel select,
+.native-page .native-settings-panel textarea,
+.native-page .native-settings-panel .native-password {
+  min-width: 0 !important;
+  max-width: 100% !important;
+  box-sizing: border-box !important;
+}
+
+.native-page .native-settings-panel .native-row {
+  width: auto !important;
+  margin-left: 0 !important;
+  margin-right: 0 !important;
+}
+
+.native-page .native-settings-panel .native-row > .native-control {
+  flex: 1 1 0 !important;
+  width: auto !important;
+  max-width: none !important;
+}
+
+.native-page .native-settings-panel .native-row > .native-control > input,
+.native-page .native-settings-panel .native-row > .native-control > select,
+.native-page .native-settings-panel .native-row > .native-control > textarea,
+.native-page .native-settings-panel .native-row > .native-control > .native-password {
+  width: 100% !important;
+  max-width: 100% !important;
+}
+
+.mask,
+.native-modal-mask {
+  background: rgba(0, 0, 0, .48) !important;
+}
+
+@media (max-width: 900px) {
+  body > .block,
+  .native-page {
+    min-width: 0 !important;
+  }
+
+  .native-page .native-router,
+  .native-page .native-management,
+  .native-page .native-advanced {
+    width: calc(100% - 24px) !important;
+    margin: 12px auto !important;
+    padding: 24px 18px !important;
+  }
+}
+
+/* Final embedded-LuCI reset: there is no iframe or secondary page canvas. */
+html,
+body,
+#be6500-native-root,
+#be6500-native-root .native-page,
+#be6500-native-root .native-card,
+#be6500-native-root .native-router,
+#be6500-native-root .native-management,
+#be6500-native-root .native-advanced,
+#be6500-native-root .native-section,
+#be6500-native-root .native-settings-panel,
+#be6500-native-root .native-list,
+#be6500-native-root .native-table,
+#be6500-native-root .native-device-group,
+#be6500-native-root .native-access-list,
+#be6500-native-root .native-hosts-box,
+#be6500-native-root .native-internet-info,
+#be6500-native-root .native-wan-info > div,
+#be6500-native-root .ipv4_info,
+#be6500-native-root .ipv6_info {
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+html,
+body {
+  background-color: var(--be-bg) !important;
+  color: var(--be-text) !important;
+}
+
+/* Compact LuCI CBI layout, matching the system settings pages. */
+#be6500-native-root .native-page,#be6500-native-root .native-card{width:100%!important;max-width:none!important;margin:0!important;padding:0!important;border:0!important;background:transparent!important;box-shadow:none!important}
+#be6500-native-root .native-page-title,#be6500-native-root .native-card>.title,#be6500-native-root .native-card>.seniorManagement_top{margin:0 0 1rem!important;padding:0 0 .55rem!important;border-bottom:1px solid var(--be-border)!important;color:var(--be-text)!important;font-size:1.25rem!important}
+#be6500-native-root .native-section{margin:0 0 1.5rem!important;padding:0!important;border:0!important;background:transparent!important}
+#be6500-native-root .native-section-title{margin:0!important;padding:.75rem 1rem!important;border:1px solid var(--be-border)!important;border-bottom:0!important;border-radius:.25rem .25rem 0 0!important;background:var(--be-section)!important;color:var(--be-text)!important;font-size:1rem!important}
+#be6500-native-root .cbi-section-node{padding:.5rem 1rem 1rem!important;border:1px solid var(--be-border)!important;background:transparent!important}
+#be6500-native-root .native-row{display:flex!important;align-items:flex-start!important;width:100%!important;min-height:2.6rem!important;margin:0!important;padding:.55rem 0!important}
+#be6500-native-root .native-row>.cbi-value-title{flex:0 0 22%!important;width:22%!important;max-width:22%!important;height:auto!important;padding:.55rem 1rem .25rem 0!important;color:var(--be-text)!important;line-height:1.35!important}
+#be6500-native-root .native-row>.native-control{flex:1 1 auto!important;width:auto!important;max-width:36rem!important;padding:0!important}
+#be6500-native-root .native-control>.cbi-input-text,#be6500-native-root .native-control>.cbi-input-select,#be6500-native-root .native-control>textarea{width:20rem!important;min-width:0!important;max-width:100%!important}
+#be6500-native-root .native-control>.cbi-input-text{height:auto!important;min-height:0!important;padding:.5em .8em!important;line-height:normal!important}
+#be6500-native-root .native-password{display:flex!important;width:20rem!important;max-width:100%!important;border:0!important;background:transparent!important}
+#be6500-native-root .native-password>.cbi-input-text{flex:1 1 auto!important;width:auto!important;min-width:0!important;padding-right:.7rem!important;border-radius:var(--border-radius,.25rem) 0 0 var(--border-radius,.25rem)!important}
+#be6500-native-root .native-password>button{position:static!important;flex:0 0 2.5rem!important;width:2.5rem!important;height:auto!important;min-width:0!important;margin:0!important;padding:.5em!important;border:1px solid var(--be-border)!important;border-left:0!important;border-radius:0 var(--border-radius,.25rem) var(--border-radius,.25rem) 0!important;background:var(--be-section)!important;color:var(--be-text)!important;font-weight:bold!important;line-height:normal!important}
+#be6500-native-root .native-actions{display:flex!important;justify-content:flex-end!important;width:auto!important;margin:.75rem 0 0!important;padding:.5rem 0 0!important;gap:.5rem!important;background:transparent!important}
+#be6500-native-root .native-actions button,
+#be6500-native-root .native-inline-actions button,
+#be6500-native-root .native-inline-control button,
+#be6500-native-root .native-access-actions button{width:auto!important;min-width:0!important;height:auto!important;min-height:0!important;padding:.5em .8em!important;line-height:normal!important;border-radius:var(--border-radius, .25rem)!important}
+
+/* Dialogs use the same surface, spacing and action controls as LuCI modals. */
+#be6500-native-root .native-modal-mask{background:rgba(0,0,0,.5)!important}
+#be6500-native-root .native-modal{top:10vh!important;width:min(42rem,calc(100% - 2rem))!important;padding:1.25rem!important;border:1px solid var(--be-border)!important;border-radius:var(--border-radius,.25rem)!important;background:var(--be-section)!important;color:var(--be-text)!important;box-shadow:0 .5rem 2rem rgba(0,0,0,.35)!important}
+#be6500-native-root .native-modal-head{padding:0 0 .75rem!important;border-bottom:1px solid var(--be-border)!important}
+#be6500-native-root .native-modal-head h4{margin:0!important;font-size:1.1rem!important}
+#be6500-native-root .native-modal-close{min-width:0!important;padding:.25em .65em!important;font-size:1.15rem!important;line-height:1!important}
+#be6500-native-root .native-modal-body{padding:.75rem 0 0!important}
+#be6500-native-root .native-modal .native-actions{width:auto!important;margin:.75rem 0 0!important;padding:.5rem 0 0!important}
+@media(max-width:700px){#be6500-native-root .native-row{display:block!important}#be6500-native-root .native-row>.cbi-value-title,#be6500-native-root .native-row>.native-control{width:100%!important;max-width:none!important}#be6500-native-root .native-actions{margin-left:0!important}}
+#be6500-native-root .native-luci-dropdown>.cbi-dropdown{width:100%}
+#be6500-native-root .native-luci-dropdown .cbi-dropdown li{align-items:center!important;gap:.55rem!important}
+#be6500-native-root .native-luci-dropdown .cbi-dropdown form{display:inline-flex!important;flex:0 0 1rem!important;align-items:center!important;width:1rem!important;height:1rem!important;margin:0!important;padding:0!important;border:0!important;background:transparent!important}
+#be6500-native-root .native-luci-dropdown .cbi-dropdown>ul.preview>li>form{display:none!important}
+#be6500-native-root .native-luci-dropdown .cbi-dropdown input[type="checkbox"]{display:inline-block!important;position:relative!important;width:1rem!important;height:1rem!important;min-height:0!important;margin:0!important;padding:0!important;opacity:1!important;pointer-events:auto!important;box-shadow:none!important}
+#be6500-native-root .native-luci-dropdown .cbi-dropdown label{display:flex!important;align-items:center!important;min-width:0!important;margin:0!important;line-height:1.5!important}
+
+/* Use the same flat CBI form presentation as LuCI's firewall/network pages. */
+#be6500-native-root .native-section {
+  margin: 0 0 1.75rem !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+}
+#be6500-native-root .native-section-title {
+  margin: 0 !important;
+  padding: .7rem 0 !important;
+  border: 0 !important;
+  border-bottom: 1px solid var(--be-border) !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  font-size: 1.15rem !important;
+}
+#be6500-native-root .native-section > .cbi-section-node {
+  padding: .65rem 0 1rem !important;
+  border: 0 !important;
+  background: transparent !important;
+}
+#be6500-native-root .native-checkbox {
+  display: inline-flex !important;
+  align-items: center !important;
+  min-height: 2.5rem !important;
+  gap: .55rem !important;
+  margin: 0 !important;
+  cursor: pointer !important;
+}
+#be6500-native-root .native-checkbox > b {
+  color: var(--be-text) !important;
+  font-weight: 400 !important;
+}
+#be6500-native-root .native-checkbox-list {
+  display: flex !important;
+  align-items: center !important;
+  flex-wrap: wrap !important;
+  gap: .45rem 1.5rem !important;
+}
+#be6500-native-root .native-checkbox.native-hidden {
+  display: none !important;
+}
+#be6500-native-root .native-settings-panel {
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+}

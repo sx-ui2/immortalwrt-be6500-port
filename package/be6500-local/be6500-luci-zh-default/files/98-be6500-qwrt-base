@@ -1,0 +1,111 @@
+#!/bin/sh
+
+[ "$(board_name 2>/dev/null)" = "jdcloud,be6500" ] || exit 0
+
+# eth0 is WAN; eth1 is the CPU link to the QCA8386 and switch ports 1-3 are
+# LAN.  The Linux 6.6 NSS datapath does not deliver RX frames through eth1.1,
+# so use an untagged CPU member and bridge the working parent eth1 directly.
+uci -q set network.@device[0].ports='eth1'
+while uci -q delete network.@switch[0]; do :; done
+while uci -q delete network.@switch_vlan[0]; do :; done
+uci set network.switch1='switch'
+uci set network.switch1.name='switch1'
+uci set network.switch1.reset='1'
+uci set network.switch1.enable_vlan='1'
+uci set network.vlan1='switch_vlan'
+uci set network.vlan1.device='switch1'
+uci set network.vlan1.vlan='1'
+uci set network.vlan1.vid='1'
+uci set network.vlan1.ports='0 1 2 3'
+uci commit network
+
+# A functional fw4 router baseline.  Keep ordinary rule/include sections, but
+# replace stale diagnostic zones and forwarding with the validated LAN/WAN
+# policy and IPv4 NAT configuration.
+while uci -q delete firewall.@zone[0]; do :; done
+while uci -q delete firewall.@forwarding[0]; do :; done
+uci set firewall.lan='zone'
+uci set firewall.lan.name='lan'
+uci add_list firewall.lan.network='lan'
+uci set firewall.lan.input='ACCEPT'
+uci set firewall.lan.output='ACCEPT'
+uci set firewall.lan.forward='ACCEPT'
+uci set firewall.wan='zone'
+uci set firewall.wan.name='wan'
+uci add_list firewall.wan.network='wan'
+uci add_list firewall.wan.network='wan6'
+uci set firewall.wan.input='REJECT'
+uci set firewall.wan.output='ACCEPT'
+uci set firewall.wan.forward='REJECT'
+uci set firewall.wan.masq='1'
+uci set firewall.wan.mtu_fix='1'
+uci set firewall.lan_wan='forwarding'
+uci set firewall.lan_wan.src='lan'
+uci set firewall.lan_wan.dest='wan'
+
+# DHCPv6 replies and IPv6 neighbour/router discovery must reach odhcp6c even
+# though WAN input is rejected by default.  Keep named sections so rerunning
+# this defaults script is idempotent.
+uci set firewall.Allow_DHCPv6='rule'
+uci set firewall.Allow_DHCPv6.name='Allow-DHCPv6'
+uci set firewall.Allow_DHCPv6.src='wan'
+uci set firewall.Allow_DHCPv6.proto='udp'
+uci set firewall.Allow_DHCPv6.dest_port='546'
+uci set firewall.Allow_DHCPv6.family='ipv6'
+uci set firewall.Allow_DHCPv6.target='ACCEPT'
+uci set firewall.Allow_MLD='rule'
+uci set firewall.Allow_MLD.name='Allow-MLD'
+uci set firewall.Allow_MLD.src='wan'
+uci set firewall.Allow_MLD.proto='icmp'
+uci set firewall.Allow_MLD.src_ip='fe80::/10'
+uci -q delete firewall.Allow_MLD.icmp_type
+for type in 130/0 131/0 132/0 143/0; do
+	uci add_list firewall.Allow_MLD.icmp_type="$type"
+done
+uci set firewall.Allow_MLD.family='ipv6'
+uci set firewall.Allow_MLD.target='ACCEPT'
+uci set firewall.Allow_ICMPv6_Input='rule'
+uci set firewall.Allow_ICMPv6_Input.name='Allow-ICMPv6-Input'
+uci set firewall.Allow_ICMPv6_Input.src='wan'
+uci set firewall.Allow_ICMPv6_Input.proto='icmp'
+uci -q delete firewall.Allow_ICMPv6_Input.icmp_type
+for type in echo-request echo-reply destination-unreachable packet-too-big time-exceeded bad-header unknown-header-type router-solicitation neighbour-solicitation router-advertisement neighbour-advertisement; do
+	uci add_list firewall.Allow_ICMPv6_Input.icmp_type="$type"
+done
+uci set firewall.Allow_ICMPv6_Input.limit='1000/sec'
+uci set firewall.Allow_ICMPv6_Input.family='ipv6'
+uci set firewall.Allow_ICMPv6_Input.target='ACCEPT'
+uci commit firewall
+
+# Ensure the LAN always has IPv4 DHCP/DNS after a clean initramfs boot.
+uci -q set dhcp.lan.dhcpv4='server'
+uci -q set dhcp.lan.start='100'
+uci -q set dhcp.lan.limit='150'
+uci -q set dhcp.lan.leasetime='12h'
+uci -q set dhcp.wan.ignore='1'
+uci commit dhcp
+
+# Match the factory wireless defaults on a clean image.  The 2.4 GHz radio
+# starts on channel 1, both 5 GHz radios use automatic channel selection, and
+# separate SSIDs follow JDCloud's JDCwifi_XXXX / JDCwifi_XXXX_5G convention.
+lan_mac="$(cat /sys/class/net/br-lan/address 2>/dev/null | tr -d ':' | tail -c 5 | tr '[:lower:]' '[:upper:]')"
+[ -n "$lan_mac" ] || lan_mac='BE65'
+base_ssid="JDCwifi_${lan_mac}"
+uci -q set wireless.radio0.channel='1'
+uci -q set wireless.radio1.channel='auto'
+uci -q set wireless.radio2.channel='auto'
+for section in default_radio0 default_radio1 default_radio2; do
+	current_ssid="$(uci -q get wireless.$section.ssid)"
+	case "$current_ssid" in
+		OpenWrt|ImmortalWrt|'')
+			device="$(uci -q get wireless.$section.device)"
+			case "$device" in
+				radio0|wifi0) uci -q set wireless.$section.ssid="$base_ssid" ;;
+				*) uci -q set wireless.$section.ssid="${base_ssid}_5G" ;;
+			esac
+		;;
+	esac
+done
+uci commit wireless
+
+exit 0

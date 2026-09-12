@@ -1,0 +1,232 @@
+#!/bin/sh
+
+. /lib/functions.sh
+
+led_get() { uci -q get "be6500_oem.led.$1"; }
+
+blink_pidfile=/var/run/be6500-led-blink.pid
+
+led_path() {
+	local short
+	case "$1" in red) short=r;; green) short=g;; blue) short=b;; esac
+	for name in "led_$1" "led_${1}1" "led_${short}1"; do
+		[ -d "/sys/class/leds/$name" ] && { printf '%s\n' "/sys/class/leds/$name"; return 0; }
+	done
+	return 1
+}
+
+stop_blink() {
+	local pid
+	[ -r "$blink_pidfile" ] || return 0
+	read -r pid < "$blink_pidfile"
+	case "$pid" in ''|*[!0-9]*) ;; *) kill "$pid" 2>/dev/null ;; esac
+	rm -f "$blink_pidfile"
+}
+
+clear_leds_raw() {
+	local color path
+	for color in red green blue; do
+		path="$(led_path "$color")" || continue
+		echo none > "$path/trigger" 2>/dev/null
+		echo 0 > "$path/brightness" 2>/dev/null
+	done
+}
+
+clear_leds() {
+	stop_blink
+	clear_leds_raw
+}
+
+set_colors_brightness() {
+	local colors="$1" value="$2" color path old_ifs
+	old_ifs="$IFS"; IFS=+
+	for color in $colors; do
+		path="$(led_path "$color")" || continue
+		echo "$value" > "$path/brightness" 2>/dev/null
+	done
+	IFS="$old_ifs"
+}
+
+start_synced_blink() {
+	local colors="$1" delay="$2"
+	/usr/libexec/be6500-led-blink.uc "$colors" "$delay" >/dev/null 2>&1 &
+	echo "$!" > "$blink_pidfile"
+}
+
+set_channel() {
+	local color="$1" effect="$2" path
+	path="$(led_path "$color")" || return 0
+	case "$effect" in
+		slow)
+			echo none > "$path/trigger" 2>/dev/null
+			echo timer > "$path/trigger" 2>/dev/null
+			echo 1000 > "$path/delay_on" 2>/dev/null
+			echo 1000 > "$path/delay_off" 2>/dev/null ;;
+		fast)
+			echo none > "$path/trigger" 2>/dev/null
+			echo timer > "$path/trigger" 2>/dev/null
+			echo 200 > "$path/delay_on" 2>/dev/null
+			echo 200 > "$path/delay_off" 2>/dev/null ;;
+		*)
+			echo none > "$path/trigger" 2>/dev/null
+			cat "$path/max_brightness" > "$path/brightness" 2>/dev/null || echo 1 > "$path/brightness" ;;
+	esac
+}
+
+set_led() {
+	local colors="$1" effect="$2" color old_ifs
+	stop_blink
+	clear_leds_raw
+	case "$effect" in
+		slow) start_synced_blink "$colors" 1000; return ;;
+		fast) start_synced_blink "$colors" 200; return ;;
+	esac
+	old_ifs="$IFS"; IFS=+
+	for color in $colors; do set_channel "$color" "$effect"; done
+	IFS="$old_ifs"
+}
+
+wan_online() {
+	local up
+	up="$(ubus -S call network.interface.wan status 2>/dev/null | jsonfilter -e '@.up' 2>/dev/null)"
+	[ "$up" = "true" ] || [ "$up" = "1" ]
+}
+
+oem_plugin_running() {
+	local plugin
+	for plugin in /opt/etc/init.d/aiecplugin*; do
+		[ -x "$plugin" ] || continue
+		[ "$($plugin is_running 2>/dev/null)" = "1" ] && return 0
+	done
+	return 1
+}
+
+booting() { [ "$(cut -d. -f1 /proc/uptime 2>/dev/null)" -lt 120 ] 2>/dev/null; }
+upgrading() { [ -e /tmp/sysupgrade ] || pidof sysupgrade >/dev/null 2>&1; }
+overheating() {
+	local zone value
+	for zone in /sys/class/thermal/thermal_zone*/temp; do
+		[ -r "$zone" ] || continue
+		read -r value < "$zone"
+		[ "${value:-0}" -ge 85000 ] 2>/dev/null && return 0
+	done
+	return 1
+}
+wps_active() {
+	local object status
+	for object in $(ubus -S list 'hostapd.*' 2>/dev/null); do
+		status="$(ubus -S call "$object" wps_status 2>/dev/null | jsonfilter -e '@.pbc_status' 2>/dev/null)"
+		[ "$status" = "Active" ] && return 0
+	done
+	return 1
+}
+wifi_off() { ! ubus -S list 'hostapd.*' 2>/dev/null | grep -q .; }
+usb_connected() {
+	local device class
+	for device in /sys/bus/usb/devices/*; do
+		[ -r "$device/idVendor" ] || continue
+		class="$(cat "$device/bDeviceClass" 2>/dev/null)"
+		[ "$class" = "09" ] || return 0
+	done
+	return 1
+}
+detect_state() {
+	if upgrading; then echo upgrading
+	elif overheating; then echo overheat
+	elif booting; then echo booting
+	elif wps_active; then echo wps
+	elif wifi_off; then echo wifi_off
+	elif ! wan_online; then echo offline
+	elif oem_plugin_running; then echo plugin
+	elif usb_connected; then echo usb
+	else echo online
+	fi
+}
+
+state_active() {
+	case "$1" in
+		upgrading) upgrading ;;
+		overheat) overheating ;;
+		booting) booting ;;
+		wps) wps_active ;;
+		wifi_off) wifi_off ;;
+		offline) ! wan_online ;;
+		online) wan_online ;;
+		plugin) oem_plugin_running ;;
+		usb) usb_connected ;;
+		default) return 0 ;;
+		*) return 1 ;;
+	esac
+}
+
+apply_led() {
+	local enabled policy color effect
+	enabled="$(led_get enabled)"; [ -n "$enabled" ] || enabled=1
+	[ "$enabled" = "1" ] || { clear_leds; return 0; }
+	policy="$(led_get policy)"; [ -n "$policy" ] || policy=auto
+	if [ "$policy" = "auto" ]; then
+		if ! wan_online; then color=red
+		elif oem_plugin_running; then color=green
+		else color=blue
+		fi
+		effect=steady
+	else
+		local selected_color selected_effect
+		selected_color=''; selected_effect=''
+		match_rule() {
+			local section="$1" state rule_color rule_effect rule_enabled
+			[ -n "$selected_color" ] && return
+			config_get rule_enabled "$section" enabled 1
+			[ "$rule_enabled" = "1" ] || return
+			config_get state "$section" state
+			[ "$state" = "default" ] && return
+			state_active "$state" || return
+			config_get rule_color "$section" color
+			config_get rule_effect "$section" effect
+			case "$rule_color" in red|green|blue|red+green|red+blue|green+blue|red+green+blue) selected_color="$rule_color";; esac
+			case "$rule_effect" in steady|slow|fast) selected_effect="$rule_effect";; esac
+		}
+		match_default() {
+			local section="$1" state rule_color rule_effect rule_enabled
+			[ -n "$selected_color" ] && return
+			config_get rule_enabled "$section" enabled 1
+			[ "$rule_enabled" = "1" ] || return
+			config_get state "$section" state
+			[ "$state" = "default" ] || return
+			config_get rule_color "$section" color
+			config_get rule_effect "$section" effect
+			case "$rule_color" in red|green|blue|red+green|red+blue|green+blue|red+green+blue) selected_color="$rule_color";; esac
+			case "$rule_effect" in steady|slow|fast) selected_effect="$rule_effect";; esac
+		}
+		config_load be6500_oem
+		config_foreach match_rule led_rule
+		[ -n "$selected_color" ] || config_foreach match_default led_rule
+		color="${selected_color:-blue}"
+		effect="${selected_effect:-steady}"
+	fi
+	set_led "$color" "$effect"
+}
+
+case "$1" in
+	apply) apply_led ;;
+	clear) clear_leds ;;
+	run)
+		last=''
+		while :; do
+			policy="$(led_get policy)"; [ -n "$policy" ] || policy=auto
+			auto_state=''
+			if [ "$policy" = "auto" ]; then
+				if ! wan_online; then auto_state=offline
+				elif oem_plugin_running; then auto_state=plugin
+				else auto_state=online
+				fi
+			fi
+			[ "$policy" = "custom" ] && auto_state="$(detect_state)"
+			rules="$(uci -q show be6500_oem | grep '^[^=]*=led_rule\|\.state=\|\.color=\|\.effect=\|\.enabled=' | tr '\n' ';')"
+			state="$(led_get enabled):$policy:$auto_state:$rules"
+			[ "$state" != "$last" ] && apply_led
+			last="$state"
+			sleep 5
+		done ;;
+	*) echo "Usage: $0 {apply|run}" >&2; exit 1 ;;
+esac

@@ -1,0 +1,223 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR BSD-3-Clause)
+/*
+ * JDCloud ZhaoYun BE6500 — boot-validated wired/external-radio topology plus
+ * the integrated IPQ5332 2.4 GHz radio.  This keeps the v19 DSA/PCI path and
+ * restores the WCSS/Q6 and two-chip WSI contract required by the SoC radio.
+ */
+#include "ipq5332-jdcloud-be6500-qcn92xx-firmware-initramfs.dts"
+
+/ {
+	model = "JDCloud ZhaoYun BE6500";
+	compatible = "jdcloud,be6500", "qcom,ipq5332-ap-mi01.6", "qcom,ipq5332";
+	be6500,port-stage = "full-three-band-wsi-m3-v59";
+
+	chosen {
+		/* QSDK's S04ath12k_dyn_dbg_enable.sh deliberately rebuilds the
+		 * first /etc/modules.d/ath12k line from ath12k_* kernel arguments.
+		 * Keep this in bootargs instead of a modules.d overlay so the value
+		 * survives that rewrite.  The working QWRT firmware disables cold
+		 * boot calibration for both the integrated and PCI radios.
+		 */
+		bootargs-append = " ath12k_cold_boot_cal=0 ath12k_debug_mask=1099511627872";
+	};
+
+	/* The factory/QWRT firmware uses the legacy MPD loader with one 35 MiB
+	 * Q6 region and separate M3, ETR and calibration reservations.  Keep
+	 * those exact addresses while retaining the v19 external-radio pool.
+	 */
+	reserved-memory {
+		/delete-node/ wcnss@4a900000;
+		/delete-node/ m3-dump@4cc00000;
+		/delete-node/ q6-etr-dump@4cd00000;
+		/delete-node/ q6-caldb@4ce00000;
+
+		q6_region: wcnss@4a900000 {
+			reg = <0x0 0x4a900000 0x0 0x2300000>;
+			no-map;
+		};
+
+		m3_dump: m3-dump@4cc00000 {
+			reg = <0x0 0x4cc00000 0x0 0x100000>;
+			no-map;
+		};
+
+		q6_etr_region: q6-etr-dump@4cd00000 {
+			reg = <0x0 0x4cd00000 0x0 0x100000>;
+			no-map;
+		};
+
+		q6_caldb_region: q6-caldb@4ce00000 {
+			reg = <0x0 0x4ce00000 0x0 0x500000>;
+			no-map;
+		};
+
+		/* QSDK14 assigns the PCI radio's type-3 request through the
+		 * m3-dump-mem named region.  QWRT's older driver placed this in its
+		 * combined PCI arena, but the 6.6 driver requires an explicit region.
+		 */
+		jd_qcn_m3_dump: qcn-m3-dump@55000000 {
+			reg = <0x0 0x55000000 0x0 0x100000>;
+			no-map;
+		};
+
+	};
+};
+
+/* QSDK 14's base IPQ5332 DTS selects IPQ9574 SCM quirks.  Keep an
+ * IPQ5332-specific match while restoring the factory startup behaviour.
+ */
+&{/firmware/scm} {
+	compatible = "qcom,scm-ipq5332", "qcom,scm";
+};
+
+&q6v5_wcss {
+	compatible = "qcom,ipq5332-q6-mpd";
+	firmware = "IPQ5332/q6_fw0.mdt";
+	reg = <0x0d100000 0x4040>;
+	reg-names = "qdsp6";
+	/* Match the working QWRT RootPD list exactly.  HOST_DDR belongs to the
+	 * ath12k UserPD node below; inserting it here shifts the fixed RootPD
+	 * M3/ETR/CALDB/MLO region indexes and makes the firmware abort.
+	 */
+	memory-region = <&q6_region>, <&m3_dump>, <&q6_etr_region>,
+			<&q6_caldb_region>, <&jd_mlo_global_mem>;
+	qcom,rproc = <&q6v5_wcss>;
+	qcom,bootargs_smem = <507>;
+	qcom,bootargs_version = <2>;
+	qcom,userpd-bootargs;
+	qcom,heartbeat_smem = <508>;
+	license-file = "";
+	/delete-property/ upd-firmware-names;
+	status = "okay";
+};
+
+&q6_wcss_pd1 {
+	firmware = "IPQ5332/q6_fw1.mdt";
+	m3_firmware = "IPQ5332/iu_fw.mdt";
+	/* Keep the remoteproc child available so the root Q6 loader can publish
+	 * the UserPD load address/size in SMEM.  The current ath12k AHB driver
+	 * loads/authenticates q6_fw1 and owns the UserPD SMP2P interrupts itself.
+	 */
+	qcom,ath12k-manages-userpd;
+	status = "okay";
+};
+
+&qcom_test_userpd1 {
+	status = "disabled";
+};
+
+&wcss {
+	status = "okay";
+};
+
+/*
+ * The 5.4 QWRT tree describes two WLAN chips with a legacy wsi node.  The
+ * QSDK 14 ath12k driver additionally walks an OF graph to discover every
+ * device in the group before it sends the MLO host-capability request.  If
+ * this graph is absent, both chips are incorrectly initialized as unrelated
+ * one-device groups; the IPQ5332 WLAN firmware then asserts when QCN9224
+ * comes up.  Keep the factory two-chip count and add the graph below.
+ */
+&wsi {
+	id = <0>;
+	num_chip = <2>;
+	status = "okay";
+};
+
+&wifi0 {
+	/* ath12k expects the root Q6 remoteproc here; it manages UserPD1 itself. */
+	qcom,rproc = <&q6v5_wcss>;
+	/delete-property/ qcom,rproc_rpd;
+	qcom,multipd_arch;
+	qcom,userpd-subsys-name = "q6v5_wcss_userpd1";
+	mem-region = <&q6_region>;
+	/* Preserve the factory CNSS address classes.  In particular, HOST_DDR
+	 * aliases the WCSS reservation; a new arena at 0x4ed00000 would overlap
+	 * the QCN6224/QCN9224 PCI firmware reservation.
+	 */
+	memory-region = <&q6_region>, <&q6_region>, <&jd_mlo_global_mem>,
+			<&m3_dump>;
+	memory-region-names = "q6-region", "host-ddr-mem",
+			      "mlo-global-mem", "m3-dump-mem";
+	qcom,bdf-addr = <0x4b500000 0x4b500000 0x4b500000
+			  0x0 0x0 0x0>;
+	qcom,caldb-addr = <0x4ce00000 0x4ce00000 0x0
+			    0x0 0x0 0x0>;
+	qcom,caldb-size = <0x500000>;
+	qcom,board_id = <0x16>;
+	/* v57 diagnostic: initialize the integrated IPQ5332 independently.
+	 * The external member currently fails its fixed-memory request before
+	 * reaching WMI, so keeping the two-member WSI group blocks this radio.
+	 */
+	qcom,wsi = <&wsi>;
+	qcom,wsi_index = <0>;
+	hw_link_id = <0 0>;
+	status = "okay";
+
+	ports {
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		port@0 {
+			reg = <0>;
+
+			jd_wifi0_wsi_tx: endpoint {
+				remote-endpoint = <&jd_qcn9224_wsi_rx>;
+			};
+		};
+
+		port@1 {
+			reg = <1>;
+
+			jd_wifi0_wsi_rx: endpoint {
+				remote-endpoint = <&jd_qcn9224_wsi_tx>;
+			};
+		};
+	};
+};
+
+&jd_qcn92xx_mhi {
+	status = "okay";
+	qcom,wsi = <&wsi>;
+	qcom,wsi_index = <1>;
+	memory-region = <&jd_qcn9224_pcie1>, <&jd_mhi_region1>,
+			<&jd_mlo_global_mem>, <&jd_qcn_m3_dump>;
+	memory-region-names = "host-ddr-mem", "mhi-region",
+			      "mlo-global-mem", "m3-dump-mem";
+	/* QCN6224/QCN9224 board 0x1008 runs the dual-MAC image.  QSDK14
+	 * derives num_local_links from the firmware response, then expands this
+	 * pair into link IDs 1 and 2.  Using <1 0> advertises a duplicate of the
+	 * integrated IPQ5332 link 0 and makes the WLAN firmware assert while the
+	 * second chip joins the WSI group.  Qualcomm's equivalent IPQ9574 RDP457
+	 * topology (integrated 2.4 GHz + b1008 dual 5 GHz) uses <1 2> as well.
+	 */
+	hw_link_id = <1 2>;
+
+	ports {
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		port@0 {
+			reg = <0>;
+
+			jd_qcn9224_wsi_tx: endpoint {
+				remote-endpoint = <&jd_wifi0_wsi_rx>;
+			};
+		};
+
+		port@1 {
+			reg = <1>;
+
+			jd_qcn9224_wsi_rx: endpoint {
+				remote-endpoint = <&jd_wifi0_wsi_tx>;
+			};
+		};
+	};
+};
+
+/* Other unused reference-board radio nodes remain disabled. */
+&wifi1 { status = "disabled"; };
+&wifi2 { status = "disabled"; };
+&wifi3 { status = "disabled"; };
+&wifi4 { status = "disabled"; };
+&wifi5 { status = "disabled"; };

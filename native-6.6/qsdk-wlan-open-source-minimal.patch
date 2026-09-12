@@ -1,0 +1,44 @@
+--- a/drivers/net/wireless/ath/ath12k/Makefile
++++ b/drivers/net/wireless/ath/ath12k/Makefile
+@@ -58,5 +58,4 @@
+ obj-$(CPTCFG_QCN_EXTN) += qcn_extns/wifi6/
+ obj-$(CPTCFG_QCN_EXTN) += qcn_extns/sa_test/
+ obj-$(CPTCFG_ATH12K) += wifi7/
+-obj-$(CPTCFG_ATH12K) += wifi8/
+ obj-$(CPTCFG_ATHDEBUG) += ath_debug/
+--- a/drivers/net/wireless/ath/ath12k/ppe.h
++++ b/drivers/net/wireless/ath/ath12k/ppe.h
+@@ -6,13 +6,20 @@
+ #ifndef ATH12K_PPE_H
+ #define ATH12K_PPE_H
+ 
+-#ifndef PLATFORM_SDX
++#if !defined(PLATFORM_SDX) && defined(CPTCFG_ATH12K_PPE_DS_SUPPORT)
+ #include <ppe_ds_wlan.h>
+ #include <ppe_vp_public.h>
+ #include <ppe_drv_sc.h>
+ #include <ppe_drv.h>
+ #include <nss_plugins.h>
+ #endif
++#ifndef CPTCFG_ATH12K_PPE_DS_SUPPORT
++struct nss_plugins_ops;
++struct ppe_ds_wlan_ops_v2;
++struct ppe_ds_wlan_rxdesc_elem;
++struct ppe_ds_wlan_txdesc_elem;
++struct ppe_drv_fse_rule_info;
++#endif
+ #include "dp_cmn.h"
+ #include "dp.h"
+ #include "core.h"
+--- a/drivers/net/wireless/ath/ath12k/ahb.c
++++ b/drivers/net/wireless/ath/ath12k/ahb.c
+@@ -1683,7 +1683,9 @@ static int ath12k_ahb_probe(struct platform_device *pdev)
+ 			bus_type = ATH12K_BUS_AHB;
+ 			break;
+ 		case ATH12K_HW_QCN6432_HW10:
++#ifdef CPTCFG_QCN_EXTN
+ 		case ATH12K_HW_QCN9160_HW10:
++#endif
+ 			bus_type = ATH12K_BUS_HYBRID;
+ 			hif_ops = &ath12k_ahb_hif_ops_qcn6432;
+ 			break;

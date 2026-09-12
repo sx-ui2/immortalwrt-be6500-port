@@ -1,0 +1,81 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR BSD-3-Clause)
+/*
+ * JDCloud ZhaoYun BE6500 external-radio mapping for static audit only.
+ *
+ * This file deliberately leaves PCIe, MHI and every Wi-Fi node disabled.
+ * It records the intersection of the working QWRT DTB and pinned QSDK 14 r9
+ * source so incorrect reference-board values are rejected before any boot
+ * experiment.  It is not a flashable board port and does not assert that
+ * ath12k has registered both external 5 GHz PHYs.
+ */
+#include "ipq5332-jdcloud-be6500-ethernet.dts"
+
+/ {
+	model = "JDCloud ZhaoYun BE6500 (6.6 radio audit only)";
+	be6500,port-stage = "radio-audit-only-not-boot-validated";
+
+	reserved-memory {
+		/* QSDK allocates this pool dynamically.  Keep it disabled until a
+		 * non-writing boot has proved the complete MHI memory contract.
+		 */
+		jd_mhi_region1: dma-pool-radio-audit {
+			compatible = "shared-dma-pool";
+			no-map;
+			size = <0x0 0x900000>;
+			alignment = <0x0 0x1000>;
+			status = "disabled";
+		};
+	};
+};
+
+/* The working tree and QSDK14 rdp468 both use PCIe1 x2 and GPIO47 low. */
+&pcie1_phy_x2 {
+	status = "disabled";
+};
+
+&pcie1 {
+	pinctrl-0 = <&jd_pcie1_default_state>;
+	pinctrl-names = "default";
+	linux,pci-domain = <1>;
+	num-lanes = <2>;
+	perst-gpios = <&tlmm 47 GPIO_ACTIVE_LOW>;
+	status = "disabled";
+
+	pcie1_rp {
+		reg = <0 0 0 0 0>;
+		#address-cells = <3>;
+		#size-cells = <2>;
+
+		jd_qcn92xx_mhi: qcom,mhi@1 {
+			reg = <0 0 0 0 0>;
+			qrtr_node_id = <0x31>;
+			memory-region = <&jd_qcn9224_pcie1>,
+					<&jd_mhi_region1>,
+					<&jd_mlo_global_mem>;
+			memory-region-names = "host-ddr-mem", "mhi-region",
+					      "mlo-global-mem";
+
+			/* 0x1008 is a source-supported candidate: 0x1000 selects
+			 * amss_dualmac.bin, while 0x008 preserves the observed b1008
+			 * selector.  It is not marked verified until hardware boots.
+			 */
+			qcom,board_id = <0x1008>;
+			qcom,caldata_offset = <0x58800>;
+			status = "disabled";
+		};
+	};
+};
+
+&wifi0 {
+	qcom,board_id = <0x16>;
+	status = "disabled";
+};
+
+&tlmm {
+	jd_pcie1_default_state: pcie1-radio-audit-state {
+		pins = "gpio47";
+		function = "gpio";
+		drive-strength = <8>;
+		bias-pull-up;
+	};
+};

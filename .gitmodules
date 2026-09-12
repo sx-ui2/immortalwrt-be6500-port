@@ -1,0 +1,3 @@
+[submodule "package/luci-app-diskman"]
+	path = package/luci-app-diskman
+	url = https://github.com/lisaac/luci-app-diskman.git

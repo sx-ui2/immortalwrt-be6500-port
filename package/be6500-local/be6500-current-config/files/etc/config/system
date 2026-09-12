@@ -1,0 +1,17 @@
+
+config system
+	option hostname 'JDCloud'
+	option timezone 'CST-8'
+	option ttylogin '0'
+	option log_size '128'
+	option urandom_seed '0'
+	option zonename 'Asia/Shanghai'
+	option freq_mode '1'
+
+config timeserver 'ntp'
+	option enabled '1'
+	option enable_server '0'
+	list server 'time.apple.com'
+	list server 'time1.google.com'
+	list server 'time.cloudflare.com'
+	list server 'pool.ntp.org'

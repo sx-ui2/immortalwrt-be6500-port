@@ -1,0 +1,157 @@
+--- a/modules/luci-base/root/usr/share/rpcd/ucode/luci
++++ b/modules/luci-base/root/usr/share/rpcd/ucode/luci
+@@ -494,6 +494,26 @@ const methods = {
+ 					swaps.close();
+ 				}
+ 
++				/* Filesystem usage and physical media capacity are different
++				 * values.  Include raw eMMC devices even when the current root is
++				 * initramfs or most of the device has not been partitioned yet.
++				 */
++				for (let path in glob('/sys/class/block/mmcblk*/size')) {
++					let dev = basename(dirname(path));
++
++					if (!match(dev, /^mmcblk\d+$/))
++						continue;
++
++					let sectors = +readfile(path);
++
++					if (sectors > 0)
++						result[dev] = {
++							dev: `/dev/${dev}`,
++							type: 'disk',
++							size: sectors * 512
++						};
++				}
++
+ 				return result;
+ 			}
+ 			else {
+--- a/modules/luci-mod-status/htdocs/luci-static/resources/view/status/include/20_memory.js
++++ b/modules/luci-mod-status/htdocs/luci-static/resources/view/status/include/20_memory.js
+@@ -7,6 +7,11 @@ var callSystemInfo = rpc.declare({
+ 	method: 'info'
+ });
+ 
++var callSystemBoard = rpc.declare({
++	object: 'system',
++	method: 'board'
++});
++
+ function progressbar(value, max, byte) {
+ 	var vn = parseInt(value) || 0,
+ 	    mn = parseInt(max) || 100,
+@@ -23,11 +28,12 @@ return baseclass.extend({
+ 	title: _('Memory'),
+ 
+ 	load: function() {
+-		return L.resolveDefault(callSystemInfo(), {});
++		return Promise.all([ L.resolveDefault(callSystemInfo(), {}), L.resolveDefault(callSystemBoard(), {}) ]);
+ 	},
+ 
+-	render: function(systeminfo) {
+-		var mem = L.isObject(systeminfo.memory) ? systeminfo.memory : {},
++	render: function(data) {
++		var systeminfo = data[0], boardinfo = data[1],
++		    mem = L.isObject(systeminfo.memory) ? systeminfo.memory : {},
+ 		    swap = L.isObject(systeminfo.swap) ? systeminfo.swap : {};
+ 
+ 		var fields = [
+@@ -45,6 +51,17 @@ return baseclass.extend({
+ 
+ 		var table = E('table', { 'class': 'table' });
+ 
++		/* The BE6500 has 1 GiB fitted DDR.  Linux correctly reports less
++		 * because secure firmware, NSS and wireless carve-outs are reserved.
++		 * Show both facts instead of labelling the usable figure as the fitted
++		 * hardware capacity.
++		 */
++		if (boardinfo.board_name == 'jdcloud,be6500')
++			table.appendChild(E('tr', { 'class': 'tr' }, [
++				E('td', { 'class': 'td left', 'width': '33%' }, [ '物理内存' ]),
++				E('td', { 'class': 'td left' }, [ String.format('%1024.2mB', 1024 * 1024 * 1024) ])
++			]));
++
+ 		for (var i = 0; i < fields.length; i += 3) {
+ 			table.appendChild(E('tr', { 'class': 'tr' }, [
+ 				E('td', { 'class': 'td left', 'width': '33%' }, [ fields[i] ]),
+--- a/modules/luci-mod-status/htdocs/luci-static/resources/view/status/include/25_storage.js
++++ b/modules/luci-mod-status/htdocs/luci-static/resources/view/status/include/25_storage.js
+@@ -15,6 +15,17 @@ var callMountPoints = rpc.declare({
+ 	expect: { result: [] }
+ });
+ 
++var callSystemBoard = rpc.declare({
++	object: 'system',
++	method: 'board'
++});
++
++var callBlockDevices = rpc.declare({
++	object: 'luci',
++	method: 'getBlockDevices',
++	expect: { '': {} }
++});
++
+ var MountSkipList = [
+ 	"/rom",
+ 	"/tmp",
+@@ -42,6 +53,8 @@ return baseclass.extend({
+ 		return Promise.all([
+ 			L.resolveDefault(callSystemInfo(), {}),
+ 			L.resolveDefault(callMountPoints(), {}),
++			L.resolveDefault(callBlockDevices(), {}),
++			L.resolveDefault(callSystemBoard(), {}),
+ 		]);
+ 	},
+ 
+@@ -49,7 +62,9 @@ return baseclass.extend({
+ 		var systeminfo = data[0],
+ 		    mounts = data[1],
+ 		    root = L.isObject(systeminfo.root) ? systeminfo.root : {},
+-		    tmp = L.isObject(systeminfo.tmp) ? systeminfo.tmp : {};
++		    tmp = L.isObject(systeminfo.tmp) ? systeminfo.tmp : {},
++		    blocks = L.isObject(data[2]) ? data[2] : {},
++		    boardinfo = L.isObject(data[3]) ? data[3] : {};
+ 
+ 		const existenceChk = function(fields, name, values) {
+ 			if (!fields.hasOwnProperty(name))
+@@ -57,6 +72,15 @@ return baseclass.extend({
+ 		};
+ 
+ 		var fields = {};
++		Object.keys(blocks).forEach(function(dev) {
++			var entry = blocks[dev];
++
++			if (entry.type == 'disk' && entry.size > 0)
++				existenceChk(fields,
++					dev.indexOf('mmcblk') == 0 ? '物理 eMMC 容量' : entry.dev,
++					{ text: String.format('%1024.2mB', entry.size) });
++		});
++
+-		existenceChk(fields, _('Disk space'), { used: root.used * 1024, size: root.total * 1024 });
++		existenceChk(fields, boardinfo.rootfs_type == 'initramfs' ? '临时根目录（initramfs）' : _('Disk space'), { used: root.used * 1024, size: root.total * 1024 });
+ 		existenceChk(fields, _('Temp space'), { used: tmp.used * 1024, size: tmp.total * 1024 });
+ 
+@@ -78,7 +102,9 @@ return baseclass.extend({
+ 		table.appendChild(E('tr', { 'class': 'tr' }, [
+ 				E('td', { 'class': 'td left', 'width': '33%' }, [ key ]),
+ 				E('td', { 'class': 'td left' }, [
+-					(fields[key].used != null) ? progressbar(fields[key].used, fields[key].size, true) : '?'
++					(fields[key].text != null)
++						? fields[key].text
++						: (fields[key].used != null) ? progressbar(fields[key].used, fields[key].size, true) : '?'
+ 				])
+ 			]));
+ 		});
+--- a/modules/luci-mod-status/root/usr/share/rpcd/acl.d/luci-mod-status-index.json
++++ b/modules/luci-mod-status/root/usr/share/rpcd/acl.d/luci-mod-status-index.json
+@@ -21,7 +21,7 @@
+ 		"description": "Grant access to Storage and Mount status display",
+ 		"read": {
+ 			"ubus": {
+-				"luci": [ "getMountPoints" ],
+-				"system": [ "info" ]
++				"luci": [ "getBlockDevices", "getMountPoints" ],
++				"system": [ "board", "info" ]
+ 			}
+ 		}

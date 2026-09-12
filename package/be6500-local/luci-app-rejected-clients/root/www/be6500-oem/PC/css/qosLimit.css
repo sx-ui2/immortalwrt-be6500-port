@@ -1,0 +1,107 @@
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+li {
+    list-style: none;
+    float: left;
+}
+
+.box {
+    padding: 44px 60px 44px 60px;
+    color: #333333;
+    font-size: 14px;
+}
+
+.title {
+    font-weight: 550;
+    font-size: 18px;
+    border-bottom: 1px solid #EEEEEE;
+}
+
+.title .text {
+    font-weight: 550;
+    margin-bottom: 20px;
+    display: inline-block;
+}
+
+.main {
+    color: #333333;
+    padding-top: 40px;
+    font-size: 14px;
+    display: none;
+}
+
+.main span {
+    display: inline-block;
+    width: 120px;
+    color: #999999;
+}
+
+.main .ipt {
+    display: inline-block;
+    height: 46px;
+    margin-right: 10px;
+}
+
+.button {
+    width: 355px;
+    background-color: #4762FE;
+    border-color: #4762FE;
+    border-radius: 4px;
+    padding: 12px 16px;
+    font-size: 14px;
+    color: #fff;
+    border: 1px solid transparent;
+    outline: none;
+}
+
+.point {
+    padding-top: 60px;
+}
+
+.point-main {
+    padding-top: 15px !important;
+}
+
+.point-main .active {
+    text-align: center;
+    padding: 15px 0 !important;
+}
+
+.point-main #point-mode-text {
+    padding: 15px 30px !important;
+    box-sizing: border-box;
+    text-align: center;
+}
+
+.Description {
+    font-size: 12px;
+    color: #999999;
+    word-wrap: break-word;
+    width: 550px;
+    padding-left: 60px;
+    text-indent: -60px;
+}
+
+.errNo_tip {
+    display: inline-block;
+    color: red;
+    margin: 0;
+    padding-left: 30px;
+}
+
+.tip {
+    display: flex;
+    flex-direction: row;
+    padding: 13px 20px;
+    position: absolute;
+    height: 46px;
+    left: 480px;
+    top: 233px;
+    background: rgba(0, 0, 0, 0.5);
+    border-radius: 6px;
+    color: #ffffff;
+}

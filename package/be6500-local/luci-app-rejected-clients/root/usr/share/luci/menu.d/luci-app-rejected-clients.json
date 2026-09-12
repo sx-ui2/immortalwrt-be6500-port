@@ -1,0 +1,27 @@
+{
+	"admin/router_settings": {
+		"title": "路由设置",
+		"order": 15,
+		"action": {
+			"type": "firstchild",
+			"preferred": "wifi",
+			"recurse": true
+		}
+	},
+	"admin/router_settings/wifi": { "title": "Wi-Fi 设置", "order": 1, "action": { "type": "template", "path": "be6500_oem_beta/index" } },
+	"admin/router_settings/internet": { "title": "上网设置", "order": 2, "action": { "type": "template", "path": "be6500_oem_beta/index" } },
+	"admin/router_settings/iptv": { "title": "IPTV 设置", "order": 3, "action": { "type": "template", "path": "be6500_oem_beta/index" } },
+	"admin/router_settings/guest": { "title": "访客网络", "order": 4, "action": { "type": "template", "path": "be6500_oem_beta/index" } },
+	"admin/router_settings/localnet": { "title": "局域网设置", "order": 5, "action": { "type": "template", "path": "be6500_oem_beta/index" } },
+	"admin/router_settings/led": { "title": "灯光控制", "order": 6, "action": { "type": "template", "path": "be6500_oem_beta/index" } },
+	"admin/router_settings/devices": { "title": "设备列表", "order": 7, "action": { "type": "template", "path": "be6500_oem_beta/index" } },
+	"admin/router_settings/access": { "title": "访问控制", "order": 8, "action": { "type": "template", "path": "be6500_oem_beta/index" } },
+	"admin/router_settings/rejected": { "title": "拒绝记录", "order": 9, "action": { "type": "template", "path": "be6500_oem_beta/index" } },
+	"admin/router_settings/dhcp": { "title": "静态 IP 分配", "order": 10, "action": { "type": "template", "path": "be6500_oem_beta/index" } },
+	"admin/router_settings/qos": { "title": "QoS 智能限速", "order": 11, "action": { "type": "template", "path": "be6500_oem_beta/index" } },
+	"admin/router_settings/ddns": { "title": "DDNS", "order": 12, "action": { "type": "template", "path": "be6500_oem_beta/index" } },
+	"admin/router_settings/dmz": { "title": "DMZ", "order": 13, "action": { "type": "template", "path": "be6500_oem_beta/index" } },
+	"admin/router_settings/upnp": { "title": "UPnP", "order": 14, "action": { "type": "template", "path": "be6500_oem_beta/index" } },
+	"admin/router_settings/hosts": { "title": "自定义 Hosts", "order": 15, "action": { "type": "template", "path": "be6500_oem_beta/index" } },
+	"admin/router_settings/nat": { "title": "NAT 设置", "order": 16, "action": { "type": "template", "path": "be6500_oem_beta/index" } }
+}

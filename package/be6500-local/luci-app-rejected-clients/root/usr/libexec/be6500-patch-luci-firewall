@@ -1,0 +1,17 @@
+#!/bin/sh
+
+set -eu
+
+file=/www/luci-static/resources/view/firewall/zones.js
+marker=be6500_expose
+
+[ -f "$file" ] || exit 0
+grep -q "$marker" "$file" && exit 0
+
+needle="o=s.option(form.Flag,'drop_invalid',_('Drop invalid packets'));if("
+replacement="o=s.option(form.Flag,'drop_invalid',_('Drop invalid packets'));o=s.option(form.Flag,'be6500_expose',_('暴露至公网'),_('危险：开启后允许公网访问路由器服务，请自行承担安全风险。'));o.cfgvalue=function(section_id){var value='0';uci.sections('firewall','zone',function(zone){if(zone.name=='wan'&&zone.be6500_expose=='1')value='1';});return value;};o.write=function(section_id,value){uci.sections('firewall','zone',function(zone){if(zone.name=='wan'){uci.set('firewall',zone['.name'],'be6500_expose',value);uci.set('firewall',zone['.name'],'input',value=='1'?'ACCEPT':'REJECT');uci.set('firewall',zone['.name'],'forward',value=='1'?'ACCEPT':'REJECT');}});};o.remove=function(section_id){return this.write(section_id,'0');};if("
+
+escaped=$(printf '%s' "$replacement" | sed 's/[&@]/\\&/g')
+sed -i "s@${needle}@${escaped}@" "$file"
+
+grep -q "$marker" "$file"

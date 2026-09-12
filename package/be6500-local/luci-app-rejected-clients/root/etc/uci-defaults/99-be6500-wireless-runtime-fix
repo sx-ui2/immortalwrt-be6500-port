@@ -1,0 +1,14 @@
+#!/bin/sh
+
+# Ensure the BE6500 runtime wireless script gets the shared-radio descriptor
+# limit even when the base wifi-scripts package is rebuilt independently.
+script=/lib/netifd/wireless/mac80211.sh
+if [ -f "$script" ] && grep -q 'jdcloud,be6500' "$script" && ! grep -q 'ulimit -n 65536' "$script"; then
+	awk '
+		/if \[ "\$\(cat \/tmp\/sysinfo\/board_name/ && /jdcloud,be6500/ {
+			print; print "\t\tulimit -n 65536 2>/dev/null || true"; next
+		}
+		{ print }
+	' "$script" > "$script.be6500-new" && mv "$script.be6500-new" "$script"
+fi
+exit 0

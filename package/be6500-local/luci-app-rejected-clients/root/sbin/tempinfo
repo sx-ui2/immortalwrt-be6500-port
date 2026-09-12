@@ -1,0 +1,8 @@
+#!/bin/sh
+read_temp(){ [ -r "$1" ]||return 1; value=$(cat "$1" 2>/dev/null)||return 1; case "$value" in *[!0-9-]*|'') return 1;; esac; awk -v value="$value" 'BEGIN{printf "%.1f",value/1000}'; }
+cpu=$(read_temp /sys/class/thermal/thermal_zone0/temp||true)
+wifi1=$(read_temp /sys/class/thermal/thermal_zone1/temp||true)
+wifi2=$(read_temp /sys/class/thermal/thermal_zone2/temp||true)
+printf 'CPU: %s°C' "${cpu:---}"
+[ -n "$wifi1" ]&&printf ', WiFi: %s°C' "$wifi1"
+[ -n "$wifi2" ]&&printf ' %s°C' "$wifi2"

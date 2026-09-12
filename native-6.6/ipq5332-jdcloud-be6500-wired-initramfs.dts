@@ -1,0 +1,32 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR BSD-3-Clause)
+/*
+ * JDCloud ZhaoYun BE6500 — native 6.6 wired initramfs candidate.
+ *
+ * This deliberately enables only the already-audited core/eMMC/UART and
+ * MHT ethernet topology.  PCIe, MHI, WCSS, all radios, USB and crypto remain
+ * disabled.  It is not a sysupgrade image and has not booted on hardware.
+ */
+#include "ipq5332-jdcloud-be6500-ethernet.dts"
+
+/ {
+	model = "JDCloud ZhaoYun BE6500 (6.6 wired initramfs candidate)";
+	be6500,port-stage = "wired-initramfs-only-not-boot-validated";
+
+	chosen {
+		/* Same pinned QSDK 6.6 MHT reference requirement; no root= policy. */
+		bootargs-append = " clk_ignore_unused";
+	};
+};
+
+/* Keep every unvalidated subsystem off in the first controlled image. */
+&pcie1_phy_x2 { status = "disabled"; };
+&pcie1 { status = "disabled"; };
+&q6v5_wcss { /delete-property/ memory-region; status = "disabled"; };
+&wifi0 { status = "disabled"; };
+&wifi1 { status = "disabled"; };
+&wifi2 { status = "disabled"; };
+&wifi3 { status = "disabled"; };
+&wifi4 { status = "disabled"; };
+&wifi5 { status = "disabled"; };
+&usb3 { status = "disabled"; };
+&license_manager { status = "disabled"; };

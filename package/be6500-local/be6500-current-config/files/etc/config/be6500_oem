@@ -1,0 +1,89 @@
+
+config settings 'access'
+	option enabled '0'
+	option policy 'deny'
+
+config settings 'guest_qos'
+	option enabled '0'
+	option upload '0'
+	option download '0'
+
+config settings 'qos'
+	option mode '0'
+
+config settings 'led'
+	option enabled '1'
+	option color 'red'
+	option policy 'auto'
+	option effect 'fast'
+
+config device 'device_5e56df9c61f5'
+	option mac '5E:56:DF:9C:61:F5'
+	option qos_enable '0'
+	option qos_upload '1'
+	option qos_download '2'
+
+config settings 'iptv'
+	option auth_enable '0'
+	option capture_port 'lan1'
+
+config device 'device_423b00c17f8e'
+	option mac '42:3B:00:C1:7F:8E'
+	option qos_enable '0'
+	option qos_upload '0'
+	option qos_download '0'
+
+config led_rule
+	option state 'offline'
+	option color 'red'
+	option effect 'steady'
+	option enabled '1'
+
+config led_rule
+	option state 'online'
+	option color 'blue'
+	option effect 'steady'
+	option enabled '1'
+
+config led_rule
+	option state 'plugin'
+	option color 'green'
+	option effect 'steady'
+	option enabled '1'
+
+config led_rule
+	option state 'booting'
+	option color 'blue'
+	option effect 'slow'
+	option enabled '1'
+
+config led_rule
+	option state 'upgrading'
+	option color 'blue'
+	option effect 'fast'
+	option enabled '1'
+
+config led_rule
+	option state 'overheat'
+	option color 'red'
+	option effect 'fast'
+	option enabled '1'
+
+config led_rule
+	option state 'wps'
+	option color 'blue'
+	option effect 'fast'
+	option enabled '1'
+
+config led_rule
+	option state 'wifi_off'
+	option color 'red'
+	option effect 'slow'
+	option enabled '1'
+
+config led_rule
+	option state 'usb'
+	option color 'green'
+	option effect 'steady'
+	option enabled '1'
+

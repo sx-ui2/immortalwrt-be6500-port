@@ -1,0 +1,48 @@
+#!/bin/sh
+
+state=/var/run/be6500-radio0-auto-channel
+iface=phy00.0-ap0
+
+# All logical radios share one QSDK wiphy.  Never scan or restart radio0 while
+# radio1/radio2 are inside their serialized hostapd transaction.
+waited=0
+while [ -d /tmp/be6500-radio-setup.lock ] && [ "$waited" -lt 180 ]; do
+	sleep 1
+	waited=$((waited + 1))
+done
+[ ! -d /tmp/be6500-radio-setup.lock ] || exit 0
+sleep 3
+
+[ "$(uci -q get wireless.radio0.channel)" = "auto" ] || exit 0
+[ -e "/sys/class/net/$iface" ] || exit 0
+
+scan="$(iwinfo "$iface" scan 2>/dev/null)"
+[ -n "$scan" ] || exit 0
+
+selected="$(printf '%s\n' "$scan" | awk '
+	BEGIN { candidate[1]=1; candidate[2]=6; candidate[3]=11 }
+	/^Cell / { is2=0; channel=0 }
+	/Band: 2\.4 GHz/ { is2=1 }
+	/Channel:/ && is2 { channel=$2+0 }
+	/Signal:/ && is2 && channel>=1 && channel<=14 {
+		signal=$2+0; strength=110+signal; if (strength<1) strength=1
+		for (i=1; i<=3; i++) {
+			d=channel-candidate[i]; if (d<0) d=-d
+			if (d<5) score[i]+=strength*(5-d)
+		}
+	}
+	END {
+		best=1
+		for (i=2; i<=3; i++) if (score[i]<score[best]) best=i
+		print candidate[best]
+	}')"
+
+case "$selected" in 1|6|11) ;; *) exit 0 ;; esac
+printf '%s\n' "$selected" > "$state"
+
+current="$(iw dev "$iface" info 2>/dev/null | awk '/channel / { print $2; exit }')"
+[ "$current" = "$selected" ] && exit 0
+
+logger -t be6500-auto-channel "radio0 auto-selected channel $selected (was $current)"
+wifi down radio0
+wifi up radio0

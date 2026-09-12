@@ -1,0 +1,17 @@
+.router-mesh-content {
+  position: relative;
+}
+.router-mesh-content .arrow_left,
+.router-mesh-content .arrow_right {
+  display: none;
+  position: absolute;
+  top: 300px;
+  width: 55px;
+  cursor: pointer;
+}
+.router-mesh-content .arrow_left {
+  left: 20px;
+}
+.router-mesh-content .arrow_right {
+  right: 20px;
+}

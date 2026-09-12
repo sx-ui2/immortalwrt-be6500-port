@@ -1,0 +1,35 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR BSD-3-Clause)
+/*
+ * RAM-only controller-isolation diagnostic.
+ *
+ * This keeps the staged MDIO module and the already-proven raw eth1
+ * management path, but prevents both the DSA QCA8386 node and the SSDK MHT
+ * instance from consuming the bus.  Loading mdio-ipq4019.ko therefore tests
+ * only the controller clock/reset/register path.  It is never flashable.
+ */
+#include "ipq5332-jdcloud-be6500-mdio-staged-initramfs.dts"
+
+/ {
+	be6500,mdio-controller-only;
+};
+
+&jd_phy1 { status = "disabled"; };
+&jd_phy2 { status = "disabled"; };
+&jd_phy3 { status = "disabled"; };
+&jd_phy4 { status = "disabled"; };
+
+&mdio {
+	/* Do not erase the QWRT-initialised switch state in this isolation step.
+	 * The next stage will restore these only after the bus itself is proven.
+	 */
+	/delete-property/ phy-reset-gpio;
+	/delete-property/ mdio_clk_fixup;
+};
+
+&{/soc@0/mdio@90000/switch@10} {
+	status = "disabled";
+};
+
+&jd_mht {
+	status = "disabled";
+};

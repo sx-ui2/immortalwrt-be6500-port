@@ -1,0 +1,54 @@
+--- a/drivers/net/wireless/ath/ath12k/core.c
++++ b/drivers/net/wireless/ath/ath12k/core.c
+@@ -6581,6 +6581,10 @@
+ 
+	if (!of_property_read_u32(ab->dev->of_node, "memory-region", &addr))
+ 		set_bit(ATH12K_FLAG_FIXED_MEM_REGION, &ab->dev_flags);
++
++	ath12k_info(ab, "fixed-memory trace: first-cell 0x%x fixed=%u bus=%u\n",
++		    addr, test_bit(ATH12K_FLAG_FIXED_MEM_REGION, &ab->dev_flags),
++		    ab->hif.bus);
+ 
+	/* This is HACK to bring up the qcn9224 with segmented memory */
+ 	if (ab->hif.bus == ATH12K_BUS_PCI && ath12k_fw_mem_seg)
+--- a/drivers/net/wireless/ath/ath12k/qmi.c
++++ b/drivers/net/wireless/ath/ath12k/qmi.c
+@@ -4042,6 +4042,12 @@
+ 	if (!req)
+ 		return -ENOMEM;
+ 
++	ath12k_info(ab,
++		    "qmi respond trace: fixed=%u delayed=%u total=%u current=%d\n",
++		    test_bit(ATH12K_FLAG_FIXED_MEM_REGION, &ab->dev_flags),
++		    ab->qmi.target_mem_delayed, ab->qmi.mem_seg_count,
++		    *curr_seg_cnt);
++
+	/* Some targets by default request a block of big contiguous
+	 * DMA memory, it's hard to allocate from kernel. So host returns
+ 	 * failure to firmware and firmware then request multiple blocks of
+@@ -4052,6 +4058,7 @@
+ 		delayed = true;
+ 		ath12k_dbg(ab, ATH12K_DBG_QMI, "qmi delays mem_request %d\n",
+ 			   ab->qmi.mem_seg_count);
++		ath12k_info(ab, "qmi respond trace: taking delayed response branch\n");
+ 	} else {
+ 		delayed = false;
+ 		req->mem_seg_len = *curr_seg_cnt;
+@@ -6681,11 +6688,17 @@
+ 
+ 	req_mem_seg_count = msg->mem_seg_len;
+ 
++	ath12k_info(ab, "qmi request trace: fixed=%u segments=%u\n",
++		    test_bit(ATH12K_FLAG_FIXED_MEM_REGION, &ab->dev_flags),
++		    req_mem_seg_count);
++
+ 	for (i = 0; i < req_mem_seg_count; i++) {
+ 		req_mem[i].type = msg->mem_seg[i].type;
+ 		req_mem[i].size = msg->mem_seg[i].size;
+ 		ath12k_dbg(ab, ATH12K_DBG_QMI, "qmi mem seg type %d size %d\n",
+ 			   msg->mem_seg[i].type, msg->mem_seg[i].size);
++		ath12k_info(ab, "qmi request trace: segment[%d] type=%u size=%u\n",
++			    i, msg->mem_seg[i].type, msg->mem_seg[i].size);
+ 	}
+ 
+ 	if (test_bit(ATH12K_FLAG_FIXED_MEM_REGION, &ab->dev_flags)) {

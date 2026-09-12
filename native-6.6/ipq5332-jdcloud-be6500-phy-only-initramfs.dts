@@ -1,0 +1,28 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR BSD-3-Clause)
+/*
+ * RAM-only PHY-consumer isolation diagnostic.
+ *
+ * The four internal PHY nodes are enabled while QCA8386 DSA and SSDK MHT are
+ * disabled.  Reset, clock fixup and address rewrites are also suppressed so
+ * a late MDIO insertion tests PHY enumeration/binding alone.  Never flash.
+ */
+#include "ipq5332-jdcloud-be6500-mdio-staged-initramfs.dts"
+
+/ {
+	be6500,phy-only;
+};
+
+&mdio {
+	/delete-property/ phy-reset-gpio;
+	/delete-property/ mdio_clk_fixup;
+	/delete-property/ phyaddr_fixup;
+	/delete-property/ uniphyaddr_fixup;
+};
+
+&{/soc@0/mdio@90000/switch@10} {
+	status = "disabled";
+};
+
+&jd_mht {
+	status = "disabled";
+};

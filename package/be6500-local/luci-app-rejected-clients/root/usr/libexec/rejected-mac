@@ -1,0 +1,770 @@
+#!/bin/sh
+
+CONFIG=device_manager
+
+section_for() { [ "$1" = guest ] && echo guest_settings || echo settings; }
+radios_for() { [ "$1" = guest ] && echo 'guest wifinet3' || echo 'default_radio0 default_radio1'; }
+
+valid_scope() { [ "$1" = main ] || [ "$1" = guest ]; }
+valid_mac() { printf '%s' "$1" | grep -Eq '^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$'; }
+normalize_mac() { printf '%s' "$1" | tr 'a-f' 'A-F'; }
+
+init_scope() {
+	scope="$1"; section="$(section_for "$scope")"
+	uci -q get "$CONFIG.$section" >/dev/null && return
+	[ -e "/etc/config/$CONFIG" ] || touch "/etc/config/$CONFIG"
+	set -- $(radios_for "$scope"); first="$1"
+	mode="$(uci -q get wireless.$first.macfilter)"
+	case "$mode" in allow|deny) ;; *) mode=off ;; esac
+	uci set "$CONFIG.$section=control"
+	uci set "$CONFIG.$section.mode=$mode"
+	for mac in $(uci -q get wireless.$first.maclist); do
+		mac="$(normalize_mac "$mac")"
+		[ "$mode" = deny ] && uci add_list "$CONFIG.$section.denylist=$mac" || uci add_list "$CONFIG.$section.allowlist=$mac"
+	done
+	uci commit "$CONFIG"
+}
+
+list_has() {
+	scope="$1"; option="$2"; mac="$3"; section="$(section_for "$scope")"
+	uci -q get "$CONFIG.$section.$option" | tr 'a-f' 'A-F' | tr ' ' '\n' | grep -qx "$mac"
+}
+
+sync_wireless() {
+	scope="$1"; section="$(section_for "$scope")"; mode="$(uci -q get "$CONFIG.$section.mode")"
+	for radio in $(radios_for "$scope"); do
+		uci -q get "wireless.$radio" >/dev/null || continue
+		uci -q delete "wireless.$radio.maclist"
+		if [ "$mode" = off ]; then
+			uci -q delete "wireless.$radio.macfilter"
+		else
+			uci set "wireless.$radio.macfilter=$mode"
+			for mac in $(uci -q get "$CONFIG.$section.${mode}list"); do uci add_list "wireless.$radio.maclist=$mac"; done
+		fi
+	done
+	uci commit wireless
+}
+
+runtime_acl_sync() {
+	scope="$1"; section="$(section_for "$scope")"; mode="$(uci -q get "$CONFIG.$section.mode")"
+	# An inactive list only needs persistence; there is no live hostapd ACL to update.
+	case "$mode" in allow) acl=accept_acl; option=allowlist;; deny) acl=deny_acl; option=denylist;; *) return 0;; esac
+	desired="/tmp/device-manager-acl-desired.$$"; current="/tmp/device-manager-acl-current.$$"
+	uci -q get "$CONFIG.$section.$option" | tr 'a-f' 'A-F' | tr ' ' '\n' | grep -E '^([0-9A-F]{2}:){5}[0-9A-F]{2}$' | sort -u >"$desired"
+	if [ "$scope" = guest ]; then ifaces='phy0-ap1 phy1-ap1'; else ifaces='phy0-ap0 phy1-ap0'; fi
+	for iface in $ifaces; do
+		ubus -v list "hostapd.$iface" >/dev/null 2>&1 || continue
+		hostapd_cli -p /var/run/hostapd -i "$iface" "$acl" SHOW 2>/dev/null | awk '{print toupper($1)}' | grep -E '^([0-9A-F]{2}:){5}[0-9A-F]{2}$' | sort -u >"$current"
+		while read -r mac; do grep -qx "$mac" "$desired" || hostapd_cli -p /var/run/hostapd -i "$iface" "$acl" DEL_MAC "$mac" >/dev/null 2>&1; done <"$current"
+		while read -r mac; do grep -qx "$mac" "$current" || hostapd_cli -p /var/run/hostapd -i "$iface" "$acl" ADD_MAC "$mac" >/dev/null 2>&1; done <"$desired"
+	done
+	rm -f "$desired" "$current"
+}
+
+reload_wifi_later() {
+	(sleep 1; wifi reload) >/dev/null 2>&1 &
+}
+
+status() {
+	for scope in main guest; do
+		init_scope "$scope"; section="$(section_for "$scope")"; set -- $(radios_for "$scope"); first="$1"
+		mode="$(uci -q get "$CONFIG.$section.mode")"
+		allow_count="$(uci -q get "$CONFIG.$section.allowlist" | wc -w)"
+		deny_count="$(uci -q get "$CONFIG.$section.denylist" | wc -w)"
+		ssid="$(uci -q get wireless.$first.ssid)"
+		printf '%s\t%s\t%s\t%s\t%s\n' "$scope" "${mode:-off}" "$allow_count" "$deny_count" "$ssid"
+	done
+}
+
+client_stream() {
+	for spec in 'phy0-ap0|main|2.4G' 'phy1-ap0|main|5G' 'phy0-ap1|guest|2.4G' 'phy1-ap1|guest|5G'; do
+		iface="${spec%%|*}"; rest="${spec#*|}"; scope="${rest%%|*}"; band="${rest#*|}"
+		iw dev "$iface" station dump 2>/dev/null | awk -v iface="$iface" -v scope="$scope" -v band="$band" '
+		function emit(){if(mac!="")print toupper(mac)"\t"iface"\t"scope"\t"band"\t"signal"\t"rx"\t"tx"\t"connected}
+		/^Station /{emit();mac=$2;signal="";rx=0;tx=0;connected=0;next}
+		/^[[:space:]]*signal:/{signal=$2;next}
+		/^[[:space:]]*rx bytes:/{rx=$3;next}
+		/^[[:space:]]*tx bytes:/{tx=$3;next}
+		/^[[:space:]]*connected time:/{connected=$3;next}
+		END{emit()}'
+	done
+}
+
+clients() {
+	init_scope main; init_scope guest
+	tmp="/tmp/device-manager-clients.$$"; v6tmp="/tmp/device-manager-ipv6.$$"; wiredtmp="/tmp/device-manager-wired-stats.$$"; history="/tmp/device-manager-wireless-history"; histtmp="/tmp/device-manager-wireless-history.$$"; client_stream >"$tmp"
+	# Wired client traffic is collected at the bridge by MAC: source traffic
+	# is device upload and destination traffic is device download.
+	{
+		nft list chain bridge device_usage upload 2>/dev/null | awk '/ether saddr/&&/counter/{for(i=1;i<=NF;i++)if($i=="bytes")b=$(i+1);print toupper($3) "\tup\t" b}'
+		nft list chain bridge device_usage download 2>/dev/null | awk '/ether daddr/&&/counter/{for(i=1;i<=NF;i++)if($i=="bytes")b=$(i+1);print toupper($3) "\tdown\t" b}'
+	} | awk -F '\t' '{seen[$1]=1;if($2=="up")up[$1]=$3;else down[$1]=$3}END{for(m in seen)print m "\t" up[m]+0 "\t" down[m]+0}' >"$wiredtmp"
+	# Build a MAC -> IPv6 map once. Keep routable/ULA addresses before the
+	# link-local address, and retain all addresses currently known to NDP.
+	ip -6 neigh show 2>/dev/null | awk '
+	function append(old,value){return old==""?value:old "," value}
+	{mac="";for(i=1;i<NF;i++)if($i=="lladdr"){mac=toupper($(i+1));break}if(mac=="")next
+	 addr=$1;if(addr~/^fe80:/)linklocal[mac]=append(linklocal[mac],addr);else other[mac]=append(other[mac],addr)}
+	END{for(mac in other)print mac "\t" other[mac] (linklocal[mac]!=""?"," linklocal[mac]:"");for(mac in linklocal)if(!(mac in other))print mac "\t" linklocal[mac]}' >"$v6tmp"
+	{ cat "$history" 2>/dev/null; awk -F '\t' '{print $1 "\t" $3 "\t" $4 "\t" $2}' "$tmp"; } | awk -F '\t' 'NF>=4{m=toupper($1);line[m]=m "\t" $2 "\t" $3 "\t" $4}END{for(m in line)print line[m]}' >"$histtmp"
+	mv "$histtmp" "$history"
+	while IFS="$(printf '\t')" read -r mac ifname scope band signal rx tx connected; do
+		lease="$(awk -v m="$mac" 'toupper($2)==m {print $3 "\t" $4; exit}' /tmp/dhcp.leases 2>/dev/null)"
+		ip="${lease%%$(printf '\t')*}"; name="${lease#*$(printf '\t')}"
+		[ "$lease" = "$ip" ] && name=''; [ "$name" = '*' ] && name=''
+		[ -n "$ip" ] || ip="$(ip neigh 2>/dev/null | awk -v m="$mac" 'toupper($5)==m {print $1; exit}')"
+		ipv6="$(awk -F '\t' -v m="$mac" '$1==m{print $2;exit}' "$v6tmp")"
+		membership=none; list_has "$scope" allowlist "$mac" && membership=allow; list_has "$scope" denylist "$mac" && membership=deny
+		device_section="dev_$(printf '%s' "$mac" | tr 'A-F:' 'a-f_')"; alias="$(uci -q get "$CONFIG.$device_section.name")"
+		prefix="$(printf '%s' "$mac" | tr -d ':' | cut -c1-6)"
+		vendor="$(awk -v p="$prefix" 'toupper($1)==p {$1="";sub(/^ /,"");print;exit}' /usr/share/nmap/nmap-mac-prefixes 2>/dev/null)"
+		display_name="${alias:-$name}"
+		printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$mac" "$display_name" "$ip" "$band" "$signal" "$rx" "$tx" "$connected" "$membership" "$ifname" "$vendor" "$name" "$scope" "$ipv6"
+	done <"$tmp"
+	while read -r expires mac ip name clientid; do
+		mac="$(normalize_mac "$mac")"; grep -q "^$mac$(printf '\t')" "$tmp" && continue
+		ip neigh show "$ip" 2>/dev/null | grep -qi "lladdr $(printf '%s' "$mac"|tr 'A-F' 'a-f')" || continue
+		[ "$name" = '*' ] && name=''; device_section="dev_$(printf '%s' "$mac" | tr 'A-F:' 'a-f_')"; alias="$(uci -q get "$CONFIG.$device_section.name")"; prefix="$(printf '%s' "$mac"|tr -d ':'|cut -c1-6)"; vendor="$(awk -v p="$prefix" 'toupper($1)==p{$1="";sub(/^ /,"");print;exit}' /usr/share/nmap/nmap-mac-prefixes 2>/dev/null)"
+		ipv6="$(awk -F '\t' -v m="$mac" '$1==m{print $2;exit}' "$v6tmp")"
+		fdb_port="$(brctl showmacs br-lan 2>/dev/null | awk -v m="$mac" 'toupper($2)==m&&$3=="no"{print $1;exit}')"; wired_if=''
+		for port in lan2 lan3 lan4;do raw_port="$(cat "/sys/class/net/$port/brport/port_no" 2>/dev/null)"; port_no="$(printf '%d' "$raw_port" 2>/dev/null)"; [ -n "$fdb_port" ]&&[ "$fdb_port" = "$port_no" ]&&wired_if="$port";done
+		seen="$(awk -F '\t' -v m="$mac" 'toupper($1)==m{print $2 "\t" $3 "\t" $4;exit}' "$history" 2>/dev/null)"
+		if [ -n "$wired_if" ];then
+			usage="$(awk -F '\t' -v m="$mac" '$1==m{print $2 "\t" $3;exit}' "$wiredtmp")"; up="${usage%%$(printf '\t')*}"; down="${usage#*$(printf '\t')}"; [ "$usage" = "$up" ]&&down=0
+			first="$(awk -F '\t' -v m="$mac" '$1==m{print $2;exit}' /tmp/device-manager-wired-state 2>/dev/null)"; now="$(date +%s)"; connected=0; [ -n "$first" ]&&[ "$now" -ge "$first" ] 2>/dev/null&&connected=$((now-first))
+			printf '%s\t%s\t%s\t有线\t-\t%s\t%s\t%s\tnone\t%s\t%s\t%s\twired\t%s\n' "$mac" "${alias:-$name}" "$ip" "${up:-0}" "${down:-0}" "$connected" "$wired_if" "$vendor" "$name" "$ipv6"
+		elif [ -n "$seen" ];then old_scope="${seen%%$(printf '\t')*}"; rest="${seen#*$(printf '\t')}"; old_band="${rest%%$(printf '\t')*}"; old_if="${rest#*$(printf '\t')}"; printf '%s\t%s\t%s\t%s\t-\t0\t0\t0\tnone\t%s\t%s\t%s\t%s\t%s\n' "$mac" "${alias:-$name}" "$ip" "$old_band" "$old_if" "$vendor" "$name" "$old_scope" "$ipv6";fi
+	done </tmp/dhcp.leases
+	rm -f "$tmp" "$v6tmp" "$wiredtmp"
+}
+
+list_rejected() {
+	awk -F '\t' '
+	NF>=4{key=toupper($2) "/" $3;order[++n]=key;latest[key]=n;row[key]=toupper($2) "\t" $3 "\t" strftime("%a %b %d %H:%M:%S %Y",$1) " " $4}
+	END{shown=0;for(i=n;i>=1&&shown<30;i--){key=order[i];if(latest[key]!=i)continue;print row[key];shown++}}' /tmp/device-manager-rejected 2>/dev/null
+}
+
+set_mode() {
+	scope="$1"; mode="$2"; valid_scope "$scope" || { echo '无效网络' >&2; exit 2; }
+	case "$mode" in off|allow|deny) ;; *) echo '无效模式' >&2; exit 2 ;; esac
+	init_scope "$scope"; section="$(section_for "$scope")"
+	uci set "$CONFIG.$section.mode=$mode"; uci commit "$CONFIG"; sync_wireless "$scope"
+	echo "$([ "$scope" = guest ] && echo 访客 || echo 主) Wi‑Fi 已切换为 $mode"; reload_wifi_later
+}
+
+change_list() {
+	action="$1"; scope="$2"; mac="$(normalize_mac "$3")"
+	target_mac="$mac"
+	valid_scope "$scope" || { echo '无效网络' >&2; exit 2; }; valid_mac "$mac" || { echo '无效 MAC' >&2; exit 2; }
+	init_scope "$scope"; section="$(section_for "$scope")"
+	case "$action" in
+	allow) uci -q del_list "$CONFIG.$section.denylist=$mac"; list_has "$scope" allowlist "$mac" || uci add_list "$CONFIG.$section.allowlist=$mac"; message='已加入白名单' ;;
+	deny) uci -q del_list "$CONFIG.$section.allowlist=$mac"; list_has "$scope" denylist "$mac" || uci add_list "$CONFIG.$section.denylist=$mac"; message='已加入黑名单' ;;
+	remove) uci -q del_list "$CONFIG.$section.allowlist=$mac"; uci -q del_list "$CONFIG.$section.denylist=$mac"; message='已移出名单' ;;
+	esac
+	uci commit "$CONFIG"; sync_wireless "$scope"
+	if runtime_acl_sync "$scope"; then echo "$target_mac $message（已即时生效，Wi‑Fi 未重启）"; else echo "$target_mac $message"; reload_wifi_later; fi
+}
+
+disconnect_client() {
+	scope="$1"; mac="$(normalize_mac "$2")"; valid_scope "$scope" || exit 2; valid_mac "$mac" || exit 2
+	low="$(printf '%s' "$mac" | tr 'A-F' 'a-f')"
+	if [ "$scope" = guest ]; then ifaces='phy0-ap1 phy1-ap1'; else ifaces='phy0-ap0 phy1-ap0'; fi
+	found=0; disconnected=0
+	for iface in $ifaces; do
+		iw dev "$iface" station get "$low" >/dev/null 2>&1 || continue
+		found=1
+		# Briefly suppress automatic reassociation so the immediate disconnect
+		# remains visible. This does not change the persistent access list.
+		if ubus call "hostapd.$iface" del_client "{\"addr\":\"$low\",\"reason\":5,\"deauth\":true,\"ban_time\":10000}" >/dev/null 2>&1; then
+			disconnected=1
+			logger -t device-manager "Disconnected $mac immediately from $iface"
+		fi
+	done
+	[ "$found" = 0 ] && { echo "$mac 已经离线"; return; }
+	[ "$disconnected" = 1 ] || { echo '无线驱动未能断开该设备' >&2; exit 1; }
+	echo "$mac 已立即断开"
+}
+
+rename_client() {
+	mac="$(normalize_mac "$1")"; valid_mac "$mac" || exit 2
+	name="$(printf '%s' "$2" | tr '\t\r\n' '   ' | cut -c1-40)"; [ -n "$name" ] || { echo '名称不能为空' >&2; exit 2; }
+	init_scope main; device_section="dev_$(printf '%s' "$mac" | tr 'A-F:' 'a-f_')"
+	uci set "$CONFIG.$device_section=device"; uci set "$CONFIG.$device_section.mac=$mac"; uci set "$CONFIG.$device_section.name=$name"; uci commit "$CONFIG"
+	echo "$mac 已命名为 $name"
+}
+
+set_limit() {
+	mac="$(normalize_mac "$1")"; down="$2"; up="$3"
+	valid_mac "$mac" || { echo '无效 MAC' >&2; exit 2; }
+	case "$down:$up" in *[!0-9:]*|'':*|*:) echo '限速参数无效' >&2; exit 2;; esac
+	# A freshly booted initramfs image may not have device_manager yet.
+	# Initialize its persistent scope before adding a limit section; otherwise
+	# UCI rejects every set operation while this command still appears to pass.
+	init_scope main
+	s="limit_$(printf '%s' "$mac" | tr 'A-F:' 'a-f_')"
+	if [ "$down" -eq 0 ] && [ "$up" -eq 0 ]; then
+		uci -q delete "$CONFIG.$s"
+	else
+		uci set "$CONFIG.$s=limit"; uci set "$CONFIG.$s.mac=$mac"
+		uci set "$CONFIG.$s.down=$down"; uci set "$CONFIG.$s.up=$up"
+	fi
+	uci commit "$CONFIG"; apply_limits
+	echo "$mac 限速已即时保存"
+}
+
+set_binding() {
+	mac="$(normalize_mac "$1")"; ip="$2"; enabled="$3"
+	valid_mac "$mac" || { echo '无效 MAC' >&2; exit 2; }
+	case "$enabled" in 0|1);; *) echo '绑定开关无效' >&2; exit 2;; esac
+	s="dm_$(printf '%s' "$mac" | tr 'A-F:' 'a-f_')"
+	if [ "$enabled" = 1 ]; then
+		ipcalc.sh "$ip" 255.255.255.255 >/dev/null 2>&1 || { echo 'IPv4 地址无效' >&2; exit 2; }
+		uci set "dhcp.$s=host"; uci set "dhcp.$s.mac=$mac"; uci set "dhcp.$s.ip=$ip"
+	else
+		uci -q delete "dhcp.$s"
+	fi
+	uci commit dhcp; /etc/init.d/dnsmasq reload >/dev/null 2>&1
+	echo "$mac 的 IP 绑定已即时保存"
+}
+
+set_guest_limit() {
+	on="$1"; down="$2"; up="$3"
+	case "$on" in 0|1);; *) echo '限速开关无效' >&2; exit 2;; esac
+	case "$down:$up" in *[!0-9:]*|'':*|*:) echo '限速参数无效' >&2; exit 2;; esac
+	uci -q get sqm.eth1 >/dev/null || uci set sqm.eth1=queue
+	uci set sqm.eth1.interface=br-guest; uci set sqm.eth1.enabled="$on"
+	# SQM ingress is device upload and egress is device download.
+	uci set sqm.eth1.download="$up"; uci set sqm.eth1.upload="$down"
+	uci set sqm.eth1.qdisc=cake; uci set sqm.eth1.script=piece_of_cake.qos; uci set sqm.eth1.linklayer=none
+	uci commit sqm; /etc/init.d/sqm restart >/dev/null 2>&1
+	echo '访客网络限速已即时保存'
+}
+
+iface_enabled() {
+	uci -q get "wireless.$1" >/dev/null || { echo 0; return; }
+	[ "$(uci -q get wireless.$1.disabled)" != 1 ] && echo 1 || echo 0
+}
+
+wifi_info() {
+	init_scope main; init_scope guest
+	freqmode="$(uci -q get wireless.main.freq_mode)"
+	[ -n "$freqmode" ] || { [ "$(uci -q get wireless.radio2.disabled)" = 1 ] && freqmode=0 || freqmode=1; }
+	printf 'freqmode\t%s\n' "$freqmode"
+	ssid2="$(uci -q get wireless.default_radio0.ssid)"; ssid5="$(uci -q get wireless.default_radio1.ssid)"
+	enc2="$(uci -q get wireless.default_radio0.encryption)"; enc5="$(uci -q get wireless.default_radio1.encryption)"
+	key2="$(uci -q get wireless.default_radio0.key)"; key5="$(uci -q get wireless.default_radio1.key)"
+	dual="$(uci -q get $CONFIG.wifi.dual)"
+	[ -n "$dual" ] || { [ "$ssid2" = "$ssid5" ] && [ "$enc2" = "$enc5" ] && [ "$key2" = "$key5" ] && dual=1 || dual=0; }
+	printf 'dual\t%s\n' "$dual"
+	printf 'main2\t%s\t%s\t%s\t%s\t%s\n' "$(iface_enabled default_radio0)" "$ssid2" "${enc2:-psk2}" "$key2" "$(uci -q get wireless.default_radio0.hidden)"
+	printf 'main5\t%s\t%s\t%s\t%s\t%s\n' "$(iface_enabled default_radio1)" "$ssid5" "${enc5:-psk2}" "$key5" "$(uci -q get wireless.default_radio1.hidden)"
+	printf 'main5high\t%s\t%s\t%s\t%s\t%s\n' "$(iface_enabled default_radio2)" "$(uci -q get wireless.default_radio2.ssid)" "$(uci -q get wireless.default_radio2.encryption)" "$(uci -q get wireless.default_radio2.key)" "$(uci -q get wireless.default_radio2.hidden)"
+	gssid2="$(uci -q get wireless.guest.ssid)"; gssid5="$(uci -q get wireless.wifinet3.ssid)"; genc2="$(uci -q get wireless.guest.encryption)"; genc5="$(uci -q get wireless.wifinet3.encryption)"
+	gkey2="$(uci -q get wireless.guest.key)"; gkey5="$(uci -q get wireless.wifinet3.key)"; gdual="$(uci -q get $CONFIG.wifi.guest_dual)"
+	[ -n "$gdual" ] || { [ "$gssid2" = "$gssid5" ] && [ "$genc2" = "$genc5" ] && [ "$gkey2" = "$gkey5" ] && gdual=1 || gdual=0; }
+	printf 'guestdual\t%s\n' "$gdual"
+	printf 'guest2\t%s\t%s\t%s\t%s\t%s\n' "$(iface_enabled guest)" "$gssid2" "${genc2:-psk2}" "$gkey2" "$(uci -q get wireless.guest.hidden)"
+	printf 'guest5\t%s\t%s\t%s\t%s\t%s\n' "$(iface_enabled wifinet3)" "$gssid5" "${genc5:-psk2}" "$gkey5" "$(uci -q get wireless.wifinet3.hidden)"
+}
+
+wifi_mode() {
+	case "$2" in 0|1) ;; *) echo '无线频段模式无效' >&2; exit 2;; esac
+	/usr/sbin/be6500-switch-wifi-mode "$2"
+}
+
+csv_to_list() {
+	section="$1"; option="$2"; csv="$3"; uci -q delete "$CONFIG.$section.$option"
+	oldifs="$IFS"; IFS=','; for mac in $csv; do mac="$(normalize_mac "$mac")"; [ -z "$mac" ] && continue; valid_mac "$mac" || { IFS="$oldifs"; return 1; }; uci add_list "$CONFIG.$section.$option=$mac"; done; IFS="$oldifs"
+}
+
+config_info() {
+	init_scope main; init_scope guest
+	for scope in main guest; do section="$(section_for "$scope")"; printf 'access\t%s\t%s\t%s\t%s\n' "$scope" "$(uci -q get $CONFIG.$section.mode)" "$(uci -q get $CONFIG.$section.allowlist | tr ' ' ',')" "$(uci -q get $CONFIG.$section.denylist | tr ' ' ',')"; done
+	# SQM ingress on br-guest is traffic sent by clients (device upload), while egress is traffic received by clients (device download).
+	printf 'sqm\t%s\t%s\t%s\n' "$(uci -q get sqm.eth1.enabled)" "$(uci -q get sqm.eth1.upload)" "$(uci -q get sqm.eth1.download)"
+	uci show "$CONFIG" 2>/dev/null | sed -n "s/^$CONFIG\.\([^.=]*\)=limit$/\1/p" | while read -r s; do printf 'limit\t%s\t%s\t%s\n' "$(uci -q get $CONFIG.$s.mac)" "$(uci -q get $CONFIG.$s.down)" "$(uci -q get $CONFIG.$s.up)"; done
+	uci show dhcp 2>/dev/null | sed -n "s/^dhcp\.\(dm_[^.=]*\)=host$/\1/p" | while read -r s; do printf 'binding\t%s\t%s\n' "$(uci -q get dhcp.$s.mac | tr 'a-f' 'A-F')" "$(uci -q get dhcp.$s.ip)"; done
+	awk '{m=toupper($2);h=$4;if(h=="*")h="";printf "known\t%s\t\t%s\t%s\n",m,$3,h}' /tmp/dhcp.leases 2>/dev/null
+	{ uci -q get $CONFIG.settings.allowlist; uci -q get $CONFIG.settings.denylist; uci -q get $CONFIG.guest_settings.allowlist; uci -q get $CONFIG.guest_settings.denylist; } | tr ' ' '\n' | tr 'a-f' 'A-F' | sort -u | while read -r mac; do
+		[ -n "$mac" ] || continue; ds="dev_$(printf '%s' "$mac" | tr 'A-F:' 'a-f_')"; alias="$(uci -q get $CONFIG.$ds.name)"; lease="$(awk -v m="$mac" 'toupper($2)==m{print $3 "\t" $4;exit}' /tmp/dhcp.leases)"; ip="${lease%%$(printf '\t')*}"; host="${lease#*$(printf '\t')}"; [ "$lease" = "$ip" ] && host=''; [ "$host" = '*' ] && host=''; printf 'known\t%s\t%s\t%s\t%s\n' "$mac" "$alias" "$ip" "$host"
+	done
+	admin_ip="$(logread | sed -n 's/.*accepted login.* from \([0-9.]*\).*/\1/p' | tail -1)"; admin_mac="$(ip neigh show "$admin_ip" 2>/dev/null | awk '{print toupper($5)}')"
+	printf 'admin\t%s\t%s\n' "$admin_ip" "$admin_mac"
+}
+
+network_info() {
+	proto="$(uci -q get network.wan.proto)"; mode="$(uci -q get $CONFIG.network.uplink_mode)"; case "$mode" in wired_bridge|wireless_bridge)proto="$mode";;esac; dev="$(uci -q get network.wan.device)"; vlan="${dev#wan.}"; [ "$vlan" = "$dev" ] && vlan=''
+	iptv_on=0;uci -q get network.IPTV >/dev/null&&iptv_on=1
+	ipdev="$(uci -q get network.IPTV.device)";iptv_vlan="$(uci -q get $CONFIG.network.iptv_vlan)";iptv_port="$(uci -q get $CONFIG.network.iptv_port)";iptv_mode="$(uci -q get $CONFIG.network.iptv_mode)";iptv_source_port="$(uci -q get $CONFIG.network.iptv_source_port)"
+	case "$iptv_mode" in vlan|lan) ;; *) iptv_mode=vlan;; esac
+	if [ -z "$iptv_vlan" ];then
+		case "$ipdev" in wan.*)iptv_vlan="${ipdev#wan.}";;esac
+	fi
+	if [ -z "$iptv_vlan" ];then
+		for p in $(uci -q get network.iptv_bridge.ports);do case "$p" in wan.*)iptv_vlan="${p#wan.}";;lan2|lan3|lan4)[ "$p" = "$iptv_port" ]||{ iptv_mode=lan;iptv_source_port="$p"; };;esac;done
+	fi
+	case "$ipdev" in lan2|lan3|lan4) iptv_mode=lan;iptv_source_port="$ipdev";;esac
+	if [ -z "$iptv_vlan" ];then
+		source_dev="$(uci -q get udpxy.@udpxy[0].source)";case "$source_dev" in wan.*)iptv_vlan="${source_dev#wan.}";;esac
+	fi
+	printf 'internet\t%s\t%s\t%s\t%s\t%s\n' "${proto:-dhcp}" "$(uci -q get network.wan.username)" "$vlan" "$([ "$(uci -q get network.wan.ipv6)" = 0 ] && echo 0 || echo 1)" "$(uci -q get network.wan.password)"
+	lan_gateway="$(uci -q get network.lan.gateway)"; side=0; [ -n "$lan_gateway" ] && side=1
+	printf 'lan\t%s\t%s\t%s\t%s\t%s\t%s\n' "$(uci -q get network.lan.ipaddr)" "$(uci -q get network.lan.netmask)" "$(uci -q get network.lan.dns)" "$side" "$lan_gateway" "$([ "$(uci -q get dhcp.lan.ignore)" = 1 ] && echo 0 || echo 1)"
+	printf 'guestlan\t%s\t%s\n' "$(uci -q get network.guest.ipaddr)" "$(uci -q get network.guest.netmask)"
+	bridge_device="$(uci -q get wireless.dm_bridge.device)"; [ "$bridge_device" = radio0 ] && bridge_band=2g || bridge_band=5g
+	printf 'bridge\t%s\t%s\t%s\t%s\n' "$bridge_band" "$(uci -q get wireless.dm_bridge.ssid)" "$(uci -q get wireless.dm_bridge.encryption)" "$(uci -q get wireless.dm_bridge.key)"
+	mesh_role="$(uci -q get $CONFIG.network.mesh_role)"; [ -n "$mesh_role" ] || mesh_role=off
+	mesh_device="$(uci -q get wireless.dm_mesh.device)"; [ "$mesh_device" = radio0 ] && mesh_band=2g || mesh_band=5g
+	printf 'mesh\t%s\t%s\t%s\t%s\n' "$mesh_role" "$mesh_band" "$(uci -q get wireless.dm_mesh.mesh_id)" "$(uci -q get wireless.dm_mesh.key)"
+	mesh_if="$(iw dev 2>/dev/null | awk '/Interface/{i=$2}/type mesh point/{print i;exit}')"
+	[ -z "$mesh_if" ] || iwinfo "$mesh_if" assoclist 2>/dev/null | awk '/^[0-9A-Fa-f][0-9A-Fa-f]:/{print "meshpeer\t" toupper($1) "\t" $2 "\t" $5}'
+	printf 'iptv\t%s\t%s\t%s\t%s\t%s\n' "$iptv_on" "$iptv_vlan" "${iptv_port:-none}" "$iptv_mode" "$iptv_source_port"
+	printf 'iptvauth\t%s\t%s\t%s\t%s\n' "$(uci -q get $CONFIG.network.iptv_auth)" "$(uci -q get $CONFIG.network.iptv_mac)" "$(uci -q get $CONFIG.network.iptv_option12)" "$(uci -q get $CONFIG.network.iptv_option60)"
+	printf 'iptvlease\t%s\t%s\t%s\t%s\t%s\n' "$(uci -q get $CONFIG.network.iptv_lease_ip)" "$(uci -q get $CONFIG.network.iptv_lease_mask)" "$(uci -q get $CONFIG.network.iptv_lease_gateway)" "$(uci -q get $CONFIG.network.iptv_lease_dns)" "$(uci -q get $CONFIG.network.iptv_lease_expires)"
+	printf 'udpxy\t%s\t%s\n' "$([ "$(uci -q get udpxy.@udpxy[0].disabled)" = 1 ] && echo 0 || echo 1)" "$(uci -q get udpxy.@udpxy[0].port)"
+	printf 'multidial\t%s\t%s\t%s\n' "$(uci -q get $CONFIG.network.multidial)" "$(uci -q get $CONFIG.network.multi_user)" "$(uci -q get $CONFIG.network.multi_mode)"
+	for p in lan2 lan3 lan4 wan; do printf 'port\t%s\t%s\n' "$p" "$(cat /sys/class/net/$p/operstate 2>/dev/null)"; done
+}
+
+connection_log() {
+	logread 2>/dev/null | awk '
+	BEGIN{IGNORECASE=1}
+	/hostapd/ && /(AP-STA-CONNECTED|AP-STA-DISCONNECTED|authenticated|deauthenticated)/ {
+		line=$0;low=tolower(line);if(!match(low,/[0-9a-f][0-9a-f]:[0-9a-f][0-9a-f]:[0-9a-f][0-9a-f]:[0-9a-f][0-9a-f]:[0-9a-f][0-9a-f]:[0-9a-f][0-9a-f]/))next;
+		mac=toupper(substr(low,RSTART,RLENGTH));scope=(low~/phy[01]-ap1/) ? "guest" : "main";key=scope "/" mac;gsub(/\t/," ",line);order[++n]=key;latest[key]=n;msg[key]=line;macs[key]=mac;scopes[key]=scope
+	}
+	END{shown=0;for(i=n;i>=1&&shown<100;i--){key=order[i];if(latest[key]!=i)continue;print macs[key] "\t" scopes[key] "\t" msg[key];shown++}}'
+}
+
+wifi_scan() {
+	scan_one() {
+		radio="$1"; band="$2"; iwinfo "$radio" scan 2>/dev/null | awk -v band="$band" '
+	function emit(){if(ssid!=""&&ssid!="unknown"){e="psk2";l=tolower(enc);if(l~/not enabled|none/)e="none";else if(l~/wpa2\/wpa3|mixed wpa2\/wpa3/)e="sae-mixed";else if(l~/wpa3|sae/)e="sae";gsub(/\t/," ",ssid);print band"\t"ssid"\t"e"\t"signal"\t"channel"\t"bssid}}
+	/^Cell /{emit();ssid="";enc="";signal="";channel="";bssid=$5;next}
+	/ESSID:/{x=$0;sub(/^.*ESSID: /,"",x);if(x~/^"/)x=substr(x,2,length(x)-2);ssid=x;next}
+	/Encryption:/{x=$0;sub(/^.*Encryption: /,"",x);enc=x;next}
+	/Signal:/{for(i=1;i<=NF;i++)if($i=="Signal:"){signal=$(i+1);break};next}
+	/Channel:/{for(i=1;i<=NF;i++)if($i=="Channel:"){channel=$(i+1);break};next}
+	END{emit()}'
+	}
+	tmp2="/tmp/dm-wifi-scan-2g.$$"; tmp5="/tmp/dm-wifi-scan-5g.$$"
+	trap 'rm -f "$tmp2" "$tmp5"' EXIT INT TERM
+	scan_one radio0 2g >"$tmp2" & p2=$!
+	scan_one radio1 5g >"$tmp5" & p5=$!
+	wait "$p2"; wait "$p5"
+	cat "$tmp2" "$tmp5"
+}
+
+iptv_capture() {
+	port="$2"
+	case "$port" in lan2|lan3|lan4);;*) echo '请选择有效的机顶盒抓取网口' >&2; exit 2;; esac
+	command -v tcpdump >/dev/null 2>&1 || { echo '路由器未安装 tcpdump，无法自动抓取' >&2; exit 2; }
+	tmp="/tmp/dm-iptv-dhcp.$$";last="/tmp/device-manager-iptv-dhcp-last.log"
+	trap 'rm -f "$tmp"' EXIT INT TERM
+	# DHCP Discover/Request is sent by the set-top box before it receives an IP.
+	# Listening on the selected physical LAN port prevents Wi-Fi and other LAN
+	# clients from being mistaken for the IPTV box.
+	# Collect the complete Discover/Request retry sequence. Some boxes omit
+	# Option 12/60 from the first packet and add them only to a later Request.
+	timeout 35 tcpdump -i "$port" -Q in -e -n -vvv -XX -s 0 -c 12 'udp src port 68 and dst port 67' >"$tmp" 2>&1
+	cp "$tmp" "$last" 2>/dev/null
+	mac="$(sed -n 's/.*Request from \([0-9A-Fa-f:][0-9A-Fa-f:]*\).*/\1/p;s/.*Client-Ethernet-Address \([0-9A-Fa-f:][0-9A-Fa-f:]*\).*/\1/p' "$tmp" | head -1 | tr 'a-f' 'A-F')"
+	[ -n "$mac" ] || mac="$(sed -n 's/^.* \([0-9A-Fa-f][0-9A-Fa-f]:[0-9A-Fa-f:]*\) > .*BOOTP.*/\1/p' "$tmp" | head -1 | tr 'a-f' 'A-F')"
+	opt12="$(awk '/(Hostname Option 12|Hostname \(12\))/{x=$0;sub(/^.*(Hostname Option 12|Hostname \(12\))[^:]*:[[:space:]]*/,"",x);sub(/^"/,"",x);sub(/"$/,"",x);print x;exit}' "$tmp")"
+	hex="$(awk '/0x[0-9a-fA-F]+:/{for(i=2;i<=NF;i++){if($i~/^[0-9a-fA-F]{4}$/)printf "%s",$i;else break}}END{print ""}' "$tmp")"
+	opts="${hex#*63825363}";opt60=''
+	while [ "${#opts}" -ge 2 ];do
+		code="$(printf %s "$opts"|cut -c1-2)";opts="$(printf %s "$opts"|cut -c3-)"
+		[ "$code" = ff ]&&break;[ "$code" = 00 ]&&continue;[ "${#opts}" -ge 2 ]||break
+		lh="$(printf %s "$opts"|cut -c1-2)";opts="$(printf %s "$opts"|cut -c3-)";len=$((0x$lh));chars=$((len*2));[ "${#opts}" -ge "$chars" ]||break
+		value="$(printf %s "$opts"|cut -c1-$chars)";opts="$(printf %s "$opts"|cut -c$((chars+1))-)"
+		[ "$code" = 3c ]&&{ opt60="$value";break; }
+	done
+	valid_mac "$mac" || { echo '等待超时：没有在所选网口捕获到机顶盒 DHCP 请求，请确认网口并重启机顶盒后重试' >&2; exit 3; }
+	printf 'capture\t%s\t%s\t%s\n' "$mac" "$opt12" "$opt60"
+}
+
+network_save() {
+	ensure_base_firewall
+	proto="$2"; user="$3"; pass="$4"; vlan="$5"; ipv6="$6"; iptv_on="$7"; iptv_vlan="$8"; iptv_port="$9"; shift 9
+	case "$1" in
+		vlan|lan) iptv_mode="$1"; iptv_source_port="$2"; shift 2;;
+		*) iptv_mode="$(uci -q get $CONFIG.network.iptv_mode)"; iptv_source_port="$(uci -q get $CONFIG.network.iptv_source_port)";;
+	esac
+	[ -n "$iptv_mode" ] || iptv_mode=vlan
+	udpxy_on="$1"; udpxy_port="$2"; multi_on="$3"; multi_user="$4"; multi_pass="$5"; multi_mode="$6"; bridge_band="$7"; bridge_ssid="$8"; bridge_enc="$9"; shift 9; bridge_pass="$1"; mesh_role="$2"; mesh_band="$3"; mesh_id="$4"; mesh_key="$5"; lan_ip="$6"; lan_mask="$7"; lan_dns="$8"; side="$9"; shift 9; lan_gateway="$1"; lan_dhcp="$2"; guest_ip="$3"; guest_mask="$4"; iptv_auth="$5"; iptv_mac="$(normalize_mac "$6")"; iptv_opt12="$7"; iptv_opt60="$8"
+	case "$proto" in pppoe|dhcp|wired_bridge|wireless_bridge);;*) echo '上网模式无效' >&2;exit 2;;esac; case "$ipv6$iptv_on$udpxy_on$multi_on" in *[!01]*) echo '开关参数无效' >&2;exit 2;;esac;case "$multi_mode" in balanced|backup|'');;*)echo '多拨策略无效' >&2;exit 2;;esac;[ "$proto" = pppoe ]||multi_on=0
+	case "$iptv_auth" in 0|1|'') ;; *) echo 'IPTV DHCP 鉴权开关无效' >&2; exit 2;; esac; [ -n "$iptv_auth" ] || iptv_auth=0
+	printf %s "$iptv_opt12" | grep -q '[[:cntrl:]]' && { echo 'DHCP Option 12 不能包含控制字符' >&2; exit 2; }
+	[ "${#iptv_opt12}" -le 255 ] && [ "${#iptv_opt60}" -le 510 ] || { echo 'DHCP Option 12/60 长度无效' >&2; exit 2; }
+	[ -z "$iptv_opt60" ] || { printf %s "$iptv_opt60"|grep -Eq '^([0-9A-Fa-f]{2})+$'; } || { echo 'DHCP Option 60 必须是偶数位十六进制字节' >&2;exit 2; }
+	if [ "$iptv_auth" = 1 ]; then
+		[ "$iptv_on" = 1 ] || { echo '启用 DHCP 鉴权前必须开启 IPTV' >&2; exit 2; }
+		valid_mac "$iptv_mac" || { echo '机顶盒 MAC 地址格式不正确' >&2; exit 2; }
+		[ "$iptv_port" = none ] || [ -z "$iptv_port" ] || { echo '模拟机顶盒 DHCP 鉴权时不能同时绑定实体机顶盒端口' >&2; exit 2; }
+	fi
+	case "$bridge_band" in 2g|5g|'');;*)echo '无线桥接频段无效' >&2;exit 2;;esac;case "$bridge_enc" in none|psk2|sae|sae-mixed|'');;*)echo '无线桥接加密方式无效' >&2;exit 2;;esac
+	case "$mesh_role" in off|gateway|node|wired_node|'');;*)echo 'Mesh 节点模式无效' >&2;exit 2;;esac; case "$mesh_band" in 2g|5g|'');;*)echo 'Mesh 回程频段无效' >&2;exit 2;;esac
+	[ -z "$mesh_role" ] && mesh_role=off
+	[ "$mesh_role" = off ] || [ "$mesh_role" = wired_node ] || { [ -n "$mesh_id" ] || { echo '必须填写 Mesh 名称' >&2;exit 2;}; [ "${#mesh_key}" -ge 8 ] || { echo 'Mesh 密码至少 8 位' >&2;exit 2;}; }
+	case "$side$lan_dhcp" in *[!01]*)echo '旁路由或 DHCP 参数无效' >&2;exit 2;;esac
+	ipcalc.sh "$lan_ip" "$lan_mask" >/dev/null 2>&1 || { echo 'LAN IPv4 地址或子网掩码无效' >&2;exit 2; }
+	ipcalc.sh "$guest_ip" "$guest_mask" >/dev/null 2>&1 || { echo '访客网络 IPv4 地址或子网掩码无效' >&2;exit 2; }
+	[ "$guest_ip" != "$lan_ip" ] || { echo '访客网络与主网络不能使用相同的 IPv4 地址' >&2;exit 2; }
+	[ "$side" = 0 ] || ipcalc.sh "$lan_gateway" 255.255.255.255 >/dev/null 2>&1 || { echo '旁路由模式必须填写有效的主路由网关' >&2;exit 2; }
+	[ "$proto" != wireless_bridge ]||{ [ -n "$bridge_ssid" ]||{ echo '无线桥接必须填写上级 Wi-Fi 名称' >&2;exit 2;};[ "$bridge_enc" = none ]||[ "${#bridge_pass}" -ge 8 ]||{ echo '无线桥接密码至少 8 位' >&2;exit 2;};}
+	case "$proto" in wired_bridge|wireless_bridge)[ "$iptv_on" = 0 ]||{ echo '桥接模式不能同时启用 IPTV' >&2;exit 2;};;esac
+	case "$iptv_mode" in vlan|lan);;*) echo 'IPTV 接入方式无效' >&2;exit 2;;esac
+	for id in "$vlan" "$([ "$iptv_mode" = vlan ]&&printf %s "$iptv_vlan")";do [ -z "$id" ]||{ [ "$id" -ge 1 ] 2>/dev/null&&[ "$id" -le 4094 ]; }||{ echo 'VLAN ID 应为 1-4094' >&2;exit 2;};done
+	case "$iptv_port" in ''|none|lan2|lan3|lan4);;*) echo 'IPTV 绑定端口无效' >&2;exit 2;;esac
+	case "$iptv_source_port" in ''|lan2|lan3|lan4);;*) echo 'IPTV 上联 LAN 口无效' >&2;exit 2;;esac
+	[ "$iptv_mode" = vlan ] || [ -n "$iptv_source_port" ] || { echo 'LAN 口接入 IPTV 时必须选择接光猫 IPTV 口的上联 LAN 口' >&2;exit 2; }
+	[ "$iptv_mode" != lan ] || [ "$iptv_port" = none ] || [ -z "$iptv_port" ] || [ "$iptv_port" != "$iptv_source_port" ] || { echo 'IPTV 上联口不能同时作为机顶盒输出口' >&2;exit 2; }
+	[ "$udpxy_port" -ge 1 ] 2>/dev/null&&[ "$udpxy_port" -le 65535 ]||{ echo 'udpxy 端口无效' >&2;exit 2;}
+	wan_dev=wan;[ -n "$vlan" ]&&wan_dev="wan.$vlan";uci -q del_list network.@device[0].ports=wan;uci -q delete wireless.dm_bridge;uci -q delete dhcp.lan.ignore;uci set network.lan.proto=static
+	uci -q get $CONFIG.network >/dev/null||uci set $CONFIG.network=network;uci set $CONFIG.network.uplink_mode="$proto"
+	uci set network.lan.ipaddr="$lan_ip";uci set network.lan.netmask="$lan_mask";uci -q delete network.lan.dns
+	uci -q get network.guest >/dev/null||uci set network.guest=interface;uci set network.guest.proto=static;uci set network.guest.ipaddr="$guest_ip";uci set network.guest.netmask="$guest_mask";uci -q delete network.guest.type;uci set network.guest.device=br-guest;uci set network.dm_guest=device;uci set network.dm_guest.name=br-guest;uci set network.dm_guest.type=bridge;uci set network.dm_guest.bridge_empty=1
+	for dns in $(printf '%s' "$lan_dns"|tr ',;' '  ');do ipcalc.sh "$dns" 255.255.255.255 >/dev/null 2>&1||{ echo "DNS 地址无效：$dns" >&2;exit 2;};uci add_list network.lan.dns="$dns";done
+	uci -q delete network.lan.gateway;lan_zone="$(firewall_zone_section lan)";[ -n "$lan_zone" ]&&uci -q delete firewall.$lan_zone.masq
+	uci set $CONFIG.network.mesh_role="$mesh_role"
+	uci -q delete wireless.dm_mesh
+	if [ "$mesh_role" = gateway ] || [ "$mesh_role" = node ];then mesh_radio=radio1;[ "$mesh_band" = 2g ]&&mesh_radio=radio0;uci set wireless.dm_mesh=wifi-iface;uci set wireless.dm_mesh.device="$mesh_radio";uci set wireless.dm_mesh.mode=mesh;uci set wireless.dm_mesh.network=lan;uci set wireless.dm_mesh.mesh_id="$mesh_id";uci set wireless.dm_mesh.encryption=sae;uci set wireless.dm_mesh.key="$mesh_key";uci set wireless.dm_mesh.mesh_fwding=1;fi
+	case "$proto" in
+	pppoe)uci set network.wan.device="$wan_dev";uci set network.wan.proto=pppoe;uci set network.wan.username="$user";[ -n "$pass" ]&&uci set network.wan.password="$pass";;
+	dhcp)uci set network.wan.device="$wan_dev";uci set network.wan.proto=dhcp;uci -q delete network.wan.username;uci -q delete network.wan.password;;
+	wired_bridge)uci set network.wan.proto=none;uci add_list network.@device[0].ports=wan;uci set dhcp.lan.ignore=1;ipv6=0;;
+	wireless_bridge)uci set network.wan.proto=none;uci set dhcp.lan.ignore=1;radio=radio1;[ "$bridge_band" = 2g ]&&radio=radio0;uci set wireless.dm_bridge=wifi-iface;uci set wireless.dm_bridge.device="$radio";uci set wireless.dm_bridge.mode=sta;uci set wireless.dm_bridge.network=lan;uci set wireless.dm_bridge.ssid="$bridge_ssid";uci set wireless.dm_bridge.encryption="${bridge_enc:-psk2}";[ "$bridge_enc" = none ]&&uci -q delete wireless.dm_bridge.key||uci set wireless.dm_bridge.key="$bridge_pass";uci set wireless.dm_bridge.wds=1;ipv6=0;;
+	esac
+	if [ "$side" = 1 ];then uci set network.lan.gateway="$lan_gateway";lan_zone="$(firewall_zone_section lan)";[ -n "$lan_zone" ]&&uci set firewall.$lan_zone.masq=1;uci set network.wan.proto=none;[ "$lan_dhcp" = 1 ]&&uci -q delete dhcp.lan.ignore||uci set dhcp.lan.ignore=1;ipv6=0;fi
+	if [ "$mesh_role" = node ] || [ "$mesh_role" = wired_node ];then uci set dhcp.lan.ignore=1;uci set network.wan.proto=none;ipv6=0;fi
+	if [ "$ipv6" = 1 ];then
+		uci set network.wan.ipv6=auto
+		uci set network.wan.delegate=1
+		uci set network.wan6.device='@wan'
+		uci -q delete network.wan6.ifname
+		uci set network.wan6.proto=dhcpv6
+		uci set network.wan6.reqaddress=try
+		uci set network.wan6.reqprefix=auto
+		uci set network.wan6.delegate=1
+		uci set network.wan6.disabled=0
+		uci set network.wan6.auto=1
+		uci set network.lan.ip6assign=60
+	else
+		uci set network.wan.ipv6=0
+		uci set network.wan6.disabled=1
+		uci -q delete network.lan.ip6assign
+	fi
+	uci -q delete network.dm_iptv_vlan
+	uci -q delete network.dm_iptv_source
+	lease_ip="$(uci -q get $CONFIG.network.iptv_lease_ip)";lease_mask="$(uci -q get $CONFIG.network.iptv_lease_mask)";lease_gateway="$(uci -q get $CONFIG.network.iptv_lease_gateway)";lease_dns="$(uci -q get $CONFIG.network.iptv_lease_dns)";capture_port="$(uci -q get $CONFIG.network.iptv_capture_port)";takeover=0
+	if [ "$iptv_auth" = 1 ] && [ -n "$lease_ip" ] && [ -n "$lease_mask" ] && [ -n "$lease_gateway" ];then takeover=1;iptv_port=none;fi
+	iptv_dev="wan.$iptv_vlan";[ "$iptv_mode" = lan ]&&iptv_dev="$iptv_source_port"
+	if [ "$iptv_on" = 1 ];then
+		[ "$iptv_mode" = lan ]||[ -n "$iptv_vlan" ]||{ echo '开启 WAN VLAN IPTV 时必须填写 VLAN ID' >&2;exit 2;}
+		uci set network.IPTV=interface;uci set network.IPTV.device="$iptv_dev";uci set network.IPTV.defaultroute=0;uci set network.IPTV.peerdns=0;uci set network.IPTV.metric=20
+		if [ "$takeover" = 1 ];then
+			# Option 60 is a per-request authentication value on this ISP.  Once
+			# the real box has authenticated, keep the awarded lease and clone its
+			# MAC instead of replaying a stale Option 60 value.
+			uci set network.IPTV.proto=static;uci set network.IPTV.ipaddr="$lease_ip";uci set network.IPTV.netmask="$lease_mask";uci set network.IPTV.gateway="$lease_gateway";uci -q delete network.IPTV.dns
+			[ -n "$lease_dns" ]&&uci add_list network.IPTV.dns="$lease_dns"
+			uci -q delete network.IPTV.hostname;uci -q delete network.IPTV.vendorid;uci -q delete network.IPTV.sendopts;uci -q delete network.IPTV.broadcast
+		elif [ "$iptv_auth" = 1 ];then
+			uci set network.IPTV.proto=dhcp;uci set network.IPTV.broadcast=1;uci set network.IPTV.vendorid='';uci -q delete network.IPTV.sendopts
+			[ -n "$iptv_opt12" ]&&uci set network.IPTV.hostname="$iptv_opt12"||uci -q delete network.IPTV.hostname
+			[ -n "$iptv_opt60" ]&&uci add_list network.IPTV.sendopts="0x3c:$iptv_opt60"
+			if [ "$iptv_mode" = vlan ];then
+				uci set network.dm_iptv_vlan=device;uci set network.dm_iptv_vlan.name="wan.$iptv_vlan";uci set network.dm_iptv_vlan.macaddr="$iptv_mac"
+			else
+				uci set network.dm_iptv_source=device;uci set network.dm_iptv_source.name="$iptv_source_port";uci set network.dm_iptv_source.macaddr="$iptv_mac"
+			fi
+		else
+			uci set network.IPTV.proto=static;uci set network.IPTV.ipaddr=10.255.255.2;uci set network.IPTV.netmask=255.255.255.0;uci set network.IPTV.defaultroute=0;uci set network.IPTV.peerdns=0;uci -q delete network.IPTV.gateway;uci -q delete network.IPTV.dns;uci -q delete network.IPTV.hostname;uci -q delete network.IPTV.vendorid;uci -q delete network.IPTV.sendopts;uci -q delete network.IPTV.broadcast
+		fi
+		uci set network.udpxy_mcast_route=route;uci set network.udpxy_mcast_route.interface=IPTV;uci set network.udpxy_mcast_route.target=224.0.0.0;uci set network.udpxy_mcast_route.netmask=240.0.0.0;uci set network.udpxy_mcast_route.metric=20
+	else uci -q delete network.IPTV;uci -q delete network.udpxy_mcast_route;iptv_port=none;iptv_auth=0;takeover=0;fi
+	uci set network.wan.metric=10;uci -q set network.wan6.metric=10
+	uci set network.@device[0].igmp_snooping="$iptv_on"
+	if [ "$iptv_auth" != 1 ];then
+		for opt in iptv_lease_ip iptv_lease_mask iptv_lease_gateway iptv_lease_dns iptv_lease_expires iptv_capture_port;do uci -q delete "$CONFIG.network.$opt";done
+		capture_port=''
+	fi
+	uci set $CONFIG.network.iptv_port="${iptv_port:-none}"
+	uci set $CONFIG.network.iptv_vlan="$iptv_vlan"
+	uci set $CONFIG.network.iptv_mode="$iptv_mode"
+	uci set $CONFIG.network.iptv_source_port="$iptv_source_port"
+	uci set $CONFIG.network.iptv_auth="$iptv_auth";uci set $CONFIG.network.iptv_mac="$iptv_mac";uci set $CONFIG.network.iptv_option12="$iptv_opt12";uci set $CONFIG.network.iptv_option60="$iptv_opt60"
+	uci set $CONFIG.network.multidial="$multi_on";uci set $CONFIG.network.multi_user="$multi_user";uci set $CONFIG.network.multi_mode="${multi_mode:-balanced}"
+	# IPTV 上联口用于连接光猫 IPTV 口；机顶盒绑定口用于原始信号直通。其余 LAN 口保留在主 LAN。
+	iptv_lan_uplink='';[ "$iptv_on" = 1 ]&&[ "$iptv_mode" = lan ]&&iptv_lan_uplink="$iptv_source_port"
+	for p in lan2 lan3 lan4;do uci -q del_list network.@device[0].ports="$p";done;for p in lan2 lan3 lan4;do [ "$p" = "$iptv_port" ]||[ "$p" = "$iptv_lan_uplink" ]||uci add_list network.@device[0].ports="$p";done
+	uci -q delete network.iptv_bridge
+	if [ "$iptv_on" = 1 ]&&[ "$iptv_mode" = lan ];then
+		uci set network.iptv_bridge=device;uci set network.iptv_bridge.name=br-iptv;uci set network.iptv_bridge.type=bridge;uci add_list network.iptv_bridge.ports="$iptv_source_port";[ "$iptv_port" = none ]||[ -z "$iptv_port" ]||uci add_list network.iptv_bridge.ports="$iptv_port";[ "$iptv_auth" = 1 ]&&uci set network.iptv_bridge.macaddr="$iptv_mac";uci set network.IPTV.device=br-iptv
+	elif [ "$takeover" = 1 ];then
+		uci set network.iptv_bridge=device;uci set network.iptv_bridge.name=br-iptv;uci set network.iptv_bridge.type=bridge;uci add_list network.iptv_bridge.ports="wan.$iptv_vlan";uci set network.iptv_bridge.macaddr="$iptv_mac";uci set network.IPTV.device=br-iptv
+	elif [ "$iptv_on" = 1 ]&&[ "$iptv_port" != none ]&&[ -n "$iptv_port" ];then
+		uci set network.iptv_bridge=device;uci set network.iptv_bridge.name=br-iptv;uci set network.iptv_bridge.type=bridge;uci add_list network.iptv_bridge.ports="wan.$iptv_vlan";uci add_list network.iptv_bridge.ports="$iptv_port";uci set network.IPTV.device=br-iptv
+	fi
+	uci -q delete network.iptv_source_rule;uci -q delete network.iptv_default_route
+	if [ "$takeover" = 1 ];then
+		uci set network.iptv_source_rule=rule;uci set network.iptv_source_rule.src="$lease_ip/32";uci set network.iptv_source_rule.lookup=4000;uci set network.iptv_source_rule.priority=4000
+		uci set network.iptv_default_route=route;uci set network.iptv_default_route.interface=IPTV;uci set network.iptv_default_route.target=0.0.0.0/0;uci set network.iptv_default_route.gateway="$lease_gateway";uci set network.iptv_default_route.table=4000
+	fi
+	udpxy_source=0.0.0.0
+	if [ "$iptv_on" = 1 ];then
+		if [ "$iptv_mode" = lan ] || [ "$takeover" = 1 ];then udpxy_source=br-iptv;else udpxy_source=10.255.255.2;fi
+	fi
+	uci -q get udpxy.@udpxy[0] >/dev/null||uci add udpxy udpxy >/dev/null;uci set udpxy.@udpxy[0].disabled="$([ "$udpxy_on" = 1 ]&&echo 0||echo 1)";uci set udpxy.@udpxy[0].status="$udpxy_on";uci set udpxy.@udpxy[0].port="$udpxy_port";uci set udpxy.@udpxy[0].bind=br-lan;uci set udpxy.@udpxy[0].source="$udpxy_source"
+	uci -q delete network.wan2;uci -q delete network.dm_macvlan2;uci -q del_list firewall.@zone[1].network=wan2
+	for s in dm_wan dm_wan2 dm_wan_member dm_wan2_member dm_policy dm_rule;do uci -q delete mwan3.$s;done
+	if [ "$multi_on" = 1 ];then
+		uci set network.dm_macvlan2=device;uci set network.dm_macvlan2.name=dm-macvlan2;uci set network.dm_macvlan2.type=macvlan;uci set network.dm_macvlan2.ifname="$wan_dev";uci set network.wan2=interface;uci set network.wan2.device=dm-macvlan2;uci set network.wan2.proto=pppoe;uci set network.wan2.username="${multi_user:-$user}";[ -n "$multi_pass" ]&&uci set network.wan2.password="$multi_pass"||uci set network.wan2.password="$(uci -q get network.wan.password)";uci set network.wan2.metric=20;uci add_list firewall.@zone[1].network=wan2
+		for i in wan wan2;do uci set mwan3.dm_$i=interface;uci set mwan3.dm_$i.enabled=1;uci add_list mwan3.dm_$i.track_ip=223.5.5.5;uci add_list mwan3.dm_$i.track_ip=119.29.29.29;uci set mwan3.dm_$i.reliability=1;uci set mwan3.dm_$i.family=ipv4;done
+		uci set mwan3.dm_wan_member=member;uci set mwan3.dm_wan_member.interface=wan;uci set mwan3.dm_wan_member.metric=1;uci set mwan3.dm_wan_member.weight=1;uci set mwan3.dm_wan2_member=member;uci set mwan3.dm_wan2_member.interface=wan2;uci set mwan3.dm_wan2_member.metric="$([ "$multi_mode" = backup ]&&echo 2||echo 1)";uci set mwan3.dm_wan2_member.weight=1
+		uci set mwan3.dm_policy=policy;uci add_list mwan3.dm_policy.use_member=dm_wan_member;uci add_list mwan3.dm_policy.use_member=dm_wan2_member;uci set mwan3.dm_policy.last_resort=default;uci set mwan3.dm_rule=rule;uci set mwan3.dm_rule.dest_ip=0.0.0.0/0;uci set mwan3.dm_rule.use_policy=dm_policy;uci set mwan3.dm_rule.family=ipv4
+	fi
+	if [ "$iptv_on" = 1 ];then
+		uci show firewall|grep -q "\.name='IPTV'"||{ uci set firewall.dm_iptv=zone;uci set firewall.dm_iptv.name=IPTV;uci set firewall.dm_iptv.network=IPTV;uci set firewall.dm_iptv.input=ACCEPT;uci set firewall.dm_iptv.output=ACCEPT;uci set firewall.dm_iptv.forward=REJECT; }
+		uci set firewall.dm_lan_iptv=forwarding;uci set firewall.dm_lan_iptv.src=lan;uci set firewall.dm_lan_iptv.dest=IPTV
+		uci set firewall.dm_iptv_lan=forwarding;uci set firewall.dm_iptv_lan.src=IPTV;uci set firewall.dm_iptv_lan.dest=lan
+		uci set firewall.dm_iptv_igmp=rule;uci set firewall.dm_iptv_igmp.name=DeviceManager-Allow-IPTV-IGMP;uci set firewall.dm_iptv_igmp.src=IPTV;uci set firewall.dm_iptv_igmp.proto=igmp;uci set firewall.dm_iptv_igmp.target=ACCEPT
+	else uci -q delete firewall.dm_lan_iptv;uci -q delete firewall.dm_iptv_lan;uci -q delete firewall.dm_iptv_igmp;fi
+	ensure_guest_firewall
+	uci commit network;uci commit wireless;uci commit dhcp;uci commit udpxy;uci commit firewall;uci commit mwan3;uci commit $CONFIG
+	(/etc/init.d/network reload;sleep 3;wifi down;sleep 1;wifi up;sleep 5
+	 up0="$(ubus call network.wireless status 2>/dev/null|jsonfilter -e '@.radio0.up')";up1="$(ubus call network.wireless status 2>/dev/null|jsonfilter -e '@.radio1.up')"
+	 if [ "$up0" != true ] || [ "$up1" != true ];then logger -t device-manager 'Network-save Wi-Fi recovery retry';uci -q delete wireless.radio0.disabled;uci -q delete wireless.radio1.disabled;uci commit wireless;wifi up;fi
+	 /etc/init.d/firewall reload;/etc/init.d/dnsmasq restart;/etc/init.d/udpxy restart;/etc/init.d/mwan3 restart) >/dev/null 2>&1 &
+	echo '上网与 IPTV 设置已保存，网络正在重新连接'
+}
+
+apply_limits() {
+	nft delete table inet device_limits >/dev/null 2>&1 || true
+	nft add table inet device_limits; nft 'add chain inet device_limits forward { type filter hook forward priority - 2; policy accept; }'
+	flow_exclude=/etc/nftables.d/device-manager-flow-exclude.nft
+	limited_v4='0.0.0.0'
+	limited_v6='::'
+	for s in $(uci show "$CONFIG" 2>/dev/null | sed -n "s/^$CONFIG\.\([^.=]*\)=limit$/\1/p"); do
+		mac="$(uci -q get $CONFIG.$s.mac)"; down="$(uci -q get $CONFIG.$s.down)"; up="$(uci -q get $CONFIG.$s.up)"
+		ip="$(awk -v m="$mac" 'toupper($2)==toupper(m){print $3;exit}' /tmp/dhcp.leases)"
+		ip6s="$(ip -6 neigh show 2>/dev/null | awk -v m="$mac" 'toupper($0) ~ toupper(m) && $1 !~ /^fe80:/ && $1 !~ /^ff/ {print $1}' | sort -u)"
+		if [ -n "$ip" ]; then
+			case ",$limited_v4," in *",$ip,"*) ;; *) limited_v4="$limited_v4, $ip";; esac
+			[ "${down:-0}" -gt 0 ] && nft add rule inet device_limits forward ip daddr "$ip" limit rate over "$(((down+7)/8))" kbytes/second counter drop
+			[ "${up:-0}" -gt 0 ] && nft add rule inet device_limits forward ip saddr "$ip" limit rate over "$(((up+7)/8))" kbytes/second counter drop
+		fi
+		for ip6 in $ip6s; do
+			case ",$limited_v6," in *",$ip6,"*) ;; *) limited_v6="$limited_v6, $ip6";; esac
+			[ "${down:-0}" -gt 0 ] && nft add rule inet device_limits forward ip6 daddr "$ip6" limit rate over "$(((down+7)/8))" kbytes/second counter drop
+			[ "${up:-0}" -gt 0 ] && nft add rule inet device_limits forward ip6 saddr "$ip6" limit rate over "$(((up+7)/8))" kbytes/second counter drop
+		done
+	done
+	{
+		printf 'define dm_limited_v4 = { %s }\n' "$limited_v4"
+		printf 'define dm_limited_v6 = { %s }\n' "$limited_v6"
+	} > "$flow_exclude"
+	run_limit_hooks
+	/etc/init.d/firewall reload >/dev/null 2>&1 || true
+}
+
+run_limit_hooks() {
+	hook_dir=/etc/device-manager/limit-hooks.d
+	[ -d "$hook_dir" ] || return 0
+	for hook in "$hook_dir"/*; do
+		[ -x "$hook" ] || continue
+		"$hook" >/dev/null 2>&1 || logger -t device-manager "limit hook failed: $hook"
+	done
+}
+
+apply_all() {
+	shift
+	main_dual="$1"; main2="$2"; main5="$3"; m2ssid="$4"; m2enc="$5"; m2pass="$6"; m5ssid="$7"; m5enc="$8"; m5pass="$9"; shift 9
+	guest_dual="$1"; guest_on="$2"; guest2="$3"; guest5="$4"; g2ssid="$5"; g2enc="$6"; g2pass="$7"; g5ssid="$8"; g5enc="$9"; shift 9
+	g5pass="$1"; main_mode="$2"; guest_mode="$3"; main_allow="$4"; main_deny="$5"; guest_allow="$6"; guest_deny="$7"; sqm_on="$8"; sqm_down="$9"; shift 9
+	sqm_up="$1"; limits="$2"; aliases="$3"; bindings="$4"; hidden="$5"; admin_mac="$(normalize_mac "$6")"; confirm="$7"; main_wifi_dirty="${8:-0}"; guest_wifi_dirty="${9:-0}"; access_dirty="${10:-0}"
+	logger -t device-manager "apply_all wifi_dirty main=$main_wifi_dirty guest=$guest_wifi_dirty; requested main=$main2/$main5 guest_on=$guest_on guest=$guest2/$guest5; sqm=$sqm_on down=$sqm_down up=$sqm_up"
+	m2hidden="${hidden%%@*}"; hrest="${hidden#*@}"; m5hidden="${hrest%%@*}"; hrest="${hrest#*@}"; g2hidden="${hrest%%@*}"; g5hidden="${hrest#*@}"
+	case "$m2hidden$m5hidden$g2hidden$g5hidden" in *[!01]*) echo '隐藏网络参数无效' >&2;exit 2;;esac
+	case "$main_dual$main2$main5$guest_dual$guest_on$guest2$guest5$sqm_on" in *[!01]*) echo '开关参数无效' >&2; exit 2;; esac
+	case "$main_wifi_dirty$guest_wifi_dirty$access_dirty" in *[!01]*) echo '无线变更标记无效' >&2;exit 2;;esac
+	case "$main_mode" in off|allow|deny);; *) exit 2;; esac; case "$guest_mode" in off|allow|deny);; *) exit 2;; esac
+	validate_ssid "$m2ssid" && validate_ssid "$m5ssid" && validate_ssid "$g2ssid" && validate_ssid "$g5ssid" || { echo 'Wi‑Fi 名称不能为空且不能超过 32 字节' >&2; exit 2; }
+	valid_encryption "$m2enc" && valid_encryption "$m5enc" && valid_encryption "$g2enc" && valid_encryption "$g5enc" || { echo '加密方式无效' >&2; exit 2; }
+	for pair in "$m2enc:$m2pass" "$m5enc:$m5pass" "$g2enc:$g2pass" "$g5enc:$g5pass"; do enc="${pair%%:*}"; pass="${pair#*:}"; [ "$enc" = none ] || [ -z "$pass" ] || [ "${#pass}" -ge 8 ] || { echo 'Wi‑Fi 密码至少 8 位' >&2; exit 2; }; done
+	[ "$main2$main5" != 00 ] || { echo '主 Wi‑Fi 至少启用一个频段' >&2; exit 2; }; [ "$guest_on" = 0 ] || [ "$guest2$guest5" != 00 ] || { echo '访客 Wi‑Fi 至少启用一个频段' >&2; exit 2; }
+	if [ "$main_dual" = 1 ]; then main2=1;main5=1;m5ssid="$m2ssid";m5enc="$m2enc";[ -n "$m2pass" ]&&m5pass="$m2pass";fi
+	if [ "$guest_dual" = 1 ]; then [ "$guest_on" = 1 ]&&{ guest2=1;guest5=1; };g5ssid="$g2ssid";g5enc="$g2enc";[ -n "$g2pass" ]&&g5pass="$g2pass";fi
+	if [ "$main_mode" = allow ] && valid_mac "$admin_mac" && ! printf ',%s,' "$main_allow" | tr 'a-f' 'A-F' | grep -q ",$admin_mac," && [ "$confirm" != 1 ]; then echo 'SELF_LOCKOUT' >&2; exit 3; fi
+	init_scope main; init_scope guest
+	old_main_mode="$(uci -q get $CONFIG.settings.mode)"; old_guest_mode="$(uci -q get $CONFIG.guest_settings.mode)"
+	[ "$old_main_mode" = "$main_mode" ] && main_mode_changed=0 || main_mode_changed=1
+	[ "$old_guest_mode" = "$guest_mode" ] && guest_mode_changed=0 || guest_mode_changed=1
+	uci set $CONFIG.settings.mode="$main_mode"; uci set $CONFIG.guest_settings.mode="$guest_mode"
+	csv_to_list settings allowlist "$main_allow" && csv_to_list settings denylist "$main_deny" && csv_to_list guest_settings allowlist "$guest_allow" && csv_to_list guest_settings denylist "$guest_deny" || { echo '名单包含无效 MAC' >&2; exit 2; }
+	if [ "$main_wifi_dirty" = 1 ]; then set_wifi_iface default_radio0 "$main2" "$m2ssid" "$m2enc" "$m2pass" "$m2hidden"; set_wifi_iface default_radio1 "$main5" "$m5ssid" "$m5enc" "$m5pass" "$m5hidden"; fi
+	if [ "$guest_wifi_dirty" = 1 ]; then [ "$guest_on" = 1 ] || { guest2=0;guest5=0; }; set_wifi_iface guest "$guest2" "$g2ssid" "$g2enc" "$g2pass" "$g2hidden"; set_wifi_iface wifinet3 "$guest5" "$g5ssid" "$g5enc" "$g5pass" "$g5hidden"; fi
+	uci -q get $CONFIG.wifi >/dev/null || uci set $CONFIG.wifi=wifi; [ "$main_wifi_dirty" = 1 ] && uci set $CONFIG.wifi.dual="$main_dual"; [ "$guest_wifi_dirty" = 1 ] && uci set $CONFIG.wifi.guest_dual="$guest_dual"
+	sqm_down_kbit="$(awk -v v="$sqm_down" 'BEGIN{if(v~/^[0-9]+([.][0-9]+)?$/)printf "%.0f",v*1000;else printf "0"}')"
+	sqm_up_kbit="$(awk -v v="$sqm_up" 'BEGIN{if(v~/^[0-9]+([.][0-9]+)?$/)printf "%.0f",v*1000;else printf "0"}')"
+	uci -q get sqm.eth1 >/dev/null || uci set sqm.eth1=queue; uci set sqm.eth1.interface=br-guest; uci set sqm.eth1.enabled="$sqm_on"; uci set sqm.eth1.download="$sqm_up_kbit"; uci set sqm.eth1.upload="$sqm_down_kbit"; uci set sqm.eth1.qdisc=cake; uci set sqm.eth1.script=piece_of_cake.qos; uci set sqm.eth1.linklayer=none
+	for s in $(uci show $CONFIG | sed -n "s/^$CONFIG\.\([^.=]*\)=limit$/\1/p"); do uci delete $CONFIG.$s; done
+	oldifs="$IFS"; IFS=';'; for item in $limits; do [ -z "$item" ]&&continue; mac="${item%%@*}"; rest="${item#*@}"; down="${rest%%@*}"; up="${rest#*@}"; mac="$(normalize_mac "$mac")"; valid_mac "$mac"||continue; s="limit_$(printf '%s' "$mac"|tr 'A-F:' 'a-f_')"; uci set $CONFIG.$s=limit;uci set $CONFIG.$s.mac="$mac";uci set $CONFIG.$s.down="${down:-0}";uci set $CONFIG.$s.up="${up:-0}";done;IFS="$oldifs"
+	oldifs="$IFS"; IFS=';'; for item in $aliases; do [ -z "$item" ]&&continue; mac="$(normalize_mac "${item%%@*}")"; name="${item#*@}"; valid_mac "$mac"||continue; name="$(printf '%s' "$name"|tr '\t\r\n;@' '      '|cut -c1-40)"; [ -n "$name" ]||continue; s="dev_$(printf '%s' "$mac"|tr 'A-F:' 'a-f_')";uci set $CONFIG.$s=device;uci set $CONFIG.$s.mac="$mac";uci set $CONFIG.$s.name="$name";done;IFS="$oldifs"
+	for s in $(uci show dhcp 2>/dev/null|sed -n "s/^dhcp\.\(dm_[^.=]*\)=host$/\1/p");do uci delete dhcp.$s;done
+	oldifs="$IFS";IFS=';';for item in $bindings;do [ -z "$item" ]&&continue;mac="$(normalize_mac "${item%%@*}")";ip="${item#*@}";valid_mac "$mac"||continue;printf '%s' "$ip"|grep -Eq '^([0-9]{1,3}\.){3}[0-9]{1,3}$'||continue;s="dm_$(printf '%s' "$mac"|tr 'A-F:' 'a-f_')";uci set dhcp.$s=host;uci set dhcp.$s.mac="$mac";uci set dhcp.$s.ip="$ip";done;IFS="$oldifs"
+	# Interface switches are authoritative; never allow an unrelated edit to disable a radio device.
+	if [ "$main_wifi_dirty" = 1 ];then [ "$main2" = 1 ]&&uci -q delete wireless.radio0.disabled;[ "$main5" = 1 ]&&uci -q delete wireless.radio1.disabled;fi
+	uci commit $CONFIG;uci commit wireless;uci commit sqm;uci commit dhcp;sync_wireless main;sync_wireless guest;ensure_guest_firewall
+	if [ "$access_dirty" = 1 ];then
+		[ "$main_mode_changed" = 0 ]&&runtime_acl_sync main
+		[ "$guest_mode_changed" = 0 ]&&runtime_acl_sync guest
+	fi
+	/etc/init.d/sqm restart >/dev/null 2>&1;apply_limits
+	(/etc/init.d/dnsmasq restart;/etc/init.d/firewall reload
+	 if [ "$main_wifi_dirty" = 1 ] || [ "$guest_wifi_dirty" = 1 ] || [ "$main_mode_changed" = 1 ] || [ "$guest_mode_changed" = 1 ];then
+		# Changing hidden/SSID/encryption can make hostapd's incremental BSS reload drop the primary AP.
+		# A clean radio restart is slightly longer but deterministic, followed by an automatic recovery check.
+		wifi down;sleep 1;wifi up;sleep 5
+		up0="$(ubus call network.wireless status 2>/dev/null|jsonfilter -e '@.radio0.up')";up1="$(ubus call network.wireless status 2>/dev/null|jsonfilter -e '@.radio1.up')"
+		if { [ "$main2" = 1 ]&&[ "$up0" != true ]; } || { [ "$main5" = 1 ]&&[ "$up1" != true ]; };then logger -t device-manager 'Wi-Fi recovery retry';uci -q delete wireless.radio0.disabled;uci -q delete wireless.radio1.disabled;uci commit wireless;wifi up;fi
+	 fi) >/dev/null 2>&1 &
+	echo '全部设置已保存'
+}
+
+valid_encryption() {
+	case "$1" in none|psk2|sae-mixed|sae) return 0;; *) return 1;; esac
+}
+
+validate_ssid() {
+	[ -n "$1" ] && [ "$(printf '%s' "$1" | wc -c)" -le 32 ]
+}
+
+set_wifi_iface() {
+	section="$1"; enabled="$2"; ssid="$3"; encryption="$4"; password="$5"; hidden="$6"
+	if [ "$enabled" != 1 ]; then
+		uci -q delete "wireless.$section"
+		return 0
+	fi
+	if ! uci -q get "wireless.$section" >/dev/null; then
+		case "$section" in
+			default_radio0) device=radio0; network=lan ;;
+			default_radio1) device=radio1; network=lan ;;
+			default_radio2) device=radio2; network=lan ;;
+			guest) device=radio0; network=guest ;;
+			wifinet3) device=radio1; network=guest ;;
+			*) return 1 ;;
+		esac
+		uci set "wireless.$section=wifi-iface"
+		uci set "wireless.$section.device=$device"
+		uci set "wireless.$section.network=$network"
+		uci set "wireless.$section.mode=ap"
+	fi
+	uci -q delete "wireless.$section.disabled"
+	uci set "wireless.$section.ssid=$ssid"; uci set "wireless.$section.encryption=$encryption"
+	if [ "$encryption" = none ]; then uci -q delete "wireless.$section.key"; elif [ -n "$password" ]; then uci set "wireless.$section.key=$password"; fi
+	[ "$hidden" = 1 ] && uci set "wireless.$section.hidden=1" || uci -q delete "wireless.$section.hidden"
+}
+
+ensure_guest_firewall() {
+	guest_enabled=0
+	for guest_section in $(uci show wireless 2>/dev/null | sed -n 's/^wireless\.\([^.=]*\)=wifi-iface$/\1/p'); do
+		[ "$(uci -q get wireless.$guest_section.network)" = guest ] || continue
+		[ "$(uci -q get wireless.$guest_section.disabled)" = 1 ] || { guest_enabled=1; break; }
+	done
+	if [ "$guest_enabled" = 0 ]; then
+		for section_type in forwarding rule zone; do
+			for section in $(uci show firewall 2>/dev/null | sed -n "s/^firewall\.\([^.=]*\)=$section_type$/\1/p" | sort -r); do
+				name="$(uci -q get firewall.$section.name)"; src="$(uci -q get firewall.$section.src)"; dest="$(uci -q get firewall.$section.dest)"; networks="$(uci -q get firewall.$section.network)"
+				case "$section_type:$name:$src:$dest:$networks" in
+					zone:guest:*|forwarding:*:guest:wan:*|rule:Guest-DNS:guest:*|rule:Guest-DHCP:guest:*|rule:DeviceManager-Allow-Guest-DNS:guest:*|rule:DeviceManager-Allow-Guest-DHCP:guest:*) uci -q delete firewall.$section;;
+				esac
+			done
+		done
+		uci -q delete dhcp.guest
+		uci -q delete network.guest
+		uci -q delete network.guest_dev
+		uci -q delete network.dm_guest
+		uci commit dhcp
+		uci commit network
+		uci commit firewall
+		return 0
+	fi
+	uci -q get network.guest >/dev/null || { uci set network.guest=interface; uci set network.guest.proto=static; uci set network.guest.ipaddr=192.168.4.1; uci set network.guest.netmask=255.255.255.0; }
+	uci -q delete network.guest.type; uci set network.guest.device=br-guest; uci set network.dm_guest=device; uci set network.dm_guest.name=br-guest; uci set network.dm_guest.type=bridge; uci set network.dm_guest.bridge_empty=1; uci commit network
+	uci -q get dhcp.guest >/dev/null || { uci set dhcp.guest=dhcp; uci set dhcp.guest.interface=guest; uci set dhcp.guest.start=50; uci set dhcp.guest.limit=200; uci set dhcp.guest.leasetime=1h; uci commit dhcp; }
+	uci show firewall | grep -q "\.name='guest'" || { s="$(uci add firewall zone)"; uci set firewall.$s.name=guest; uci set firewall.$s.network=guest; uci set firewall.$s.input=REJECT; uci set firewall.$s.output=ACCEPT; uci set firewall.$s.forward=REJECT; }
+	uci show firewall | grep -q "\.src='guest'.*" || true
+	if ! uci show firewall | grep -B1 -A5 "\.src='guest'" | grep -q "\.dest='wan'"; then s="$(uci add firewall forwarding)"; uci set firewall.$s.src=guest; uci set firewall.$s.dest=wan; fi
+	uci show firewall | grep -q "\.name='DeviceManager-Allow-Guest-DNS'" || { s="$(uci add firewall rule)"; uci set firewall.$s.name=DeviceManager-Allow-Guest-DNS; uci set firewall.$s.src=guest; uci set firewall.$s.dest_port=53; uci set firewall.$s.proto=tcpudp; uci set firewall.$s.target=ACCEPT; }
+	uci show firewall | grep -q "\.name='DeviceManager-Allow-Guest-DHCP'" || { s="$(uci add firewall rule)"; uci set firewall.$s.name=DeviceManager-Allow-Guest-DHCP; uci set firewall.$s.src=guest; uci set firewall.$s.src_port=67-68; uci set firewall.$s.dest_port=67-68; uci set firewall.$s.proto=udp; uci set firewall.$s.target=ACCEPT; }
+	uci commit firewall
+}
+
+firewall_zone_section() {
+	uci show firewall 2>/dev/null | sed -n "s/^firewall\.\([^.=]*\)\.name='$1'$/\1/p" | head -n 1
+}
+
+ensure_base_firewall() {
+	uci -q get firewall.@defaults[0] >/dev/null || uci add firewall defaults >/dev/null
+	uci set firewall.@defaults[0].input=REJECT; uci set firewall.@defaults[0].output=ACCEPT
+	uci set firewall.@defaults[0].forward=REJECT; uci set firewall.@defaults[0].synflood_protect=1
+	lan_zone="$(firewall_zone_section lan)"; [ -n "$lan_zone" ] || { lan_zone=dm_lan; uci set firewall.$lan_zone=zone; }
+	uci set firewall.$lan_zone.name=lan; uci set firewall.$lan_zone.network=lan
+	uci set firewall.$lan_zone.input=ACCEPT; uci set firewall.$lan_zone.output=ACCEPT; uci set firewall.$lan_zone.forward=ACCEPT
+	uci -q delete firewall.$lan_zone.masq
+	wan_zone="$(firewall_zone_section wan)"; [ -n "$wan_zone" ] || { wan_zone=dm_wan; uci set firewall.$wan_zone=zone; }
+	uci set firewall.$wan_zone.name=wan; uci -q delete firewall.$wan_zone.network
+	for net in wan wan6 wwan wwan6; do uci add_list firewall.$wan_zone.network="$net"; done
+	uci set firewall.$wan_zone.input=REJECT; uci set firewall.$wan_zone.output=ACCEPT; uci set firewall.$wan_zone.forward=REJECT
+	uci set firewall.$wan_zone.masq=1; uci set firewall.$wan_zone.mtu_fix=1
+	uci set firewall.dm_lan_wan=forwarding; uci set firewall.dm_lan_wan.src=lan; uci set firewall.dm_lan_wan.dest=wan
+	uci set firewall.dm_dhcp_renew=rule; uci set firewall.dm_dhcp_renew.name='Allow-DHCP-Renew'; uci set firewall.dm_dhcp_renew.src=wan
+	uci set firewall.dm_dhcp_renew.proto=udp; uci set firewall.dm_dhcp_renew.dest_port=68; uci set firewall.dm_dhcp_renew.family=ipv4; uci set firewall.dm_dhcp_renew.target=ACCEPT
+	uci set firewall.dm_ping=rule; uci set firewall.dm_ping.name='Allow-Ping'; uci set firewall.dm_ping.src=wan
+	uci set firewall.dm_ping.proto=icmp; uci set firewall.dm_ping.icmp_type=echo-request; uci set firewall.dm_ping.family=ipv4; uci set firewall.dm_ping.target=ACCEPT
+	uci set firewall.dm_dhcpv6=rule; uci set firewall.dm_dhcpv6.name='Allow-DHCPv6'; uci set firewall.dm_dhcpv6.src=wan
+	uci set firewall.dm_dhcpv6.proto=udp; uci set firewall.dm_dhcpv6.dest_port=546; uci set firewall.dm_dhcpv6.family=ipv6; uci set firewall.dm_dhcpv6.target=ACCEPT
+	uci set firewall.dm_mld=rule; uci set firewall.dm_mld.name='Allow-MLD'; uci set firewall.dm_mld.src=wan; uci set firewall.dm_mld.proto=icmp
+	uci set firewall.dm_mld.src_ip='fe80::/10'; uci set firewall.dm_mld.icmp_type='130/0 131/0 132/0 143/0'; uci set firewall.dm_mld.family=ipv6; uci set firewall.dm_mld.target=ACCEPT
+	uci set firewall.dm_icmpv6_input=rule; uci set firewall.dm_icmpv6_input.name='Allow-ICMPv6-Input'; uci set firewall.dm_icmpv6_input.src=wan
+	uci set firewall.dm_icmpv6_input.proto=icmp; uci set firewall.dm_icmpv6_input.icmp_type='echo-request echo-reply destination-unreachable packet-too-big time-exceeded bad-header unknown-header-type router-solicitation neighbour-solicitation router-advertisement neighbour-advertisement'
+	uci set firewall.dm_icmpv6_input.limit='1000/sec'; uci set firewall.dm_icmpv6_input.family=ipv6; uci set firewall.dm_icmpv6_input.target=ACCEPT
+	uci set firewall.dm_icmpv6_forward=rule; uci set firewall.dm_icmpv6_forward.name='Allow-ICMPv6-Forward'; uci set firewall.dm_icmpv6_forward.src=wan; uci set firewall.dm_icmpv6_forward.dest='*'
+	uci set firewall.dm_icmpv6_forward.proto=icmp; uci set firewall.dm_icmpv6_forward.icmp_type='echo-request echo-reply destination-unreachable packet-too-big time-exceeded bad-header unknown-header-type'
+	uci set firewall.dm_icmpv6_forward.limit='1000/sec'; uci set firewall.dm_icmpv6_forward.family=ipv6; uci set firewall.dm_icmpv6_forward.target=ACCEPT
+	uci commit firewall
+}
+
+wifi_save() {
+	dual="$2"; main2="$3"; main5="$4"; m2ssid="$5"; m2enc="$6"; m2pass="$7"; m5ssid="$8"; m5enc="$9"; shift 9
+	m5pass="$1"; guest_on="$2"; guest2="$3"; guest5="$4"; gssid="$5"; genc="$6"; gpass="$7"
+	case "$dual$main2$main5$guest_on$guest2$guest5" in *[!01]*) echo '开关参数无效' >&2; exit 2;; esac
+	validate_ssid "$m2ssid" && validate_ssid "$m5ssid" && validate_ssid "$gssid" || { echo 'Wi‑Fi 名称不能为空且不能超过 32 字节' >&2; exit 2; }
+	valid_encryption "$m2enc" && valid_encryption "$m5enc" && valid_encryption "$genc" || { echo '加密方式无效' >&2; exit 2; }
+	[ "$main2$main5" != 00 ] || { echo '主 Wi‑Fi 至少选择一个频段' >&2; exit 2; }
+	[ "$guest_on" = 0 ] || [ "$guest2$guest5" != 00 ] || { echo '访客 Wi‑Fi 至少选择一个频段' >&2; exit 2; }
+	if [ "$dual" = 1 ]; then m5ssid="$m2ssid"; m5enc="$m2enc"; [ -n "$m2pass" ] && m5pass="$m2pass"; fi
+	for pair in "$m2enc:$m2pass" "$m5enc:$m5pass" "$genc:$gpass"; do enc="${pair%%:*}"; pass="${pair#*:}"; [ "$enc" = none ] || [ -z "$pass" ] || [ "${#pass}" -ge 8 ] || { echo 'Wi‑Fi 密码至少 8 位' >&2; exit 2; }; done
+	set_wifi_iface default_radio0 "$main2" "$m2ssid" "$m2enc" "$m2pass"
+	set_wifi_iface default_radio1 "$main5" "$m5ssid" "$m5enc" "$m5pass"
+	[ "$guest_on" = 1 ] || { guest2=0; guest5=0; }
+	set_wifi_iface guest "$guest2" "$gssid" "$genc" "$gpass"; set_wifi_iface wifinet3 "$guest5" "$gssid" "$genc" "$gpass"
+	uci commit wireless; [ -e /etc/config/$CONFIG ] || touch /etc/config/$CONFIG; uci -q get $CONFIG.wifi >/dev/null || uci set $CONFIG.wifi=wifi; uci set $CONFIG.wifi.dual=$dual; uci commit $CONFIG
+	ensure_guest_firewall; (/etc/init.d/firewall reload;wifi down;sleep 1;wifi up;sleep 5;ubus call network.wireless status 2>/dev/null|grep -q '"up": true'||wifi up) >/dev/null 2>&1 &
+	echo '无线设置已保存，Wi‑Fi 正在重新加载'
+}
+
+case "$1" in
+	status) status;; clients) clients;; list) list_rejected;; mode) set_mode "$2" "$3";;
+	allow|deny|remove) change_list "$1" "$2" "$3";; disconnect) disconnect_client "$2" "$3";; rename) rename_client "$2" "$3";;
+	set_limit) set_limit "$2" "$3" "$4";; set_binding) set_binding "$2" "$3" "$4";; set_guest_limit) set_guest_limit "$2" "$3" "$4";;
+	wifi_info) wifi_info;; wifi_save) wifi_save "$@";; wifi_mode) wifi_mode "$@";;
+config_info) config_info;; apply_all) apply_all "$@";; apply_limits) apply_limits;;
+network_info) network_info;; network_save) network_save "$@";; iptv_capture) iptv_capture "$@";;
+connection_log) connection_log;;
+firewall_sync) ensure_base_firewall; ensure_guest_firewall; /etc/init.d/firewall reload;;
+wifi_scan) wifi_scan;;
+*) echo '无效命令' >&2; exit 1;; esac

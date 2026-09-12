@@ -1,0 +1,625 @@
+/*公共*/
+.white-space {
+    white-space:pre!important;
+}
+ul {
+    list-style: none;
+    margin: 0;
+}
+
+.seniorManagement_Box {
+    padding: 44px 60px;
+    font-family: PingFang SC;
+    font-style: normal;
+    font-weight: normal;
+}
+
+.seniorManagement_top {
+    font-family: PingFang SC;
+    font-weight: 550;
+    font-size: 18px;
+    line-height: 25px;
+    color: #333333;
+    text-align: left;
+}
+
+#seniorManagement_btn {
+    background: #F4F6FA;
+    border: none;
+    box-sizing: border-box;
+    border-radius: 4px;
+    font-size: 14px;
+    height: 46px;
+    width: 300px;
+    line-height: 46px;
+    text-align: center;
+    color: #666666;
+    outline: none;
+}
+
+.seniorManagement_content_table {
+    margin: 20px 0;
+    background: #FFFFFF;
+    border: 1px solid #DDDDDD;
+    box-sizing: border-box;
+    padding: 10px 20px 0 20px;
+}
+
+.seniorManagement_Box>div {
+    width: 100%;
+}
+
+.AF_table {
+    width: 100%;
+    table-layout: fixed;
+}
+
+.AF_table thead tr {
+    display: flex;
+    height: 40px;
+    font-weight: 600;
+    font-size: 14px;
+    line-height: 40px;
+    color: #999999;
+    border-bottom: 1px solid #eee;
+}
+
+.AF_table tbody tr {
+    display: flex;
+    font-size: 14px;
+    height: 50px;
+    line-height: 50px;
+    color: #333;
+}
+.AF_table th,
+.AF_table td {
+    padding-right: 10px;
+    box-sizing: border-box;
+    white-space: pre;
+	overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.AF_table_button {
+    width: 54px;
+    color: #4762FE;
+    height: 24px;
+    font-size: 12px;
+    line-height: 14px;
+    text-align: center;
+    background: #FFFFFF;
+    border: 1px solid #4762FE;
+    box-sizing: border-box;
+    border-radius: 4px;
+    outline: none;
+    margin-right: 5px;
+}
+
+.seniorManagement_content {
+    margin: 30px 0;
+}
+.seniorManagement_info_p {
+    font-family: PingFang SC;
+    font-style: normal;
+    font-weight: normal;
+    font-size: 14px;
+    line-height: 20px;
+    /* identical to box height */
+    color: #999999;
+}
+
+/*遮罩公用部分*/
+
+.shade {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: #000000;
+    opacity: 0.3;
+    z-index: 9;
+    display: none;
+}
+
+.proDialog {
+    width: 560px!important;
+    border: 1px solid #EEEEEE;
+    border-radius: 20px;
+    padding: 30px 40px;
+    background-color: #FFFFFF;
+    position: fixed;
+    top: 0px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 10;
+    display: none;
+}
+
+.proDialog_top {
+    font-weight: 600;
+    font-size: 16px;
+    color: #333333;
+    line-height: 24px;
+    border-bottom: 1px solid #eee;
+    padding-bottom: 20px;
+}
+
+.proDialog_top>img {
+    vertical-align: top;
+    float: right;
+    cursor: pointer;
+}
+
+.proDialog_content {
+    padding: 30px 0 20px 0;
+    box-sizing: border-box;
+}
+
+.proDialogTip_content {
+    margin: 0 auto;
+    text-align: center;
+    padding: 20px 0 40px 0;
+    box-sizing: border-box;
+    line-height: 28px;
+}
+
+.proDialog_content_div_item {
+    position: relative;
+    font-size: 14px;
+    margin-bottom: 20px;
+}
+
+.proDialog_content_div_item span {
+    margin-left: 0!important;
+}
+
+.proDialog_content_div_noBottom {
+    margin: 0!important;
+}
+
+.proDialog_content_div_item label {
+    width: 100px;
+    color: #999;
+    line-height: 36px;
+    height: 36px;
+    margin: 0;
+    padding: 0;
+    font-weight: 550;
+}
+
+.proDialog_content_div_input {
+    width: 340px;
+    height: 36px;
+    background: #FFFFFF;
+    border: 1px solid #DDDDDD;
+    box-sizing: border-box;
+    border-radius: 4px;
+    outline: none;
+    padding-left: 12px;
+    color: #333;
+    font-size: 14px;
+}
+
+.proDialog_content_div_item input::placeholder {
+    font-size: 13px;
+    color: #999;
+}
+
+.proDialog_content_div_item .why_icon {
+    position: absolute;
+    top: 10px;
+    width: 18px;
+}
+
+.proDialog_foot {
+    text-align: center;
+}
+
+#proDialog_btn {
+    background: #4762FE;
+    box-sizing: border-box;
+    border-radius: 4px;
+    font-size: 14px;
+    height: 46px;
+    width: 360px;
+    line-height: 46px;
+    text-align: center;
+    color: white;
+    outline: none;
+    border: none;
+}
+
+.cancel-btn {
+    margin-right: 10px;
+    width: 175px;
+    height: 46px;
+    color: #666;
+    background: #F4F6FA;
+    border: 1px solid #DDDDDD;
+    box-sizing: border-box;
+    border-radius: 4px;
+}
+.confirm-btn {
+    width: 175px;
+    height: 46px;
+    border: 1px solid #4762FE;;
+    border-radius: 4px;
+    background: #4762FE;
+    color: #FFFFFF;
+}
+
+#proDialog_btn:hover {
+    background: #3350f7;
+}
+
+.proDialog_content_select_name {
+    vertical-align: top;
+}
+
+.proDialog_content_select {
+    display: inline-block;
+    width: 340px;
+    height: 36px;
+    line-height: 36px;
+    background: #FFFFFF;
+    border: 1px solid #DDDDDD;
+    box-sizing: border-box;
+    border-radius: 4px;
+    padding-left: 12px;
+    color: #333;
+    font-size: 14px;
+    position: relative;
+}
+
+.proDialog_content_select>img {
+    position: absolute;
+    top: 6px;
+    right: 10px;
+    cursor: pointer;
+}
+
+.proDialog_content_ul {
+    width: 100%;
+    padding: 0 12px;
+    position: absolute;
+    top: 35px;
+    left: 0;
+    z-index: 999;
+    background: #FFFFFF;
+    border: 1px solid #EEEEEE;
+    box-sizing: border-box;
+    box-shadow: 0px 0px 10px rgba(71, 98, 254, 0.1);
+    border-radius: 3px;
+    display: none;
+}
+
+.proDialog_content_ulLi {
+    line-height: 40px;
+    border-bottom: 1px solid #eee;
+    cursor: pointer;
+    color: #333;
+}
+
+.proDialog_content_ulLi:hover {
+    color: #4762FE;
+}
+
+.proDialog_content_ulLi_none {
+    border: none;
+}
+
+.proDialog_content_select_imgRotate {
+    -webkit-transform: rotate(180deg);
+    -moz-transform: rotate(180deg);
+    -o-transform: rotate(180deg);
+    -ms-transform: rotate(180deg);
+    transform: rotate(180deg);
+}
+
+
+/*DMZ部分*/
+
+.DMZ_top {
+    padding-bottom: 20px;
+    border-bottom: 2px solid #eee;
+}
+
+.DMZ_btn {
+    background: #4762FE!important;
+    color: white!important;
+}
+.DMZ_btn_disable,
+.disabled-select {
+    background: #EEEEEE!important;
+    color: #D0D0D0!important;
+    pointer-events: none;
+}
+.hosts_save_btn {
+    background: #4762FE!important;
+    color: white!important;
+}
+
+.seniorManagement_content_div {
+    font-size: 14px;
+}
+
+.seniorManagement_content_div>label {
+    color: #999;
+    line-height: 44px;
+    height: 36px;
+    margin: 0;
+    padding: 0;
+    font-weight: 550;
+}
+
+.seniorManagement_content_div img {
+    cursor: pointer;
+}
+
+.DMZIpAddr_sp {
+    color: #333;
+    letter-spacing: 0.05em;
+}
+
+.IPaddrIpt {
+    width: 60px;
+    height: 36px;
+    background: #FFFFFF;
+    border: 1px solid #DDDDDD;
+    box-sizing: border-box;
+    border-radius: 4px;
+    outline: none;
+    padding-left: 10px;
+}
+
+
+/*NAT设置部分*/
+
+.NAT_btn {
+    background: #4762FE!important;
+    color: white!important;
+    width: 368px!important;
+}
+
+.NAT_foot {
+    padding-left: 120px;
+}
+
+.seniorManagement_NAT_p {
+    font-weight: 600;
+    font-size: 14px;
+    line-height: 20px;
+    color: #333333;
+    margin: 0;
+}
+
+.seniorManagement_content_div .NETSet_label {
+    line-height: 46px;
+    height: 46px;
+    width: 120px;
+    vertical-align: top;
+}
+
+.NETSet_label_mode {
+    background: #FFFFFF;
+    border: 1px solid #DDDDDD;
+    box-sizing: border-box;
+    border-radius: 4px;
+    width: 175px;
+    height: 46px;
+    font-size: 14px;
+    font-weight: normal;
+    color: #666;
+    padding-left: 10px;
+    padding: 12px;
+    vertical-align: top;
+    margin-right: 10px;
+    cursor: pointer;
+}
+
+.NETSet_dot {
+    display: inline-block;
+    width: 19px;
+    height: 19px;
+    background: #FFFFFF;
+    border: 1px solid #BBBBBB;
+    border-radius: 50%;
+    vertical-align: top;
+    margin-right: 5px;
+}
+
+.select_NETSet_label_mode {
+    border: 1px solid #4762FE;
+    color: #4762FE;
+}
+
+.select_NETSet_label_mode>span {
+    border: 5px solid #4762FE;
+}
+
+.NAT_btn:hover {
+    background-color: #3350f7!important;
+}
+
+/*端口转发部分*/
+#seniorManagement_btn {
+    background: #4762FE!important;
+    color: white!important;
+}
+.noPortForward {
+    text-align: center;
+    color: #666;
+}
+.errNo_tip{
+	color: red;
+    margin: 0;
+	padding-left: 100px;
+}
+#DMZHostAddr .errNo_tip{
+    display: inline-block;
+	padding-left: 30px;
+}
+.port-forward-tooltip .tooltip-inner {
+    max-width: none;
+    white-space: nowrap;
+    text-align: left;
+    padding: 10px;
+    box-sizing: border-box;
+}
+
+/* DDNS部分 */
+.ddns_top {
+    display: flex;
+    align-items: center;
+}
+.ddns_top span {
+    margin-right: 10px;
+}
+.ddns_content_table {
+    padding: 0px 20px!important;
+}
+.ddns_content_table .head {
+    display: flex;
+    width: 100%;
+    padding: 20px 0 10px 0;
+    border-bottom: 1px solid #EEEEEE;
+}
+.ddns_content_table .head li {
+    width: 25%;
+    line-height: 20px;
+    font-weight: 600;
+    color: #999999;
+}
+.ddns_content_table .content .no-data {
+    width: 100%;
+    text-align: center;
+    height: 50px;
+    box-sizing: border-box;
+    color: #666;
+    line-height: 50px;
+}
+.ddns_content_table .content .have-data {
+    display: none;
+}
+.ddns_content_table .content .have-data .every-item {
+    display: flex;
+    align-items: flex-start;
+    margin: 20px 0;
+}
+.every-item >div {
+    width: 25%;
+    padding: 0 10px;
+    box-sizing: border-box;
+    line-height: 28px;
+    word-break: break-all;
+}
+.every-item .connect-model {
+    display: flex;
+    align-items: center;
+}
+.every-item .connect-model span:nth-child(2) {
+    margin: 0 6px;
+}
+.every-item .connect-model .success-status,
+.every-item .connect-model .error-status  {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+}
+.every-item .connect-model .success-status {
+    background: #22DC4B;
+}
+.every-item .connect-model .error-status {
+    background: #FB5954;
+}
+.cursor_pointer {
+    cursor: pointer;
+}
+.ddns_hand_btn,
+.remove_enter_btn,
+.add_editor_enter_btn {
+    width: 300px!important;
+    height: 46px;
+    font-size: 14px;
+    border-radius: 4px;
+    text-align: center;
+    line-height: 46px;
+    background: #4762FE;
+    color: #FFFFFF;
+    outline: none;
+    cursor: pointer;
+}
+.error_reason_dialog .proDialog_content {
+    padding: 0;
+}
+.error_reason_dialog .proDialog_content div {
+    margin: 20px 0 10px 0;
+    line-height: 24px;
+}
+.error_reason_dialog .proDialog_content p {
+    height: 50px;
+    margin: 0;
+    line-height: 50px;
+    border-bottom: 1px solid #eee;
+}
+.error_reason_dialog .proDialog_content p:last-child {
+    border-bottom: none;
+}
+.tip_enter_dialog .remove_enter_btn {
+    margin: 0 auto;
+}
+.tip_enter_dialog p {
+    text-align: center;
+    margin: 20px 0 40px 0;
+}
+.add_editor_ddns_content label {
+    width: 120px;
+    font-weight: 400;
+    margin: 0;
+    margin-right: 15px;
+    color: #666666;
+}
+.add_editor_ddns_content span {
+    margin-left: 5px;
+}
+.add_editor_ddns_content input {
+    width: 340px;
+    height: 46px;
+    padding: 0 12px;
+    box-sizing: border-box;
+    font-size: 14px;
+    border-radius: 4px;
+    border: 1px solid #DDDDDD;
+    background: #F3F6FA;
+    outline: none;
+    color: #333;
+}
+.add_editor_ddns_content >div input {
+    padding-right: 35px;
+}
+.add_editor_ddns_content >div .pwd_show_hide {
+    position: absolute;
+    top: 10px;
+    right: 52px;
+    cursor: pointer;
+}
+.add_editor_ddns_content .errNo_tip {
+    padding-left: 140px;
+}
+.add_editor_enter_btn {
+    justify-content: center;
+    width: 360px!important;
+    margin: 0 auto;
+}
+.add_editor_select {
+    height: 46px;
+    line-height: 46px;
+    background: #F3F6FA;
+}
+.add_editor_select>img {
+    top: 10px;
+}
+.add_editor_select .proDialog_content_ul {
+    top: 45px;
+}

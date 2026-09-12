@@ -1,0 +1,317 @@
+* {
+	margin: 0;
+	padding: 0;
+	box-sizing: border-box;
+}
+.white-space {
+    white-space:pre!important;
+}
+::-webkit-input-placeholder { /* WebKit, Blink, Edge */
+	color:    #ddd;
+	font-size: 13px;
+}
+:-moz-placeholder { /* Mozilla Firefox 4 to 18 */
+   color:    #ddd;
+   font-size: 13px;
+}
+::-moz-placeholder { /* Mozilla Firefox 19+ */
+   color:    #ddd;
+   font-size: 13px;
+}
+:-ms-input-placeholder { /* Internet Explorer 10-11 */
+   color:    #ddd;
+   font-size: 13px;
+}
+li{
+	list-style: none;
+	float: left;
+}
+.box{
+	padding: 44px 60px 44px 60px ;
+	color: #333333;
+}
+.title{
+	font-weight: 550;
+	font-size: 18px;
+	border-bottom: 1px solid #EEEEEE;
+}
+.title .text{
+	margin-bottom: 20px;
+	font-weight: 550;
+}
+.box .table{
+	margin-top: 20px;
+	padding: 20px 20px 10px 20px;
+	border: 1px solid  #DDDDDD;
+	font-size: 14px;
+}
+.table li{
+	width: 25%;
+}
+.table .width30{
+	width: 30%;
+	padding-right: 10px;
+	box-sizing: border-box;
+	white-space: pre;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.table .width20{
+	width: 20%;
+}
+.pop-ups .device-name{
+	width: 160px;
+}
+.pop-ups .ip-addr{
+	width: 160px;
+}
+.pop-ups .mac-addr{
+	width: 200px;
+}
+
+.box ul{
+	overflow: hidden;
+}
+.box .table .head{
+	border-bottom: 1px solid #EEEEEE;
+	padding-bottom: 10px;
+}
+.box .head{
+	color: #999999;
+}
+
+.head li{
+	font-weight: 550
+}
+.data{
+	margin-top:20px;
+}
+.empty {
+	width: 100%;
+	text-align: center;
+	padding: 5px 0;
+	box-sizing: border-box;
+}
+.add-btn{
+	display: inline-block;
+	text-align: center;
+	width: 300px;
+	height: 46px;
+	line-height: 46px;
+	border: 1px solid #4762FE;
+	border-radius: 4px;
+	background-color: #4762FE;
+	color: #fff;
+	cursor: pointer;
+}
+.increase-btn {
+	cursor: pointer;
+	display: inline-block;
+	text-align: center;
+	width: 175px;
+	height: 46px;
+	line-height: 46px;
+	background: #F4F6FA;
+	border: 1px solid #DDDDDD;
+	border-radius: 4px;
+	color: #666666;
+}
+.pop-ups{
+	width: 660px;
+	border: 1px solid #EEEEEE;
+	border-radius: 20px;
+	padding: 30px 40px;
+	background-color: #FFFFFF;
+	position: fixed;
+	top:0px;
+	left:50%;
+	transform: translateX(-50%);
+	z-index: 10;
+	display: none;
+}
+/*整体部分*/
+::-webkit-scrollbar {
+	width: 8px;
+}
+
+/*滑动轨道*/
+
+::-webkit-scrollbar-track {
+	border-radius: 0px;
+	background: none;
+}
+
+/*滑块*/
+
+::-webkit-scrollbar-thumb {
+	border-radius: 5px;
+	box-shadow: inset 0 0 6px rgba(0, 0, 0, .2);
+	background-color: rgba(255, 255, 255, .75)
+}
+
+/*滑块效果*/
+
+::-webkit-scrollbar-thumb:hover {
+	border-radius: 5px;
+	box-shadow: inset 0 0 6px rgba(0, 0, 0, .2);
+	background-color: rgba(85, 85, 85, 0.4);
+}
+
+.dhcp-data{
+	max-height: 290px;
+	overflow-y: auto;
+}
+
+/*整体部分*/
+::-webkit-scrollbar {
+	width: 3px;
+}
+
+/*滑动轨道*/
+
+::-webkit-scrollbar-track {
+	border-radius: 0px;
+	background: none;
+}
+
+/*滑块*/
+
+::-webkit-scrollbar-thumb {
+	border-radius: 5px;
+	box-shadow: inset 0 0 6px rgba(0, 0, 0, .2);
+	background-color: rgba(255, 255, 255, .75)
+}
+
+/*滑块效果*/
+
+::-webkit-scrollbar-thumb:hover {
+	border-radius: 5px;
+	box-shadow: inset 0 0 6px rgba(0, 0, 0, .2);
+	background-color: rgba(85, 85, 85, 0.4);
+}
+
+.dhcp-data li input{
+	height: 36px;
+	line-height: 36px;
+	text-align: center;
+	padding: 0 5px;
+	box-sizing: border-box;
+	border: 1px solid #DDDDDD;
+	border-radius: 4px;
+}
+.dhcp-data .device-name input{
+	width: 120px;
+}
+.dhcp-data .ip-addr input{
+	width: 40px;
+}
+.dhcp-data .mac-addr input{
+	width: 140px;
+}
+.dhcp-data .operate-device{
+	padding-left: 2px;
+}
+.dhcp-data input:focus{
+	border-color: #dddddd;
+  outline: 0;
+  -webkit-box-shadow: none;
+  box-shadow: none
+}
+.pop-ups .top{
+	overflow: hidden;
+	padding-bottom: 20px;
+	border-bottom: 1px solid #EEEEEE;
+	font-weight: 550;
+	font-size: 18px;
+}
+.pop-ups .left{
+	float: left;
+	color: #333333;
+}
+.pop-ups .right{
+	float: right;
+}
+.mask{
+	position: fixed;
+	top:0;
+	left: 0;
+	width: 100%;
+	height: 100%;
+	background-color: #000000;
+	opacity: 0.3;
+	z-index: 9;
+	display: none;
+}
+.off{
+	cursor: pointer;
+}
+.pop-ups .main{
+	color: #333333;
+	padding-top: 30px;
+	font-size: 14px;
+}
+.pop-ups .main .active{
+	padding: 30px 0 15px 0;
+}
+.pop-ups .main span {
+	display: inline-block;
+	width: 120px;
+}
+.pop-ups .main .ipt{
+	display: inline-block;
+	height: 46px;
+}
+.button{
+	width: 360px;
+	background-color: #4762FE;
+	border-color: #4762FE;
+	border-radius: 4px;
+	padding: 12px 16px;
+	font-size: 14px;
+	color: #fff;
+	border: 1px solid transparent;
+	 outline: none;
+}
+.remove,
+.check-all-btn,
+.edit {
+	display: inline-block;
+	cursor: pointer;
+	padding: 2px 6px;
+	background: #FFFFFF;
+	border: 1px solid #4762FE;
+	border-radius: 4px;
+	color:#4762FE;
+}
+.edit {
+	margin-right: 10px;
+}
+.errNo_tip{
+	color: red;
+	margin: 0;
+}
+.every-item-dhcp >ul {
+	display: flex;
+	align-items: center;
+}
+.choice-btn img {
+	width: 17px;
+}
+.operate-btn-list {
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+	margin-top: 20px;
+	padding-right: 25px;
+	box-sizing: border-box;
+}
+.check-all-btn-active {
+	background-color: #4762FE!important;
+	color: #fff!important;
+}
+#macAddr {
+	background-color: #f5f7fa;
+	border-color: #e4e7ed;
+	color: #c0c4cc;
+	cursor: not-allowed;
+}

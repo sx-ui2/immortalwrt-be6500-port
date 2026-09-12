@@ -1,0 +1,32 @@
+#!/bin/sh
+
+# Coalesce LuCI saves into one serialized wireless apply.  The QSDK ath12k
+# multi-radio driver can leak vdev/VIF state when netifd and per-radio
+# down/up sequences overlap.
+request=/tmp/be6500-wifi-apply.request
+lock=/tmp/be6500-wifi-apply.lock
+
+case "$1" in
+	network) printf '%s\n' network >> "$request" ;;
+	wifi|*) printf '%s\n' wifi >> "$request" ;;
+esac
+
+mkdir "$lock" 2>/dev/null || exit 0
+trap 'rmdir "$lock" 2>/dev/null' EXIT INT TERM
+
+while [ -s "$request" ]; do
+	sleep 2
+	mode=wifi
+	grep -qx network "$request" && mode=network
+	: > "$request"
+
+	if [ "$mode" = network ]; then
+		ubus call network reload >/dev/null 2>&1
+		/etc/init.d/dnsmasq restart >/dev/null 2>&1
+		/etc/init.d/firewall reload >/dev/null 2>&1
+	else
+		wifi reload >/dev/null 2>&1
+	fi
+done
+
+rm -f "$request"

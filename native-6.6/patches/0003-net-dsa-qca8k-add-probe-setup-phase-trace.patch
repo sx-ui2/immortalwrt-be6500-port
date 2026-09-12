@@ -1,0 +1,165 @@
+From: Codex <codex@local>
+Subject: [PATCH] net: dsa: qca8k: trace QCA8386 probe and setup phases
+
+This is a RAM-test-only diagnostic patch. Emit a message immediately
+before and after the QCA8386 ID read, DSA registration, and each major
+qca8k setup phase. Do not carry this instrumentation into production.
+---
+--- a/drivers/net/dsa/qca/qca8k-8xxx.c
++++ b/drivers/net/dsa/qca/qca8k-8xxx.c
+@@ -1937,6 +1937,8 @@
+ 	struct dsa_port *dp;
+ 	int cpu_port, ret;
+ 	u32 mask;
++
++	dev_info(priv->dev, "trace setup: enter\n");
+ 
+ 	cpu_port = qca8k_find_cpu_port(ds);
+ 	if (cpu_port < 0) {
+@@ -1944,30 +1946,37 @@
+ 		return cpu_port;
+ 	}
+ 
++	dev_info(priv->dev, "trace setup: CPU port %d found; parse port config\n", cpu_port);
+ 	/* Parse CPU port config to be later used in phy_link mac_config */
+ 	ret = qca8k_parse_port_config(priv);
+ 	if (ret)
+ 		return ret;
+ 
++	dev_info(priv->dev, "trace setup: configure internal MDIO bus\n");
+ 	ret = qca8k_setup_mdio_bus(priv);
+ 	if (ret)
+ 		return ret;
+ 
++	dev_info(priv->dev, "trace setup: configure PWS register\n");
+ 	ret = qca8k_setup_of_pws_reg(priv);
+ 	if (ret)
+ 		return ret;
+ 
++	dev_info(priv->dev, "trace setup: configure MAC power select\n");
+ 	ret = qca8k_setup_mac_pwr_sel(priv);
+ 	if (ret)
+ 		return ret;
+ 
++	dev_info(priv->dev, "trace setup: configure LED control\n");
+ 	ret = qca8k_setup_led_ctrl(priv);
+ 	if (ret)
+ 		return ret;
+ 
++	dev_info(priv->dev, "trace setup: configure PCS\n");
+ 	qca8k_setup_pcs(priv, &priv->pcs_port_0, 0);
+ 	qca8k_setup_pcs(priv, &priv->pcs_port_6, 6);
+ 
++	dev_info(priv->dev, "trace setup: disable MAC06 exchange\n");
+ 	/* Make sure MAC06 is disabled */
+ 	ret = regmap_clear_bits(priv->regmap, QCA8K_REG_PORT0_PAD_CTRL,
+ 				QCA8K_PORT0_PAD_MAC06_EXCHANGE_EN);
+@@ -1976,6 +1985,7 @@
+ 		return ret;
+ 	}
+ 
++	dev_info(priv->dev, "trace setup: enable CPU port\n");
+ 	/* Enable CPU Port */
+ 	ret = regmap_set_bits(priv->regmap, QCA8K_REG_GLOBAL_FW_CTRL0,
+ 			      QCA8K_GLOBAL_FW_CTRL0_CPU_PORT_EN);
+@@ -1984,11 +1994,13 @@
+ 		return ret;
+ 	}
+ 
++	dev_info(priv->dev, "trace setup: initialize MIB\n");
+ 	/* Enable MIB counters */
+ 	ret = qca8k_mib_init(priv);
+ 	if (ret)
+ 		dev_warn(priv->dev, "mib init failed");
+ 
++	dev_info(priv->dev, "trace setup: clear forwarding membership\n");
+ 	/* Initial setup of all ports */
+ 	dsa_switch_for_each_port(dp, ds) {
+ 		/* Disable forwarding by default on all ports */
+@@ -1998,10 +2010,12 @@
+ 			return ret;
+ 	}
+ 
++	dev_info(priv->dev, "trace setup: disable user-port MACs\n");
+ 	/* Disable MAC by default on all user ports */
+ 	dsa_switch_for_each_user_port(dp, ds)
+ 		qca8k_port_set_status(priv, dp->index, 0);
+ 
++	dev_info(priv->dev, "trace setup: enable CPU-port QCA headers\n");
+ 	/* Enable QCA header mode on all cpu ports */
+ 	dsa_switch_for_each_cpu_port(dp, ds) {
+ 		ret = qca8k_write(priv, QCA8K_REG_PORT_HDR_CTRL(dp->index),
+@@ -2013,6 +2027,7 @@
+ 		}
+ 	}
+ 
++	dev_info(priv->dev, "trace setup: program unknown-frame forwarding\n");
+ 	/* Forward all unknown frames to CPU port for Linux processing
+ 	 * Notice that in multi-cpu config only one port should be set
+ 	 * for igmp, unknown, multicast and broadcast packet
+@@ -2025,12 +2040,14 @@
+ 	if (ret)
+ 		return ret;
+ 
++	dev_info(priv->dev, "trace setup: connect CPU port to user ports\n");
+ 	/* CPU port gets connected to all user ports of the switch */
+ 	ret = qca8k_rmw(priv, QCA8K_PORT_LOOKUP_CTRL(cpu_port),
+ 			QCA8K_PORT_LOOKUP_MEMBER, dsa_user_ports(ds));
+ 	if (ret)
+ 		return ret;
+ 
++	dev_info(priv->dev, "trace setup: configure user-port VLAN membership\n");
+ 	/* Setup connection between CPU port & user ports
+ 	 * Individual user ports get connected to CPU port only
+ 	 */
+@@ -2059,6 +2076,7 @@
+ 			return ret;
+ 	}
+ 
++	dev_info(priv->dev, "trace setup: configure egress mode and learning\n");
+ 	dsa_switch_for_each_port(dp, ds) {
+ 		/* For port based vlans to work we need to set the
+ 		 * default egress vlan mode as untouched
+@@ -2096,6 +2114,7 @@
+ 			  mask);
+ 	}
+ 
++	dev_info(priv->dev, "trace setup: configure MTU and flush FDB\n");
+ 	/* Setup our port MTUs to match power on defaults */
+ 	ret = qca8k_write(priv, QCA8K_MAX_FRAME_SIZE, QCA8K_MAX_MTU + ETH_HLEN + ETH_FCS_LEN);
+ 	if (ret)
+@@ -2111,6 +2130,8 @@
+ 	/* Set max number of LAGs supported */
+ 	ds->num_lag_ids = QCA8K_NUM_LAGS;
+ 
++	dev_info(priv->dev, "trace setup: complete\n");
++
+ 	return 0;
+ }
+ 
+@@ -2285,9 +2306,12 @@
+ 	}
+ 
+ 	/* Check the detected switch id */
++	dev_info(priv->dev, "trace probe: before switch ID read\n");
+ 	ret = qca8k_read_switch_id(priv);
+ 	if (ret)
+ 		return ret;
++	dev_info(priv->dev, "trace probe: switch ID %x revision %x read successfully\n",
++		 priv->switch_id, priv->switch_revision);
+ 
+ 	priv->ds = devm_kzalloc(&mdiodev->dev, sizeof(*priv->ds), GFP_KERNEL);
+ 	if (!priv->ds)
+@@ -2306,7 +2330,11 @@
+ 	mutex_init(&priv->reg_mutex);
+ 	dev_set_drvdata(&mdiodev->dev, priv);
+ 
+-	return dsa_register_switch(priv->ds);
++	dev_info(priv->dev, "trace probe: before DSA registration\n");
++	ret = dsa_register_switch(priv->ds);
++	dev_info(priv->dev, "trace probe: after DSA registration, result %d\n", ret);
++
++	return ret;
+ }
+ 
+ static void

@@ -1,0 +1,53 @@
+#!/bin/sh
+
+# RAM-only diagnostic recovery for the JDCloud BE6500 DSA preserve-state image.
+# The initial bridge deliberately uses raw eth1 so SSH is available before the
+# MDIO module is inserted.  qca8k then clears the inherited hardware forwarding
+# membership while registering its DSA ports.  As soon as all three user ports
+# exist, move br-lan to those ports so the management path follows DSA.
+
+[ -e /proc/device-tree/be6500,dsa-preserve ] || exit 0
+
+case "${INTERFACE:-${DEVICENAME:-}}" in
+	lan1|lan2|lan3) ;;
+	*) exit 0 ;;
+esac
+
+[ -e /sys/class/net/lan1 ] || exit 0
+[ -e /sys/class/net/lan2 ] || exit 0
+[ -e /sys/class/net/lan3 ] || exit 0
+[ ! -e /tmp/be6500-dsa-bridge-migrated ] || exit 0
+
+mkdir /tmp/be6500-dsa-bridge-migrate.lock 2>/dev/null || exit 0
+
+if [ -e /tmp/be6500-dsa-bridge-migrated ]; then
+	rmdir /tmp/be6500-dsa-bridge-migrate.lock
+	exit 0
+fi
+
+{
+	echo "action=${ACTION:-unknown} interface=${INTERFACE:-${DEVICENAME:-unknown}}"
+	date
+} > /tmp/be6500-dsa-bridge-migrate.log
+
+uci -q delete network.@device[0].ports
+uci add_list network.@device[0].ports='lan1'
+uci add_list network.@device[0].ports='lan2'
+uci add_list network.@device[0].ports='lan3'
+uci commit network
+
+# Restore the management path immediately; netifd reload below reconciles the
+# same topology after the direct bridge move.
+ip link set eth1 nomaster 2>>/tmp/be6500-dsa-bridge-migrate.log || true
+ip link set eth1 up 2>>/tmp/be6500-dsa-bridge-migrate.log || true
+for port in lan1 lan2 lan3; do
+	ip link set "$port" up 2>>/tmp/be6500-dsa-bridge-migrate.log || true
+	ip link set "$port" master br-lan 2>>/tmp/be6500-dsa-bridge-migrate.log || true
+done
+ip link set br-lan up 2>>/tmp/be6500-dsa-bridge-migrate.log || true
+
+touch /tmp/be6500-dsa-bridge-migrated
+logger -t be6500-dsa "migrated br-lan from eth1 to lan1 lan2 lan3"
+ubus call network reload >>/tmp/be6500-dsa-bridge-migrate.log 2>&1 || true
+
+rmdir /tmp/be6500-dsa-bridge-migrate.lock

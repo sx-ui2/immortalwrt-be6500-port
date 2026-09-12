@@ -1,0 +1,59 @@
+{
+  "legacy_driver_name": "QCN9224_PCI1",
+  "openwrt_board_name": "jdcloud,be6500",
+  "qsdk_board_compatible": "qcom,ipq5332-ap-mi01.6",
+  "legacy_dt_compatible": "qcom,cnss-qcn9224",
+  "legacy_dt_board_id": "0x02",
+  "observed_pci_vendor": "0x17cb",
+  "observed_pci_device": "0x1109",
+  "observed_pci_revision": "0x01",
+  "runtime_target_board_id": "0xff",
+  "legacy_bdf_selector": "0x1008",
+  "legacy_bdf_file": "qcn9224/bdwlan.b1008",
+  "legacy_bdf_size": 100352,
+  "legacy_bdf_sha256": "dea9f3a29bbf1e3488620bc88c3f99a756e36c6365cb6238f89cdb54376b1aac",
+  "legacy_calibration_file": "qcn9224/caldata_2.bin",
+  "legacy_calibration_size": 184320,
+  "legacy_calibration_sha256": "b0d4ac0ec3c938f512a6cba8b364ace7c22689b7d66132d0a29283ac3888276f",
+  "legacy_calibration_art_partition": "0:ART",
+  "legacy_calibration_art_emmc_partition": 17,
+  "legacy_calibration_art_offset": 362496,
+  "legacy_calibration_extraction_verified": true,
+  "legacy_firmware_file": "qcn9224/amss_dualmac.bin",
+  "legacy_firmware_size": 7585792,
+  "legacy_firmware_sha256": "ae4cb182e302aaed83ab3467896b7a25fa69097f9a172ff3d9891703d82e622f",
+  "legacy_qwrt_dual_5ghz_runtime_verified": true,
+  "legacy_external_pdevs": [
+    {
+      "interface": "wifi1",
+      "phy_id": 0,
+      "lo_5ghz_mhz": 4910,
+      "hi_5ghz_mhz": 5330
+    },
+    {
+      "interface": "wifi2",
+      "phy_id": 1,
+      "lo_5ghz_mhz": 5490,
+      "hi_5ghz_mhz": 5835
+    }
+  ],
+  "ath12k_driver_directory": "ath12k/QCN92XX/hw1.0",
+  "ath12k_api1_board_file": "board.bin",
+  "ath12k_api1_fallback_source_verified": true,
+  "ath12k_pci_device_name": "0001:01:00.0",
+  "ath12k_calibration_request": "ath12k/QCN92XX/hw1.0/cal-pci-0001:01:00.0.bin",
+  "ath12k_calibration_fallback": "caldata.bin",
+  "ath12k_dualmac_mask": "0x1000",
+  "ath12k_dualmac_board_id_candidate": "0x1008",
+  "ath12k_qmi_board_id_precedence_source_verified": true,
+  "ath12k_qcn9274_hw20_max_radios": 2,
+  "ath12k_qcn9274_hw20_default_num_link": 0,
+  "ath12k_expected_external_num_phy": 2,
+  "ath12k_phy_capability_runtime_verified": false,
+  "selected_driver_pci_ids": [
+    "0x1109"
+  ],
+  "ath12k_board_data_verified": false,
+  "dual_mac_mlo_verified": false,
+  "evidence_source": "../../backups/jdcloud-be6500-pre-newkernel-20260830/be6500-hardware-probe.txt"
+}

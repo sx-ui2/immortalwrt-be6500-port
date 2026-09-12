@@ -1,0 +1,26 @@
+#!/bin/sh
+
+. /lib/functions.sh
+. /lib/functions/caldata.sh
+
+case "$FIRMWARE" in
+ath12k/IPQ5332/hw1.0/cal-ahb-*.bin|\
+ath12k/IPQ5332/hw1.0/caldata.bin|\
+ath12k/IPQ5332/hw1.0/caldata_*.bin)
+	case "$(board_name)" in
+	jdcloud,be6500)
+		# QWRT ap-mi01.6 extracts the integrated IPQ5332 calibration
+		# from 0:ART offset 0x1000. This is the missing 2.4 GHz path.
+		caldata_extract_mmc "0:ART" 0x1000 0x20000
+		;;
+	esac
+	;;
+ath12k/QCN92XX/hw1.0/cal-pci-0001:01:00.0.bin)
+	case "$(board_name)" in
+	jdcloud,be6500)
+		# QWRT ap-mi01.6 uses caldata_2.bin from 0:ART.
+		caldata_extract_mmc "0:ART" 0x58800 0x2d000
+		;;
+	esac
+	;;
+esac

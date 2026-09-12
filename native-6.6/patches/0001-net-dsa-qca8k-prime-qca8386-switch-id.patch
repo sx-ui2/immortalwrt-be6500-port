@@ -1,0 +1,39 @@
+From: Codex <codex@local>
+Subject: [PATCH] net: dsa: qca8k: prime QCA8386 switch id before MDIO probe
+
+QCA8386 uses the MHT register-address encoding in qca8k_read_mii() and
+qca8k_write_mii().  Those helpers currently select that encoding from
+priv->switch_id, but qca8k_read_switch_id() only assigns switch_id after
+the first register read has succeeded.  Consequently the initial mask
+control read for QCA8386 is issued with the legacy qca8k encoding.
+
+Prime switch_id from the compatible's match data for QCA8386 before the
+validation read.  qca8k_read_switch_id() still reads the hardware ID,
+checks it against the match data, and assigns the detected value, so the
+device validation is not weakened.  Leave all older qca8k variants on
+their existing probe path.
+
+---
+ drivers/net/dsa/qca/qca8k-8xxx.c | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/drivers/net/dsa/qca/qca8k-8xxx.c b/drivers/net/dsa/qca/qca8k-8xxx.c
+--- a/drivers/net/dsa/qca/qca8k-8xxx.c
++++ b/drivers/net/dsa/qca/qca8k-8xxx.c
+@@ -2275,6 +2275,14 @@ static int qca8k_sw_probe(struct mdio_device *mdiodev)
+ 	}
+ 
+ 	priv->mdio_cache.page = 0xffff;
++
++	/* QCA8386 needs MHT addressing for the very first register read.
++	 * The hardware ID is still read and validated below.
++	 */
++	if (priv->info && priv->info->id == QCA8K_ID_QCA8386) {
++		priv->switch_id = priv->info->id;
++		dev_info(priv->dev, "using QCA8386 MHT addressing for ID probe\n");
++	}
+ 
+ 	/* Check the detected switch id */
+ 	ret = qca8k_read_switch_id(priv);
+-- 
+2.50.1

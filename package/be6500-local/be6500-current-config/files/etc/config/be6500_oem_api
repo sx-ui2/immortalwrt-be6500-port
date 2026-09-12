@@ -1,0 +1,5 @@
+
+config backend 'main'
+	option enabled '1'
+	option allow_native_writes '0'
+

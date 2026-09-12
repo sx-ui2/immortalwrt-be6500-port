@@ -1,0 +1,71 @@
+#!/bin/sh
+
+# QCN9224: 0 = single 4-chain 5 GHz PHY (BDF 0x2),
+#          1 = split dual 2-chain 5 GHz MACs (BDF 0x1008).
+# This personality is selected before ath12k probes and requires a reboot.
+mode="$1"
+case "$mode" in 0) target_bdf=0x2 ;; 1) target_bdf=0x1008 ;; *) echo "invalid mode"; exit 2 ;; esac
+
+lockdir=/tmp/be6500-wifi-mode.lock
+mkdir "$lockdir" 2>/dev/null || { echo "wireless mode switch is already running"; exit 3; }
+trap 'rmdir "$lockdir" 2>/dev/null' EXIT INT TERM
+for radio in radio0 radio1 radio2; do
+	uci -q get wireless.$radio >/dev/null || { echo "$radio is unavailable"; exit 4; }
+done
+
+cmdline_bdf="$(sed -n 's/.*cnss2\.bdf_pci1=\([^ ]*\).*/\1/p' /proc/cmdline)"
+[ -n "$cmdline_bdf" ] || cmdline_bdf=0x2
+old_bootargs="$(fw_printenv -n bootargs 2>/dev/null)" || { echo "boot mode storage is unavailable"; exit 5; }
+new_bootargs="$(printf '%s\n' "$old_bootargs" | sed 's/[[:space:]]*cnss2\.bdf_pci1=[^[:space:]]*//g; s/[[:space:]][[:space:]]*/ /g; s/^ //; s/ $//')"
+new_bootargs="$new_bootargs cnss2.bdf_pci1=$target_bdf"
+
+stamp="$(date +%s)"; backup="/etc/be6500-backup/wifi-mode-$stamp"
+mkdir -p "$backup" /etc/jdwifi || exit 6
+cp /etc/config/wireless "$backup/wireless" || exit 6
+cp /etc/config/system "$backup/system" 2>/dev/null || true
+printf '%s\n' "$old_bootargs" >"$backup/bootargs"
+for ini in /ini/internal/global_i.ini /ini/internal/global.ini; do
+	[ ! -f "$ini" ] || cp "$ini" "$backup/$(basename "$ini")"
+done
+rollback() {
+	cp "$backup/wireless" /etc/config/wireless
+	[ ! -f "$backup/system" ] || cp "$backup/system" /etc/config/system
+	fw_setenv bootargs "$old_bootargs" >/dev/null 2>&1 || true
+}
+
+uci -q set wireless.main='be6500-profile'
+uci -q set wireless.main.freq_mode="$mode"
+uci -q set system.@system[0].freq_mode="$mode"
+uci -q set wireless.radio0.disabled='0'
+uci -q set wireless.radio1.disabled='0'
+if [ "$mode" = 0 ]; then
+	uci -q set wireless.radio2.disabled='1'; rm -f /etc/jdwifi/split; touch /etc/jdwifi/single
+else
+	uci -q set wireless.radio2.disabled='0'; rm -f /etc/jdwifi/single; touch /etc/jdwifi/split
+fi
+
+channel1="$(uci -q get wireless.radio1.channel)"; channel2="$(uci -q get wireless.radio2.channel)"
+if [ "$mode" = 1 ]; then
+	case "$channel1" in 0|auto|36|40|44|48|52|56|60|64) ;; *) uci -q set wireless.radio1.channel='auto' ;; esac
+	case "$(uci -q get wireless.radio2.htmode)" in
+		*160) case "$channel2" in 0|auto|100|104|108|112|116|120|124|128) ;; *) uci -q set wireless.radio2.channel='auto' ;; esac ;;
+		*) case "$channel2" in 0|auto|100|104|108|112|116|120|124|128|132|136|140|144|149|153|157|161|165) ;; *) uci -q set wireless.radio2.channel='auto' ;; esac ;;
+	esac
+else
+	case "$(uci -q get wireless.radio1.htmode)" in
+		*160) case "$channel1" in 0|auto|36|40|44|48|52|56|60|64|100|104|108|112|116|120|124|128) ;; *) uci -q set wireless.radio1.channel='auto' ;; esac ;;
+		*) case "$channel1" in 0|auto|36|40|44|48|52|56|60|64|100|104|108|112|116|120|124|128|132|136|140|144|149|153|157|161|165) ;; *) uci -q set wireless.radio1.channel='auto' ;; esac ;;
+	esac
+fi
+
+uci -q commit wireless && uci -q commit system || { rollback; echo "failed to save wireless mode"; exit 7; }
+if [ "$old_bootargs" != "$new_bootargs" ]; then
+	fw_setenv bootargs "$new_bootargs" >/dev/null 2>&1 || { rollback; echo "failed to save QCN9224 boot mode"; exit 8; }
+	[ "$(fw_printenv -n bootargs 2>/dev/null)" = "$new_bootargs" ] || { rollback; echo "QCN9224 boot mode verification failed"; exit 9; }
+fi
+if [ "$cmdline_bdf" != "$target_bdf" ]; then
+	echo "reboot_required"
+else
+	( sleep 1; wifi reload >/tmp/be6500-switch-wifi.log 2>&1 ) &
+	echo "wireless_restart"
+fi

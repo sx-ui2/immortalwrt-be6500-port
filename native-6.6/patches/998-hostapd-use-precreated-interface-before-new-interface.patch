@@ -1,0 +1,36 @@
+--- a/src/drivers/driver_nl80211.c
++++ b/src/drivers/driver_nl80211.c
+@@ -8327,6 +8327,33 @@ int nl80211_create_iface(struct wpa_driver_nl80211_data *drv,
+ 			 void *arg, int use_existing, int ppe_vp_type)
+ {
+ 	int ret;
++
++	/*
++	 * QSDK multi-radio devices may need an AP netdev to be created by
++	 * netifd first so that the radio/pdev mask is attached before hostapd
++	 * takes ownership.  Do not issue NL80211_CMD_NEW_INTERFACE for an
++	 * interface that the caller explicitly allowed us to reuse.  The old
++	 * create-first path generated a misleading -ENFILE and briefly drove
++	 * the ath12k VIF through an invalid state on every radio start.
++	 */
++	if (use_existing && if_nametoindex(ifname)) {
++		wpa_printf(MSG_DEBUG, "nl80211: Use pre-created interface %s",
++			   ifname);
++		if (addr && iftype != NL80211_IFTYPE_MONITOR &&
++		    linux_set_ifhwaddr(drv->global->ioctl_sock, ifname,
++				       addr) < 0 &&
++		    (linux_set_iface_flags(drv->global->ioctl_sock,
++					   ifname, 0) < 0 ||
++		     linux_set_ifhwaddr(drv->global->ioctl_sock, ifname,
++					addr) < 0 ||
++		     linux_set_iface_flags(drv->global->ioctl_sock,
++					   ifname, 1) < 0))
++			return -1;
++		nl80211_vendor_cmd_if_offload_type((void *)drv, OUI_QCA,
++			QCA_NL80211_VENDOR_SUBCMD_SET_WIFI_CONFIGURATION,
++			NULL, 0, 0, NULL, ifname, ppe_vp_type, false);
++		return -ENFILE;
++	}
+ 	ret = nl80211_create_iface_once(drv, ifname, iftype, addr, wds, handler,
+ 					arg);
+ 

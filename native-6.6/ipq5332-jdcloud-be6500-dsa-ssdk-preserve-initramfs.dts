@@ -1,0 +1,18 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR BSD-3-Clause)
+/*
+ * RAM-only QCA8386 DSA + SSDK-MHT diagnostic without late reset/fixups.
+ *
+ * The QSDK reference topology keeps both the qca8k DSA node and the SSDK MHT
+ * node enabled.  Unlike the full reference profile, this variant preserves
+ * the working boot-loader switch state by omitting GPIO reset, MDIO clock
+ * fixup, and PHY/UNIPHY address rewrite properties.  It is never flashable.
+ */
+#include "ipq5332-jdcloud-be6500-dsa-preserve-initramfs.dts"
+
+/ {
+	be6500,dsa-ssdk-preserve;
+};
+
+&jd_mht {
+	status = "okay";
+};

@@ -1,0 +1,28 @@
+# Build outputs and generated artifacts
+bin/
+build-output/
+output/
+outputs/
+sysupgrade-jdcloud_be6500/
+*.bin
+*.img
+*.tar.gz
+.DS_Store
+
+# Device-specific state and recovery material (never publish)
+current-config/
+device-backups/
+router-backups/
+build-vm-staging/
+
+# Generated diagnostics and historical binary images
+native-6.6/artifacts/
+native-6.6/reference/
+native-6.6/firmware-snapshots/
+*.itb
+*.ipk
+*.ko
+*.dtb
+*.log
+__pycache__/
+*.pyc

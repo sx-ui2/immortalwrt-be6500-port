@@ -1,0 +1,14 @@
+#!/bin/sh
+
+# Short press of the factory JOY/WPS key toggles the RGB indicator.
+[ "$ACTION" = pressed ] || exit 0
+
+enabled="$(uci -q get be6500_oem.led.enabled)"
+if [ "$enabled" = 1 ]; then
+	uci set be6500_oem.led.enabled=0
+else
+	uci set be6500_oem.led.enabled=1
+fi
+uci commit be6500_oem
+/usr/libexec/be6500-led-control apply >/dev/null 2>&1
+exit 0

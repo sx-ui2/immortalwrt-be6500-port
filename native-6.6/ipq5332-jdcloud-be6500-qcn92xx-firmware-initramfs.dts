@@ -1,0 +1,94 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR BSD-3-Clause)
+/*
+ * JDCloud ZhaoYun BE6500 — external QCN92xx firmware bootstrap probe.
+ *
+ * This is the first stage after the boot-validated PCIe enumeration probe.
+ * It keeps the integrated IPQ5332 radio and all unrelated consumers disabled,
+ * then gives the external 17cb:1109 endpoint only the memory and board data
+ * contract proven by the JDCloud/QWRT tree.  The image is RAM-test-only.
+ */
+#include "ipq5332-jdcloud-be6500-dsa-preserve-initramfs.dts"
+
+/ {
+	model = "JDCloud ZhaoYun BE6500 (6.6 pstore fallback v29)";
+	be6500,port-stage = "qcn92xx-firmware-pstore-fallback-v29";
+
+	reserved-memory {
+		/* Keep the same top-of-RAM panic log in both the test image and
+		 * its network-capable fallback.  The fallback can therefore expose
+		 * the previous boot's panic through /sys/fs/pstore.
+		 */
+		jd_ramoops: ramoops@7fe00000 {
+			compatible = "ramoops";
+			reg = <0x0 0x7fe00000 0x0 0x200000>;
+			record-size = <0x100000>;
+			console-size = <0x100000>;
+		};
+
+		/* The QSDK MHI controller allocates this pool dynamically. */
+		jd_mhi_region1: dma-pool-qcn92xx {
+			compatible = "shared-dma-pool";
+			no-map;
+			size = <0x0 0x900000>;
+			alignment = <0x0 0x1000>;
+			status = "okay";
+		};
+	};
+};
+
+&pcie1_phy_x2 {
+	status = "okay";
+};
+
+&pcie1 {
+	pinctrl-0 = <&jd_pcie1_firmware_state>;
+	pinctrl-names = "default";
+	linux,pci-domain = <1>;
+	num-lanes = <2>;
+	perst-gpios = <&tlmm 47 GPIO_ACTIVE_LOW>;
+	status = "okay";
+
+	pcie1_rp {
+		reg = <0 0 0 0 0>;
+		#address-cells = <3>;
+		#size-cells = <2>;
+
+		jd_qcn92xx_mhi: qcom,mhi@1 {
+			reg = <0 0 0 0 0>;
+			qti,disable-rddm-prealloc;
+			qti,rddm-seg-len = <0x1000>;
+			qrtr_node_id = <0x31>;
+			memory-region = <&jd_qcn9224_pcie1>,
+					<&jd_mhi_region1>,
+					<&jd_mlo_global_mem>;
+			memory-region-names = "host-ddr-mem", "mhi-region",
+					      "mlo-global-mem";
+
+			/* 0x1000 selects the dual-MAC firmware.  The low byte keeps
+			 * the factory b1008 board selection used by the working image.
+			 */
+			qcom,board_id = <0x1008>;
+			qcom,caldata_offset = <0x58800>;
+			qcom,caldb_offset = <0x1200000>;
+			qcom,caldb_size = <0x800000>;
+			status = "okay";
+		};
+	};
+};
+
+&tlmm {
+	jd_pcie1_firmware_state: pcie1-firmware-state {
+		pins = "gpio47";
+		function = "gpio";
+		drive-strength = <8>;
+		bias-pull-up;
+	};
+};
+
+/* This stage probes only the external PCI radio. */
+&wifi0 { status = "disabled"; };
+&wifi1 { status = "disabled"; };
+&wifi2 { status = "disabled"; };
+&wifi3 { status = "disabled"; };
+&wifi4 { status = "disabled"; };
+&wifi5 { status = "disabled"; };

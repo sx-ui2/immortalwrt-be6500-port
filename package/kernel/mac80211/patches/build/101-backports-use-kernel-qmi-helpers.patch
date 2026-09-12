@@ -1,0 +1,29 @@
+--- a/Kconfig.sources
++++ b/Kconfig.sources
+@@ -4,7 +4,6 @@ source "$BACKPORT_DIR/compat/Kconfig"
+ # these are copied from the kernel
+ source "$BACKPORT_DIR/net/wireless/Kconfig"
+ source "$BACKPORT_DIR/net/mac80211/Kconfig"
+-source "$BACKPORT_DIR/drivers/soc/qcom/Kconfig"
+ source "$BACKPORT_DIR/drivers/net/wireless/Kconfig"
+ source "$BACKPORT_DIR/drivers/net/usb/Kconfig"
+ 
+--- a/Makefile.kernel
++++ b/Makefile.kernel
+@@ -38,7 +38,6 @@ obj-y += compat/
+ 
+ obj-$(CPTCFG_CFG80211) += net/wireless/
+ obj-$(CPTCFG_MAC80211) += net/mac80211/
+-obj-$(CPTCFG_QCOM_QMI_HELPERS) += drivers/soc/qcom/
+ obj-$(CPTCFG_WLAN) += drivers/net/wireless/
+ obj-$(CPTCFG_USB_NET_RNDIS_WLAN) += drivers/net/usb/
+ 
+--- a/local-symbols
++++ b/local-symbols
+@@ -72,7 +72,6 @@ QCOM_PDR_MSG=
+ QCOM_PMIC_PDCHARGER_ULOG=
+ QCOM_PMIC_GLINK=
+-QCOM_QMI_HELPERS=
+ QCOM_RAMP_CTRL=
+ QCOM_RMTFS_MEM=
+ QCOM_RPM_MASTER_STATS=

@@ -1,0 +1,46 @@
+config interface 'loopback'
+	option device 'lo'
+	option proto 'static'
+	option ipaddr '127.0.0.1'
+	option netmask '255.0.0.0'
+
+config globals 'globals'
+	option ula_prefix 'fdca:6500:6500::/48'
+
+# Each possible CPU-side data path gets its own subnet.  This avoids Linux
+# choosing the wrong egress interface while we identify the BE6500 port map.
+config interface 'probe_eth0'
+	option device 'eth0'
+	option proto 'static'
+	option ipaddr '192.168.11.1'
+	option netmask '255.255.255.0'
+
+config interface 'probe_eth1'
+	option device 'eth1'
+	option proto 'static'
+	option ipaddr '192.168.12.1'
+	option netmask '255.255.255.0'
+
+config device 'probe_eth1_vlan1'
+	option name 'eth1.1'
+	option type '8021q'
+	option ifname 'eth1'
+	option vid '1'
+
+config interface 'probe_eth1_vlan1_if'
+	option device 'eth1.1'
+	option proto 'static'
+	option ipaddr '192.168.13.1'
+	option netmask '255.255.255.0'
+
+config device 'probe_eth0_vlan1'
+	option name 'eth0.1'
+	option type '8021q'
+	option ifname 'eth0'
+	option vid '1'
+
+config interface 'probe_eth0_vlan1_if'
+	option device 'eth0.1'
+	option proto 'static'
+	option ipaddr '192.168.14.1'
+	option netmask '255.255.255.0'

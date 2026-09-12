@@ -1,0 +1,35 @@
+From: Codex <codex@local>
+Subject: [PATCH] net: dsa: qca8k: skip QCA8386 MIB init in RAM trace build
+
+The v12 RAM-only trace reaches qca8k_mib_init() after successfully reading
+QCA8386 switch ID 0x17 and entering DSA setup.  The first MIB operation then
+stops kernel/network progress before the next phase marker is emitted.
+
+QCA8386 is not register-compatible with the older QCA8K MIB block at this
+point in the bring-up.  Skip MIB initialization only for QCA8386 so the
+diagnostic build can trace the remaining setup phases.  This is deliberately
+not a production fix; statistics remain unavailable until the QCA8386 MIB
+register layout and access sequence are implemented correctly.
+---
+--- a/drivers/net/dsa/qca/qca8k-8xxx.c
++++ b/drivers/net/dsa/qca/qca8k-8xxx.c
+@@ -1995,10 +1995,15 @@ qca8k_setup(struct dsa_switch *ds)
+ 	}
+ 
+ 	dev_info(priv->dev, "trace setup: initialize MIB\n");
+-	/* Enable MIB counters */
+-	ret = qca8k_mib_init(priv);
+-	if (ret)
+-		dev_warn(priv->dev, "mib init failed");
++	if (priv->switch_id == QCA8K_ID_QCA8386) {
++		dev_warn(priv->dev,
++			 "trace setup: skip QCA8386 MIB init after v12 runtime hang\n");
++	} else {
++		/* Enable MIB counters */
++		ret = qca8k_mib_init(priv);
++		if (ret)
++			dev_warn(priv->dev, "mib init failed");
++	}
+ 
+ 	dev_info(priv->dev, "trace setup: clear forwarding membership\n");
+ 	/* Initial setup of all ports */

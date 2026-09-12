@@ -1,0 +1,14 @@
+#!/bin/sh
+/usr/libexec/be6500-patch-luci-wireless
+[ -x /usr/libexec/be6500-patch-luci-firewall ] && /usr/libexec/be6500-patch-luci-firewall
+if [ -d /usr/share/be6500-luci-overrides/status/include ]; then
+	mkdir -p /www/luci-static/resources/view/status/include
+	cp -f /usr/share/be6500-luci-overrides/status/include/*.js /www/luci-static/resources/view/status/include/
+fi
+# ipq53xx is a local BE6500 subtarget and ImmortalWrt does not publish a
+# matching target package index. Keep architecture-independent feeds usable
+# without making every opkg update fail on the permanently absent core URL.
+if [ -f /etc/opkg/distfeeds.conf ]; then
+	sed -i '/^[[:space:]]*src\/gz[[:space:]]\+immortalwrt_core[[:space:]].*\/targets\/qualcommax\/ipq53xx\/packages/s/^/# unavailable custom ipq53xx feed: /' /etc/opkg/distfeeds.conf
+fi
+exit 0

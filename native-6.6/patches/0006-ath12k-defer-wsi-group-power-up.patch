@@ -1,0 +1,136 @@
+From: Codex <codex@openai.com>
+Subject: [PATCH] wifi: ath12k: defer WSI group power-up until every SoC is ready
+
+Qualcomm's multi-chip firmware expects every member of an inter-device MLO
+group to have its QMI service registered before the first WLAN processor is
+started. The current probe path powers each member from ath12k_core_init(),
+so an AHB member can start while its PCI partner has not even probed yet.
+
+Prepare QMI/debugfs per SoC as before, but defer HIF power-up until all group
+members have probed. Start members in reverse device-id order so that the
+external PCI device is available before the integrated AHB device, matching
+the vendor CNSS bring-up policy used by the BE6500 platform.
+
+Track whether initial HIF power-up completed so an error/unbind path does not
+try to power down a member which was only prepared and never powered.
+
+--- a/drivers/net/wireless/ath/ath12k/core.h
++++ b/drivers/net/wireless/ath/ath12k/core.h
+@@ -2529,6 +2529,7 @@ struct ath12k_base {
+ 		enum ath12k_bus bus;
+ 		const struct ath12k_hif_ops *ops;
+ 	} hif;
++	bool hif_powered_once;
+ 
+ 	struct {
+ 		struct completion wakeup_completed;
+--- a/drivers/net/wireless/ath/ath12k/core.c
++++ b/drivers/net/wireless/ath/ath12k/core.c
+@@ -1587,7 +1587,6 @@ int ath12k_core_check_smbios(struct ath12k_base *ab)
+ 
+ static int ath12k_core_soc_create(struct ath12k_base *ab)
+ {
+-	struct ath12k_hw_group *ag = ab->ag;
+ 	int ret;
+ 
+ 	if (ath12k_ftm_mode) {
+@@ -1606,19 +1605,53 @@ static int ath12k_core_soc_create(struct ath12k_base *ab)
+ 
+ 	ath12k_debugfs_soc_create(ab);
+ 
+-	ret = ath12k_hif_power_up(ab);
+-	if (ret) {
+-		ath12k_err(ab, "failed to power up :%d\n", ret);
+-		goto err_qmi_deinit;
++	return 0;
++}
++
++static int ath12k_core_hw_group_power_up(struct ath12k_hw_group *ag)
++{
++	struct ath12k_base *ab;
++	int i, ret;
++
++	lockdep_assert_held(&ag->mutex);
++
++	/*
++	 * Start the external PCI member before the integrated AHB member.
++	 * Device ids follow the WSI group order, with the external member at
++	 * the highest id on IPQ53xx/QCN62xx multi-chip platforms.
++	 */
++	for (i = ag->num_devices - 1; i >= 0; i--) {
++		ab = ag->ab[i];
++		if (!ab || ab->is_bypassed)
++			continue;
++
++		ath12k_info(ab,
++			   "deferred WSI group power-up: group %u device %u (%s)\n",
++			   ag->id, ab->device_id,
++			   ab->hif.bus == ATH12K_BUS_PCI ? "PCI" : "AHB");
++
++		ret = ath12k_hif_power_up(ab);
++		if (ret) {
++			ath12k_err(ab, "failed deferred power up: %d\n", ret);
++			goto err_power_down;
++		}
++
++		ab->hif_powered_once = true;
+ 	}
+ 
+ 	return 0;
+ 
+-err_qmi_deinit:
+-	ath12k_debugfs_soc_destroy(ab);
+-	mutex_unlock(&ag->mutex);
+-	ath12k_qmi_deinit_service(ab);
+-	mutex_lock(&ag->mutex);
++err_power_down:
++	/* Only members with a higher id have completed power-up. */
++	for (i++; i < ag->num_devices; i++) {
++		ab = ag->ab[i];
++		if (!ab || ab->is_bypassed || !ab->hif_powered_once)
++			continue;
++
++		ath12k_hif_power_down(ab, false);
++		ab->hif_powered_once = false;
++	}
++
+ 	return ret;
+ }
+ 
+@@ -1632,7 +1665,8 @@ static void ath12k_core_soc_destroy(struct ath12k_base *ab)
+ 	if (ab->ce_pipe_init_done && !ab->is_bypassed)
+ 		ath12k_ce_cleanup_pipes(ab);
+ 
+-	ath12k_hif_power_down(ab, false);
++	if (ab->hif_powered_once)
++		ath12k_hif_power_down(ab, false);
+ 
+ 	ath12k_reg_free(ab);
+ 	ath12k_debugfs_soc_destroy(ab);
+@@ -6399,12 +6433,24 @@ int ath12k_core_init(struct ath12k_base *ab)
+ 	is_ready = ath12k_core_hw_group_create_ready(ag);
+ 
+ 	if (is_ready) {
++		ath12k_info(ab,
++			   "all %u WSI group members prepared; starting group\n",
++			   ag->num_devices);
++
+ 		ret = ath12k_core_hw_group_create(ag);
+ 		if (ret) {
+ 			ath12k_warn(ab, "unable to create hw group\n");
+ 			mutex_unlock(&ag->mutex);
+ 			goto err;
+ 		}
++
++		ret = ath12k_core_hw_group_power_up(ag);
++		if (ret) {
++			set_bit(ATH12K_FLAG_SOC_CREATE_FAIL, &ab->dev_flags);
++			mutex_unlock(&ag->mutex);
++			ath12k_err(ab, "failed to power up hw group: %d\n", ret);
++			goto err;
++		}
+ 	}
+ 	mutex_unlock(&ag->mutex);
+ 
+-- 
+2.47.3

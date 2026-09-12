@@ -1,0 +1,24 @@
+{
+	"luci-app-rejected-clients": {
+		"description": "查看最近被拒绝的 Wi-Fi 设备并加入 MAC 白名单",
+		"read": {
+			"ubus": {
+				"file": [ "exec" ],
+				"luci": [ "getTempInfo" ]
+			},
+			"file": {
+				"/usr/libexec/rejected-mac": [ "exec" ],
+				"/usr/libexec/ddns-manager": [ "exec" ]
+			}
+		},
+		"write": {
+			"ubus": {
+				"file": [ "exec" ]
+			},
+			"file": {
+				"/usr/libexec/rejected-mac": [ "exec" ],
+				"/usr/libexec/ddns-manager": [ "exec" ]
+			}
+		}
+	}
+}

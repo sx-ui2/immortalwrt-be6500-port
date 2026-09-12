@@ -1,0 +1,314 @@
+* {
+	margin: 0;
+	padding: 0;
+	box-sizing: border-box;
+}
+
+.white-space {
+  white-space:pre!important;
+}
+
+::-webkit-input-placeholder { /* WebKit, Blink, Edge */
+	color:#ddd;
+}
+
+:-moz-placeholder { /* Mozilla Firefox 4 to 18 */
+	color:#ddd;
+}
+
+::-moz-placeholder { /* Mozilla Firefox 19+ */
+	color:#ddd;
+}
+
+:-ms-input-placeholder { /* Internet Explorer 10-11 */
+	color:#ddd;
+}
+
+li {
+	list-style: none;
+	float: left;
+}
+
+.box {
+	padding: 44px 60px 44px 60px;
+	color: #333333;
+}
+
+.tab-div {
+	display: flex;
+	align-items: center;
+	width: 100%;
+	height: 46px;
+	margin: 30px 0 40px 0;
+}
+
+.tab-div .tab-left {
+	display: flex;
+	align-items: center;
+	width: 120px;
+	height: 100%;
+	color: #999;
+}
+
+.tab-div .tab-right {
+	display: flex;
+	align-items: center;
+	flex: 1;
+	height: 100%;
+}
+
+.tab-div .tab-right .tab-right-item {
+	display: flex;
+	justify-content: center;
+	align-items: center;
+	width: 300px;
+	height: 100%;
+	margin-right: 10px;
+	border-radius: 4px;
+	border: 1px solid #DDDDDD;
+	color: #666;
+	cursor: pointer;
+}
+
+.tab-div .tab-right .tab-right-item .tab-right-radio {
+	display: inline-block;
+	width: 16px;
+	height: 16px;
+	border: 1px solid #BBBBBB;
+	border-radius: 50%;
+	margin-right: 10px;
+}
+
+.tab-div .tab-right .select-tab-right-item-active {
+	border: 1px solid #4762FE!important;
+	color: #4762FE!important;
+}
+
+.tab-div .tab-right .select-tab-right-item-active .tab-right-radio {
+	border: 5px solid #4762FE!important;
+}
+
+.tab-div .tab-right .tab-right-item span {
+	font-size: 14px;
+	font-weight: normal;
+}
+
+.list {
+	width: 100%;
+	padding-bottom: 25px;
+	box-sizing: border-box;
+	border-bottom: 1px solid #EEEEEE;
+}
+
+.list .list-title {
+	font-size: 14px;
+	font-weight: 550;
+}
+
+.list .list-table {
+	width: 100%;
+	max-width: 100%;
+	margin: 20px 0;
+	padding: 20px 20px 10px 20px;
+	border: 1px solid #DDDDDD;
+	font-size: 14px;
+}
+
+.list .list-table .head {
+	border-bottom: 1px solid #EEEEEE;
+	padding-bottom: 10px;
+}
+
+.list .list-btnlist .dianji {
+	cursor: pointer;
+	display: inline-block;
+	text-align: center;
+	width: 175px;
+	height: 46px;
+	line-height: 46px;
+	background: #F4F6FA;
+	border: 1px solid #DDDDDD;
+	border-radius: 4px;
+	color: #666666;
+}
+
+.save-button {
+	width: 360px;
+	font-size: 14px;
+	font-weight: normal;
+	margin-top: 30px;
+	cursor: pointer;
+}
+
+.title {
+	font-weight: 550;
+	font-size: 18px;
+	border-bottom: 1px solid #EEEEEE;
+}
+
+.title .text {
+	margin-bottom: 20px;
+	font-weight: 550;
+}
+
+.title .text span {
+	font-size: 12px;
+	color: #999999;
+	margin-left: 10px;
+	font-weight: normal;
+}
+
+.box li {
+	width: 33.33%;
+}
+
+.box ul {
+	overflow: hidden;
+}
+
+.box .head {
+	color: #999999;
+}
+
+.head li {
+	font-weight: 550
+}
+
+.edit {
+	cursor: pointer;
+	display: inline-block;
+	border-radius: 4px;
+	padding: 2px 6px;
+	border: 1px solid #4762FE;
+	color: #4762FE;
+	user-select: none;
+}
+
+.data {
+	margin-top: 20px;
+}
+
+.data .name,
+.data .bz-name {
+	padding-right: 10px;
+	box-sizing: border-box;
+	white-space: pre;
+	overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pop-ups {
+	width: 560px;
+	border: 1px solid #EEEEEE;
+	border-radius: 20px;
+	padding: 30px 40px;
+	background-color: #FFFFFF;
+	position: fixed;
+	top: 0px;
+	left: 50%;
+	transform: translateX(-50%);
+	z-index: 10;
+	display: none;
+}
+
+.pop-ups .top {
+	overflow: hidden;
+	padding-bottom: 20px;
+	border-bottom: 1px solid #EEEEEE;
+	font-weight: 550;
+	font-size: 18px;
+}
+
+.pop-ups .left {
+	float: left;
+	color: #333333;
+}
+
+.pop-ups .right {
+	float: right;
+}
+
+.mask {
+	position: fixed;
+	top: 0;
+	left: 0;
+	width: 100%;
+	height: 100%;
+	background-color: #000000;
+	opacity: 0.3;
+	z-index: 9;
+	display: none;
+}
+
+.off {
+	cursor: pointer;
+}
+
+.pop-ups .main {
+	color: #999999;
+	padding-top: 15px;
+}
+
+.b_data{
+	max-height: 216px;
+	overflow-y: auto;
+}
+
+.pop-ups .main .active {
+	padding: 15px 0;
+}
+
+.pop-ups .main span {
+	display: inline-block;
+	width: 120px;
+}
+
+.pop-ups .main .ipt {
+	display: inline-block;
+	height: 46px;
+}
+
+.button {
+	width: 360px;
+	background-color: #4762FE;
+	border-color: #4762FE;
+	border-radius: 4px;
+	padding: 12px 16px;
+	font-size: 14px;
+	color: #fff;
+	border: 1px solid transparent;
+	outline: none;
+}
+
+.tip {
+	display: flex;
+	flex-direction: row;
+	padding: 13px 20px;
+	position: absolute;
+	width: 278px;
+	height: 46px;
+	left: 442px;
+	top: 333px;
+	background: rgba(0, 0, 0, 0.5);
+	border-radius: 6px;
+	color: #ffffff;
+}
+
+.errNo_tip{
+	margin: 0;
+	padding-left: 123px;
+	color: red;
+}
+
+.delete_disabled {
+	background: #F4F6FA!important;
+	border: 1px solid #ddd!important;
+	color: #ccc!important;
+	cursor: not-allowed!important;
+}
+
+.empty-data {
+	padding: 0;
+	margin: 15px 0;
+	text-align: center;
+}

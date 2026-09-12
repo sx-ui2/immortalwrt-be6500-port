@@ -1,0 +1,629 @@
+#relay_wifi_option2 {
+    max-height: 225px;
+}
+
+#wan_ipv6_tip,
+#pppoe-mtu-info,
+#pppoe-status-info,
+#custom_WAN_port_moudle,
+#multiple_dial_info,
+#multiple_wan_moudle,
+#multiple_dial_setting,
+#save_single_wan_internet,
+#save_multiple_wan_internet,
+.save_multiple_wan_internet_tips,
+.multiple_dial_count,
+.ipv6_info_empty,
+.ipv6_info_content,
+.ydn_wan,
+.baili_wan,
+.taiyi_plus_wan,
+.ppoe-status-icon,
+.pppoe-ing,
+.dns-addr1,
+.dns-addr2,
+.pcdn_on,
+.pcdn_off {
+    display: none;
+}
+
+.search_wifi_pic {
+    width: 15px;
+}
+
+#internet_info {
+    display: flex;
+    width: 100%;
+    padding-top: 40px;
+    box-sizing: border-box;
+}
+
+#internet_info>div {
+    width: 50%;
+    padding: 0 10px;
+    box-sizing: border-box;
+}
+
+#internet_info .ipv6_info .ipv6_info_empty {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    height: calc(100% - 35px);
+    font-weight: 500;
+}
+
+#internet_info .ipv4_info .ipv4_info_title,
+#internet_info .ipv6_info .ipv6_info_title {
+    display: flex;
+    align-items: center;
+    width: 100%;
+    height: 35px;
+    font-size: 16px;
+    font-weight: 500;
+    padding-bottom: 10px;
+}
+
+#internet_info .ipv4_info .ipv4_info_content .ipv4_info_item,
+#internet_info .ipv6_info .ipv6_info_content .ipv6_info_item {
+    display: flex;
+    align-items: center;
+    padding: 15px 0;
+}
+
+#internet_info .ipv4_info .ipv4_info_content .ipv4_info_item .ipv4_info_item_left,
+#internet_info .ipv6_info .ipv6_info_content .ipv6_info_item .ipv6_info_item_left {
+    flex-shrink: 0;
+    width: 120px;
+    font-family: PingFang SC;
+    font-style: normal;
+    font-weight: 500;
+    font-size: 14px;
+    color: #999999;
+}
+
+#internet_info .ipv4_info .ipv4_info_content .ipv4_info_item .ipv4_info_item_right,
+#internet_info .ipv6_info .ipv6_info_content .ipv6_info_item .ipv6_info_item_right {
+    flex: 1;
+    font-family: PingFang SC;
+    font-style: normal;
+    font-weight: 500;
+    font-size: 14px;
+    color: #333;
+    overflow: hidden;
+    word-wrap: break-word;
+}
+
+#internet_info .row {
+    display: flex;
+    align-items: center;
+    padding: 15px 0;
+}
+
+.interface-name-com {
+    display: flex;
+    margin-bottom: 15px;
+}
+
+.interface-name-com>div {
+    width: 85px;
+    text-align: center;
+    color: #333;
+    cursor: default;
+}
+
+.interface-name-selected {
+    color: #4762FE !important;
+}
+
+.interface-name-disabled {
+    color: #D0D0D0 !important;
+}
+
+.interface-name-disabled,
+.lan-pic-disabled,
+.usb-pic,
+.circle-pic,
+.mate-pic,
+.mate-pic img {
+    cursor: default !important;
+}
+
+.interface-pic-div {
+    position: relative;
+    display: flex;
+    align-items: center;
+    border: 1px solid #DDDDDD;
+    border-radius: 4px;
+}
+
+.ydn_wan .interface-com {
+    width: 60%;
+}
+.ydn_wan .interface-ydn {
+    padding: 20px 0px;
+}
+.ydn_wan .interface-ydn .interface-pic {
+    width: 85px;
+    transform: rotate(0deg);
+}
+
+.baili_wan .interface-com {
+    width: 60%;
+}
+.baili_wan .interface-baili {
+    padding: 20px 0px 35px 0;
+}
+.baili_wan .interface-baili .interface-pic {
+    width: 85px;
+    transform: rotate(180deg);
+}
+
+.taiyi_plus_wan .interface-com {
+    width: 53%;
+}
+.taiyi_plus_wan .interface-taiyi-plus {
+    padding: 20px 0px;
+}
+.taiyi_plus_wan .interface-taiyi-plus .interface-pic {
+    width: 85px;
+    transform: rotate(0deg);
+}
+
+.interface-pic-div .circle-pic {
+    height: 20px;
+    margin-left: 15px;
+}
+
+.interface-pic-div .mate-pic {
+    position: absolute;
+    left: 55px;
+    bottom: 15px;
+    display: flex;
+}
+
+.interface-pic-div .mate-pic img {
+    height: 16px;
+}
+
+.interface-pic-div .mate-pic span {
+    font-size: 12px;
+    margin: 7px 10px 0 10px;
+}
+
+#save_conf_wan,
+.set_wan_desc {
+    display: none;
+}
+
+.disabled_btn {
+    background-color: #eeeeee !important;
+    border-color: #eeeeee !important;
+    color: #D0D0D0 !important;
+}
+
+.hovered_text {
+    color: #4762FE!important;
+}
+
+.wan_port_desc {
+    display: none;
+}
+
+.pppoe-finish {
+    display: flex;
+    align-items: center;
+}
+
+#solutionCom .main>div {
+    display: flex;
+    padding: 16px 0;
+    box-sizing: border-box;
+    line-height: 26px;
+    border-bottom: 1px solid #eee;
+    color: #333;
+}
+
+#solutionCom .main>div>p {
+    margin: 0;
+}
+
+#solutionCom .main>div>p:first-child {
+    flex-shrink: 0;
+    width: 50px;
+    font-weight: bold;
+}
+
+#solutionCom .main>div:last-child {
+    border-bottom: none;
+}
+
+.ipv6_info_desc {
+    display: none;
+    align-items: center;
+    height: 46px;
+    font-size: 12px;
+    font-weight: 400;
+    color: #666;
+}
+
+.mac_clone_disabled {
+    color: #D0D0D0 !important;
+    cursor: not-allowed !important;
+}
+
+/* 新增工作模式切换CSS部分 */
+.cut_Router_mode_Div {
+    padding: 0 15px;
+}
+
+.cut_Router_mode_Div>div:nth-of-type(1) {
+    padding-right: 10px;
+}
+
+.cut_Router_mode_Div:after {
+    content: " ";
+    clear: both;
+    display: table;
+}
+
+.cut_Router_mode_Div>div {
+    float: left;
+}
+
+.routerModeDiv_smodule {
+    width: 219px;
+    height: 100px;
+    border-radius: 5px;
+    background-color: #F6F8FC;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.routerModeDiv_smodule>img {
+    align-items: center;
+}
+
+.routerModeDiv_p {
+    margin: 0;
+    font-size: 16px;
+    color: #999;
+    text-align: center;
+    line-height: 50px;
+}
+
+#checkMode_Div>.routerModeDiv_smodule {
+    border: 1px solid #4762FE;
+}
+
+#checkMode_Div>.routerModeDiv_p {
+    color: #4762FE;
+}
+
+.cut_Router_mode_Div,
+.cut_APmode_tips_Div,
+.cut_Rmode_tips_Div,
+.cut_Check_connect_Div,
+.cut_Mode_network_Div,
+.cut_Mode_loading_Div {
+    display: none;
+    margin: 20px 0;
+}
+
+.cut_Mode_network_Div {
+    color: #000;
+    text-align: left;
+    padding: 16px 62px 16px;
+    display: none;
+}
+
+.cut_Mode_network_Div .cut_Mode_network_name {
+    font-weight: 500;
+    margin-bottom: 20px;
+}
+
+.cut_Mode_network_Div .cut_Mode_network_content {
+    display: flex;
+    flex-direction: column;
+    font-weight: 400;
+}
+
+.cut_Mode_network_Div .cut_Mode_network_content .cut_Mode_network_content_item {
+    display: flex;
+}
+
+.cut_Mode_network_Div .cut_Mode_network_content .cut_Mode_network_content_item_left {
+    flex-shrink: 0;
+    margin-right: 10px;
+}
+
+.cut_Mode_network_Div .cut_Mode_network_content .cut_Mode_network_content_item_right p {
+    width: 260px;
+    line-height: 20px;
+    word-wrap: break-word;
+}
+
+.cut_Mode_network_Div .cut_Mode_network_content .network_name {
+    margin-bottom: 10px;
+}
+
+.cut_Mode_network_Div .cut_Mode_network_content .network_name p {
+    color: rgba(71, 98, 254, 1);
+}
+
+.cut_tip_shadow {
+    position: fixed;
+    z-index: 10;
+    background: white;
+    transform: translateX(-50%);
+    border-radius: 5px;
+    padding: 14px 40px;
+    color: #000;
+    cursor: pointer;
+    display: none;
+}
+
+.cut_tip_shadow p {
+    margin: 0;
+}
+
+.cut_mode_tips {
+    text-align: center;
+    color: #000;
+    padding: 24px 20px;
+    margin: 0;
+}
+
+.cut_Mode_loading_Div .mode_switch_Div {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    padding: 30px 0;
+}
+
+.cut_Mode_loading_Div .work_mode_count_down_time {
+    position: relative;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    width: 108px;
+    height: 113px;
+    margin: 0 auto;
+}
+
+.cut_Mode_loading_Div .work_mode_count_down_time img {
+    width: 100%;
+    height: 100%;
+}
+
+.cut_Mode_loading_Div .work_mode_count_down_time .work_mode_count_down_num {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    font-weight: 500;
+    font-size: 30px;
+    color: #000;
+}
+
+.cut_Mode_loading_Div .work_mode_count_down_text {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    flex-direction: column;
+    padding: 30px 0 10px 0;
+}
+
+.cut_Mode_loading_Div .work_mode_count_down_text span {
+    font-weight: 400;
+    color: #000;
+}
+
+.cut_Mode_loading_Div .work_mode_count_down_text a {
+    text-decoration: underline;
+    color: #4762FE;
+}
+
+.self_multiple_wan_port_module {
+    display: none;
+    width: 510px;
+}
+
+.self_multiple_wan_port_module .multiple_wan_text_active {
+    font-weight: 600;
+    color: #4762FE!important;
+}
+
+.self_multiple_wan_port_module .multiple_wan_text_active_disable {
+    font-weight: 600;
+    color: #D0D0D0!important;
+}
+
+.self_multiple_wan_port_module .self_multiple_wan_port_title {
+    display: flex;
+    justify-content: space-between;
+    width: 100%;
+    margin: 34px 0 20px 0;
+    padding: 0 25px;
+    box-sizing: border-box;
+}
+
+.self_multiple_wan_port_module .self_multiple_wan_port_title span {
+    display: inline-block;
+    width: 90px;
+    text-align: center;
+    color: #A2B0FD;
+}
+
+.self_multiple_wan_port_module .self_multiple_wan_port_title .multiple_wan_port_text {
+    color: #D0D0D0;
+}
+
+.self_multiple_wan_port_module .self_multiple_wan_port_content {
+    display: flex;
+    justify-content: space-between;
+    width: 100%;
+    border: 1px solid #DDDDDD;
+    border-radius: 4px;
+    padding: 10px 20px;
+    box-sizing: border-box;
+}
+
+.self_multiple_wan_port_module .self_multiple_wan_port_content >div {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    font-size: 12px;
+}
+
+.self_multiple_wan_port_module .self_multiple_wan_port_content >div img {
+    width: 100px;
+    cursor: not-allowed;
+}
+
+.self_multiple_wan_port_module .self_multiple_wan_port_content >div span {
+    font-size: 14px;
+    font-weight: normal;
+    color: #999999;
+}
+
+.internet_tabs,
+.multdial_tabs {
+    display: flex;
+    align-items: center;
+    width: 100%;
+}
+
+.multdial_refresh {
+    flex-shrink: 0;
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    margin: 0;
+    padding: 0;
+    cursor: pointer;
+}
+
+.multdial_refresh span {
+    font-weight: normal;
+}
+
+.multdial_refresh img {
+    width: 18px;
+    height: 18px;
+    margin-left: 5px;
+}
+
+.internet_tabs .internet_tabs_title,
+.multdial_tabs .multdial_tabs_title {
+    flex-shrink: 0;
+    margin: 0 105px 0 0;
+}
+
+.internet_tabs .internet_tabs_content,
+.multdial_tabs .multdial_tabs_content {
+    display: flex;
+    align-items: center;
+    width: 100%;
+}
+
+.internet_tabs .internet_tabs_content .internet_tabs_content_item,
+.multdial_tabs .multdial_tabs_content .multdial_tabs_content_item {
+    position: relative;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    width: 80px;
+    height: 40px;
+    border-radius: 4px;
+    border: 1px solid #DDDDDD;
+    margin-right: 10px;
+    cursor: pointer;
+}
+
+.internet_tabs .internet_tabs_content .internet_tabs_content_item:last-child,
+.multdial_tabs .multdial_tabs_content .multdial_tabs_content_item:last-child {
+    margin-right: 0;
+}
+
+.internet_tabs .internet_tabs_content .internet_tabs_content_item .internet_tabs_content_item_text,
+.multdial_tabs .multdial_tabs_content .multdial_tabs_content_item .multdial_tabs_content_item_text {
+    font-size: 14px;
+    color: #666666;
+}
+
+.internet_tabs .internet_tabs_content .internet_tabs_content_item .internet_tabs_content_item_status,
+.multdial_tabs .multdial_tabs_content .multdial_tabs_content_item .multdial_tabs_content_item_status {
+    position: absolute;
+    right: 5px;
+    top: 5px;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #FB5954;
+}
+
+
+.internet_tabs .internet_tabs_content .internet_tabs_content_item_active,
+.multdial_tabs .multdial_tabs_content .multdial_tabs_content_item_active {
+    border: 1px solid #4762FE;
+}
+
+.internet_tabs .internet_tabs_content .internet_tabs_content_item_active .internet_tabs_content_item_text,
+.multdial_tabs .multdial_tabs_content .multdial_tabs_content_item_active .multdial_tabs_content_item_text {
+    color: #4762FE;
+}
+
+.multiple_dial_count .form_right {
+    display: flex;
+    align-items: center;
+}
+
+.multiple_dial_count .form_right .multiple_dial_selects {
+    flex-shrink: 0;
+}
+
+.multiple_dial_count .form_right .multiple_dial_concurrent {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    margin-left: 10px;
+}
+
+.multiple_dial_count .form_right .concurrent_dial_text {
+    margin: 0 6px;
+}
+
+.multiple_dial_count .multiple_dial_reason,
+.multiple_dial_count .concurrent_dial_reason {
+    width: 18px;
+    height: 18px;
+}
+
+.multiple_dial_count .concurrent_dial_switch {
+    width: 15px;
+    height: 15px;
+}
+
+.custom-tooltip .tooltip-inner {
+    max-width: none;
+    white-space: nowrap;
+    text-align: left;
+    padding: 10px;
+    box-sizing: border-box;
+}
+
+.multiple_wan_open_content,
+.multiple_wan_close_content {
+    text-align: center;
+    padding: 40px 0;
+    box-sizing: border-box;
+    color: #333;
+}
+
+.multiple_wan_open_btns,
+.multiple_wan_close_btns {
+    text-align: center;
+}

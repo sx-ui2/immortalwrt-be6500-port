@@ -1,0 +1,33 @@
+From: Codex <codex@local>
+Subject: [PATCH] net: dsa: qca8k: add QCA8386 ID-only diagnostic stop
+
+This is a RAM-test-only diagnostic patch.  Log the validated QCA8386 ID
+and revision, then stop before dsa_register_switch() can change port,
+header, VLAN, or forwarding state.  It distinguishes a harmful MHT ID
+access from a later DSA setup failure.  Do not carry this patch into a
+production image.
+
+---
+ drivers/net/dsa/qca/qca8k-8xxx.c | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/drivers/net/dsa/qca/qca8k-8xxx.c b/drivers/net/dsa/qca/qca8k-8xxx.c
+--- a/drivers/net/dsa/qca/qca8k-8xxx.c
++++ b/drivers/net/dsa/qca/qca8k-8xxx.c
+@@ -2287,6 +2287,14 @@ static int qca8k_sw_probe(struct mdio_device *mdiodev)
+ 	ret = qca8k_read_switch_id(priv);
+ 	if (ret)
+ 		return ret;
++
++	if (priv->switch_id == QCA8K_ID_QCA8386) {
++		dev_info(priv->dev,
++			 "ID-only diagnostic validated id %x revision %x; stopping before DSA registration\n",
++			 priv->switch_id, priv->switch_revision);
++		return -ENODEV;
++	}
++
+ 
+ 	priv->ds = devm_kzalloc(&mdiodev->dev, sizeof(*priv->ds), GFP_KERNEL);
+ 	if (!priv->ds)
+-- 
+2.50.1

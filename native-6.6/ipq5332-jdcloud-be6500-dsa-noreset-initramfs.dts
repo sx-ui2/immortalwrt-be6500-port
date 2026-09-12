@@ -1,0 +1,23 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR BSD-3-Clause)
+/*
+ * RAM-only DSA isolation diagnostic.
+ *
+ * The MDIO controller, QCA8386 DSA node and four PHY nodes are enabled, while
+ * the overlapping SSDK MHT consumer remains disabled.  The late module test
+ * deliberately preserves the switch state left by QWRT: no GPIO51 hardware
+ * reset and no QCA8386 clock/EPHY fixup.  It is never flashable.
+ */
+#include "ipq5332-jdcloud-be6500-mdio-staged-initramfs.dts"
+
+/ {
+	be6500,dsa-noreset;
+};
+
+&mdio {
+	/delete-property/ phy-reset-gpio;
+	/delete-property/ mdio_clk_fixup;
+};
+
+&jd_mht {
+	status = "disabled";
+};

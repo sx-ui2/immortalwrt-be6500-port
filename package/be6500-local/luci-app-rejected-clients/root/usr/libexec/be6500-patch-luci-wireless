@@ -1,0 +1,98 @@
+#!/bin/sh
+
+# Recover the persisted mode marker from the hardware personality selected by
+# the bootloader. Older migrated configs may lack wireless.main.freq_mode even
+# though ath12k is already running either the 4-chain or split-2-chain BDF.
+if ! uci -q get wireless.main.freq_mode >/dev/null; then
+	runtime_bdf="$(sed -n 's/.*cnss2\.bdf_pci1=\([^ ]*\).*/\1/p' /proc/cmdline 2>/dev/null)"
+	[ "$runtime_bdf" = "0x1008" ] && runtime_mode=1 || runtime_mode=0
+	uci -q set wireless.main='be6500-profile'
+	uci -q set wireless.main.freq_mode="$runtime_mode"
+	uci -q set system.@system[0].freq_mode="$runtime_mode"
+	uci -q set wireless.radio2.disabled="$([ "$runtime_mode" = 1 ] && echo 0 || echo 1)"
+	uci -q commit wireless
+	uci -q commit system
+fi
+
+# Width is derived from the regulatory channel/chandef on this board.  Keep
+# LuCI's value in the form for compatibility, but do not expose a separate
+# width selector that can create an invalid 149+160 MHz combination.
+if ! grep -q 'be6500-width-fixed' "$view"; then
+	sed -i "s/E('label',{'style':'float:left; margin-right:3px'},\[_('Width')/E('label',{'class':'be6500-width-fixed','style':'position:absolute;visibility:hidden;width:0;height:0;overflow:hidden'},[_('Width')/" "$view"
+fi
+
+# The QCN9224 split firmware reports a shared regulatory list for both pdevs.
+# LuCI must additionally apply the board RF-path limits in tri-band mode.
+view=/www/luci-static/resources/view/network/wireless.js
+[ -f "$view" ] || exit 0
+
+# netifd keeps a 160 MHz 5 GHz radio pending while hostapd performs the DFS
+# channel-availability check.  LuCI otherwise reports this healthy transition
+# as a generic inactive device, which makes it look like the radio failed.
+if ! grep -q 'be6500DfsCac' "$view"; then
+	sed -i "s#_('Device is not active')#(\/\*be6500DfsCac\*\/radioDev.ubus('dev','pending')\&\&radioDev.get('band')==='5g'\&\&\/160\$\/.test(String(radioDev.get('htmode')||''))?'DFS 信道检测中（约 60 秒）':_('Device is not active'))#" "$view"
+fi
+
+if grep -q 'be6500SplitMode' "$view"; then
+	# Upgrade the first split-range hotfix (which started the high path at 149).
+	sed -i "s/section_id==='radio2'\&\&freq.channel<149/section_id==='radio2'\&\&freq.channel<100/" "$view"
+else
+sed -i "s/freqlist\.forEach(freq=>{if(!freq\.band)/const be6500SplitMode=String(uci.get('wireless','main','freq_mode'))==='1';freqlist.forEach(freq=>{if(be6500SplitMode\&\&freq.band==5\&\&section_id==='radio1'\&\&freq.channel>64)return;if(be6500SplitMode\&\&freq.band==5\&\&section_id==='radio2'\&\&freq.channel<100)return;if(!freq.band)/" "$view"
+fi
+
+# All three RF paths have a fixed band on this board. Keep the hidden select
+# in the form so LuCI can preserve its value, but do not offer an invalid band
+# switch in the radio editor.
+if ! grep -q 'be6500-band-fixed' "$view"; then
+	sed -i "s/E('label',{'style':'float:left; margin-right:3px'},\[_('Band')/E('label',{'class':'be6500-band-fixed','style':'position:absolute;visibility:hidden;width:0;height:0;overflow:hidden'},[_('Band')/" "$view"
+else
+	sed -i -e "s/'class':'be6500-band-fixed','style':'display:none!important'/'class':'be6500-band-fixed','style':'position:absolute;visibility:hidden;width:0;height:0;overflow:hidden'/" \
+		-e "s/'class':'be6500-band-fixed','style':'display:none'/'class':'be6500-band-fixed','style':'position:absolute;visibility:hidden;width:0;height:0;overflow:hidden'/" "$view"
+fi
+
+# A 160 MHz 5 GHz AP can include DFS channels even when its primary channel is
+# 36.  CAC normally takes about 60 seconds.  The BE6500 serializes radio setup
+# because all pdevs share one QSDK wiphy, so both the AP-ready wait and the next
+# radio's lock wait must exceed CAC or netifd tears the AP down prematurely.
+wifi_script=/lib/netifd/wireless/mac80211.sh
+if [ -f "$wifi_script" ]; then
+	sed -i \
+		-e 's/\[ "$be6500_radio_wait" -lt 45 \]/[ "$be6500_radio_wait" -lt 300 ]/' \
+		-e 's/\[ "$be6500_radio_wait" -lt 120 \]/[ "$be6500_radio_wait" -lt 300 ]/' \
+		-e 's/\[ "$be6500_ap_wait" -lt 45 \]/[ "$be6500_ap_wait" -lt 180 ]/' \
+		-e 's/\[ "$be6500_ap_wait" -lt 120 \]/[ "$be6500_ap_wait" -lt 180 ]/' \
+		"$wifi_script"
+fi
+
+# iwinfo exposes the shared QCN92xx frequency capabilities on every logical
+# radio. Channel Analysis must follow each UCI wifi-device's configured band,
+# otherwise it incorrectly creates 2.4 GHz and 5 GHz tabs for every radio.
+channel_view=/www/luci-static/resources/view/status/channel_analysis.js
+if [ -f "$channel_view" ] && ! grep -q 'be6500ConfiguredBand' "$channel_view"; then
+	sed -i "s/for(var band in bands){if(bands\[band\]\.channels\.length==0)/for(var band in bands){var be6500ConfiguredBand=wifiDevs[ifname].dev.get('band'),be6500Disabled=String(wifiDevs[ifname].dev.get('disabled'))==='1';if(be6500Disabled||(be6500ConfiguredBand==='2g'\&\&band!=2)||(be6500ConfiguredBand==='5g'\&\&band!=5)||(be6500ConfiguredBand==='6g'\&\&band!=6))continue;if(bands[band].channels.length==0)/" "$channel_view"
+fi
+
+# Change the loader URL whenever this board-specific view patch changes. This
+# prevents a previously opened LuCI tab from reusing the unfiltered class file.
+for header in /usr/share/ucode/luci/template/header.ut; do
+	[ ! -f "$header" ] || sed -i \
+		-e 's#luci\.js?v=26\.236\.50592~9b8ee64-{{ pkgs_update_time }}#luci.js?v=26.236.50592~9b8ee64-be6500v15-{{ pkgs_update_time }}#' \
+		-e 's#be6500v[0-9]*-{{ pkgs_update_time }}#be6500v15-{{ pkgs_update_time }}#' "$header"
+done
+
+grep -q 'be6500SplitMode' "$view"
+
+# LuCI's stock swconfig RPC only exposes link state and speed.  Export the
+# QCA8386 per-port MIB byte counters as well so the overview does not show
+# every LAN socket as 0 B.
+rpcd_luci=/usr/share/rpcd/ucode/luci
+if [ -f "$rpcd_luci" ] && ! grep -q 'port.rx_bytes = +m\[1\]' "$rpcd_luci"; then
+	sed -i '/^[[:space:]]*getSwconfigPortState:/,/^[[:space:]]*setPassword:/ {
+		/^[[:space:]]*let m;[[:space:]]*$/a\
+\	\	\	\	\	if ((m = match(line, /RxGoodByte[ \\t]*:[ \\t]*([0-9]+)/)) != null)\
+\	\	\	\	\	\	port.rx_bytes = +m[1];\
+\
+\	\	\	\	\	if ((m = match(line, /TxByte[ \\t]*:[ \\t]*([0-9]+)/)) != null)\
+\	\	\	\	\	\	port.tx_bytes = +m[1];
+	}' "$rpcd_luci"
+fi
