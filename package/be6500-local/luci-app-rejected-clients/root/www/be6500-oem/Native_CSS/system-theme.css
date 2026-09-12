@@ -940,6 +940,18 @@ body {
 #be6500-native-root .native-inline-actions button,
 #be6500-native-root .native-inline-control button,
 #be6500-native-root .native-access-actions button{width:auto!important;min-width:0!important;height:auto!important;min-height:0!important;padding:.5em .8em!important;line-height:normal!important;border-radius:var(--border-radius, .25rem)!important}
+#be6500-native-root .native-access-table .access-name{width:24%!important}
+#be6500-native-root .native-access-table .access-address{width:22%!important}
+#be6500-native-root .native-access-table .access-type{width:18%!important}
+#be6500-native-root .native-access-table .access-vendor{width:24%!important}
+#be6500-native-root .native-access-table .access-action{width:12%!important;text-align:right!important}
+#be6500-native-root .native-access-table .native-table-row{transition:background-color .15s ease}
+#be6500-native-root .native-access-table .native-table-row:hover{background:var(--be-section)!important}
+@media(max-width:800px){
+  #be6500-native-root .native-access-table{overflow-x:auto!important}
+  #be6500-native-root .native-access-table>.native-table-head,
+  #be6500-native-root .native-access-table>#access-list>.native-table-row{min-width:52rem!important}
+}
 
 /* Dialogs use the same surface, spacing and action controls as LuCI modals. */
 #be6500-native-root .native-modal-mask{background:rgba(0,0,0,.5)!important}

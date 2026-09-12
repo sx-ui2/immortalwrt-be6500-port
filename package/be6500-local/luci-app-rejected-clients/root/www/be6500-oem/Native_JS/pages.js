@@ -836,14 +836,23 @@
       '<button type="button" id="access-deny" data-policy="deny"><i></i><span>黑名单模式（不允许列表中设备访问）</span></button>' +
       '<button type="button" id="access-allow" data-policy="allow"><i></i><span>白名单模式（只允许列表中设备访问）</span></button></div>' +
       '<select id="access-policy" class="native-hidden"><option value="deny">deny</option><option value="allow">allow</option></select></div>' +
-      row('启用', toggle('access-enabled', '')) + buttons(['access-mode-save', '保存']) +
-      '<section class="native-access-list"><h3 id="access-list-title">黑名单设备列表</h3><div class="native-table"><ul class="native-table-head"><li style="width:45%">设备名称</li><li style="width:35%">MAC</li><li style="width:20%">操作</li></ul><div id="access-list"><div class="native-empty">正在读取名单…</div></div></div>' +
+      row('启用', toggle('access-enabled', '')) +
+      '<div class="native-info">添加、移除、启停及名单模式切换会暂存，点击“保存并应用”后统一生效并重启 Wi-Fi。</div>' +
+      '<section class="native-access-list"><h3 id="access-list-title">黑名单设备列表</h3><div class="native-table native-access-table"><ul class="native-table-head"><li class="access-name">设备名称</li><li class="access-address">MAC</li><li class="access-type">设备类型</li><li class="access-vendor">品牌 / 厂商</li><li class="access-action">操作</li></ul><div id="access-list"><div class="native-empty">正在读取名单…</div></div></div>' +
       '<div class="native-access-actions"><button type="button" id="access-manual-open">手动添加</button><button type="button" id="access-device-open">从连接设备添加</button></div></section>' +
+      buttons(['access-mode-save', '保存并应用']) +
       '<div class="native-modal-mask"></div><div class="modal cbi-modal native-modal" id="access-modal"><div class="native-modal-head"><h4 id="access-modal-title">手动添加</h4><button type="button" class="btn cbi-button cbi-button-neutral native-modal-close" aria-label="关闭">×</button></div><div class="native-modal-body">' +
       '<div id="access-device-row">' + row('选择设备', '<select id="access-device" class="native-plain-select"><option value="">-- 请选择 --</option></select>') + '</div>' +
-      row('设备名', input('access-name', 'text', '请输入设备名')) + row('MAC 地址', input('access-mac', 'text', 'AA:BB:CC:DD:EE:FF')) + buttons(['access-add', '保存']) + '</div></div>')
+      row('设备名', input('access-name', 'text', '请输入设备名')) + row('MAC 地址', input('access-mac', 'text', 'AA:BB:CC:DD:EE:FF')) + buttons(['access-add', '加入待保存名单']) + '</div></div>')
     ;
-    function activeList() { return asArray(value('access-policy') === 'allow' ? state.access.whitelist : state.access.blacklist); }
+    var draft = { deny: [], allow: [] };
+    var dirty = false;
+    function normalizeMac(mac) { return String(mac || '').toUpperCase(); }
+    function activeList() { return draft[value('access-policy') === 'allow' ? 'allow' : 'deny']; }
+    function deviceFor(mac) {
+      mac = normalizeMac(mac);
+      return state.devices.filter(function (device) { return normalizeMac(device.uid || device.id || device.mac) === mac; })[0] || {};
+    }
     function syncMode() {
       var policy = value('access-policy');
       id('access-deny').classList.toggle('active', policy === 'deny'); id('access-allow').classList.toggle('active', policy === 'allow');
@@ -856,34 +865,59 @@
     function render() {
       var list = activeList();
       id('access-list').innerHTML = list.length ? list.map(function (item) {
-        return '<ul class="native-table-row"><li style="width:45%"><b>' + esc(item.name || '未知设备') + '</b></li><li style="width:35%"><code>' + esc(item.mac) + '</code></li><li style="width:20%"><button class="edit access-remove" data-mac="' + esc(item.mac) + '">移除</button></li></ul>';
+        var device = deviceFor(item.mac || item.macaddr);
+        return '<ul class="native-table-row"><li class="access-name"><b>' + esc(item.name || device.name || '未知设备') + '</b></li><li class="access-address"><code>' + esc(item.mac || item.macaddr) + '</code></li><li class="access-type">' + esc(device.device_type || item.device_type || '其他设备') + '</li><li class="access-vendor">' + esc(device.vendor || device.brand || item.vendor || item.brand || '暂未识别') + '</li><li class="access-action"><button class="edit access-remove" data-mac="' + esc(item.mac || item.macaddr) + '">移除</button></li></ul>';
       }).join('') : '<div class="native-empty">当前名单为空</div>';
       syncMode();
       document.querySelectorAll('.access-remove').forEach(function (button) {
         bindClick(button, function () {
-          busy(button, rpc('set_macfilter', { enable: checked('access-enabled') ? 1 : 0, macpolicy: value('access-policy'), list: [{ macaddr: button.dataset.mac, mod: 0 }] }), '已从名单移除').then(load);
+          var mac = normalizeMac(button.dataset.mac);
+          var policy = value('access-policy') === 'allow' ? 'allow' : 'deny';
+          draft[policy] = draft[policy].filter(function (item) { return normalizeMac(item.mac || item.macaddr) !== mac; });
+          dirty = true; render();
         });
       });
     }
     function load() {
       return Promise.all([rpc('get_macfilter_info', {}), rpc('web_get_device_list', {})]).then(function (items) {
         state.access = items[0]; state.devices = asArray(items[1].device_list);
+        draft.deny = asArray(state.access.blacklist).map(function (item) { return Object.assign({}, item); });
+        draft.allow = asArray(state.access.whitelist).map(function (item) { return Object.assign({}, item); });
+        dirty = false;
         set('access-policy', state.access.macpolicy || 'deny'); check('access-enabled', state.access.enable);
         id('access-device').innerHTML = '<option value="">-- 请选择 --</option>' + state.devices.map(function (device) { return '<option value="' + esc(device.uid) + '" data-name="' + esc(device.name || '') + '">' + esc(device.name || '未知设备') + '（' + esc(device.uid) + '）</option>'; }).join('');
         render();
       }).catch(function (error) { notify(error.message, false); });
     }
-    document.querySelectorAll('[data-policy]').forEach(function (button) { bindClick(button, function () { set('access-policy', button.getAttribute('data-policy')); render(); }); });
+    document.querySelectorAll('[data-policy]').forEach(function (button) { bindClick(button, function () { set('access-policy', button.getAttribute('data-policy')); dirty = true; render(); }); });
     id('access-policy').addEventListener('change', render);
+    id('access-enabled').addEventListener('change', function () { dirty = true; });
     id('access-device').addEventListener('change', function () { var option = this.options[this.selectedIndex]; set('access-mac', this.value); set('access-name', option ? option.dataset.name : ''); });
     bindClick('#access-manual-open', function () { modal(true, false); }); bindClick('#access-device-open', function () { modal(true, true); });
     bindClick('.native-modal-close', function () { modal(false); }); bindClick('.native-modal-mask', function () { modal(false); });
     bindClick('#access-mode-save', function () {
-      busy(this, rpc('set_macfilter', { enable: checked('access-enabled') ? 1 : 0, macpolicy: value('access-policy'), list: [] }), '访问控制模式已保存').then(load);
+      var enabled = checked('access-enabled');
+      var policy = value('access-policy') === 'allow' ? 'allow' : 'deny';
+      var clientMac = normalizeMac(state.access.client_mac);
+      var clientAllowed = draft.allow.some(function (item) { return normalizeMac(item.mac || item.macaddr) === clientMac; });
+      var clientDenied = draft.deny.some(function (item) { return normalizeMac(item.mac || item.macaddr) === clientMac; });
+      var rejectsClient = policy === 'allow' ? !clientAllowed : clientDenied;
+      if (enabled && Number(state.access.client_wireless) && clientMac && rejectsClient &&
+          !window.confirm('当前管理设备（' + clientMac + '）' + (policy === 'allow' ? '不在白名单中' : '已在黑名单中') + '。保存后本机会被 Wi-Fi 拒绝并断开连接，确定继续吗？')) return;
+      var button = this;
+      busy(button, rpc('set_macfilter', {
+        enable: enabled ? 1 : 0, macpolicy: policy, replace: 1, reload_wifi: 1,
+        blacklist: draft.deny, whitelist: draft.allow, list: []
+      }), '已保存，Wi-Fi 正在重启').then(function () { dirty = false; return load(); });
     });
     bindClick('#access-add', function () {
       if (!/^([0-9A-F]{2}:){5}[0-9A-F]{2}$/i.test(value('access-mac'))) return notify('MAC 地址格式不正确', false);
-      busy(this, rpc('set_macfilter', { enable: checked('access-enabled') ? 1 : 0, macpolicy: value('access-policy'), list: [{ name: value('access-name') || '未知设备', macaddr: value('access-mac'), mod: 1 }] }), '已加入当前名单').then(function () { modal(false); return load(); });
+      var policy = value('access-policy') === 'allow' ? 'allow' : 'deny';
+      var mac = normalizeMac(value('access-mac'));
+      var existing = draft[policy].filter(function (item) { return normalizeMac(item.mac || item.macaddr) === mac; })[0];
+      if (existing) existing.name = value('access-name') || existing.name || '未知设备';
+      else draft[policy].push({ name: value('access-name') || '未知设备', mac: mac });
+      dirty = true; modal(false); render();
     });
     load();
   }

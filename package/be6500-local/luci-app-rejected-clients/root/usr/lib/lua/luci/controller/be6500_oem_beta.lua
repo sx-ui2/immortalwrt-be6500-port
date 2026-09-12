@@ -1267,6 +1267,34 @@ local function find_access(uci, policy, mac)
     return found
 end
 
+local function request_client()
+    local ip = tostring(luci.http.getenv("REMOTE_ADDR") or "")
+    if not ip:match("^[%x%.:]+$") then return "", false end
+    local output = luci.sys.exec("ip neigh show " .. ip .. " 2>/dev/null") or ""
+    local mac = output:match("lladdr%s+(%x%x:%x%x:%x%x:%x%x:%x%x:%x%x)")
+    if not mac then return "", false end
+    mac = mac:upper()
+    return mac, known_wireless_clients()[mac] ~= nil
+end
+
+local function replace_access_entries(uci, policy, entries)
+    local remove = {}
+    uci:foreach("be6500_oem", "access", function(section)
+        if section.policy == policy then remove[#remove + 1] = section[".name"] end
+    end)
+    for _, section in ipairs(remove) do uci:delete("be6500_oem", section) end
+    local seen = {}
+    for _, item in ipairs(type(entries) == "table" and entries or {}) do
+        local mac = tostring(item.macaddr or item.mac or ""):upper()
+        if valid_mac(mac) and not seen[mac] then
+            seen[mac] = true
+            uci:section("be6500_oem", "access", nil, {
+                policy = policy, mac = mac, name = clean(item.name, 64)
+            })
+        end
+    end
+end
+
 local function apply_mac_policy(uci, policy)
     local list = access_entries(uci, policy)
     local enabled = uci:get("be6500_oem", "access", "enabled") ~= "0"
@@ -2258,8 +2286,10 @@ local function extended_jdcapi(method, args, uci)
         return true, { status = 0, message = trim(output) }
     elseif method == "get_macfilter_info" then
         local policy = uci:get("be6500_oem", "access", "policy") or "deny"
+        local client_mac, client_wireless = request_client()
         return true, { status = 0, enable = uci:get("be6500_oem", "access", "enabled") == "0" and 0 or 1,
-            macpolicy = policy, blacklist = access_entries(uci, "deny"), whitelist = access_entries(uci, "allow") }
+            macpolicy = policy, blacklist = access_entries(uci, "deny"), whitelist = access_entries(uci, "allow"),
+            client_mac = client_mac, client_wireless = client_wireless and 1 or 0 }
     elseif method == "set_macfilter" then
         if not ensure_oem_config(uci) then
             return true, { status = 1, message = "访问控制配置文件创建失败" }
@@ -2268,6 +2298,10 @@ local function extended_jdcapi(method, args, uci)
         if not uci:get("be6500_oem", "access") then uci:section("be6500_oem", "settings", "access", {}) end
         uci:set("be6500_oem", "access", "policy", policy); uci:set("be6500_oem", "access", "enabled", tostring(args.enable) == "0" and "0" or "1")
         local clear_after = {}
+        if tonumber(args.replace) == 1 then
+            replace_access_entries(uci, "deny", args.blacklist)
+            replace_access_entries(uci, "allow", args.whitelist)
+        end
         for _, item in ipairs(type(args.list) == "table" and args.list or {}) do
             local mac = tostring(item.macaddr or ""):upper()
             if valid_mac(mac) then
@@ -2286,6 +2320,9 @@ local function extended_jdcapi(method, args, uci)
         if not committed then return true, { status = 1, message = "访问控制配置保存失败" } end
         apply_mac_policy(uci, policy)
         for _, mac in ipairs(clear_after) do clear_rejected_record(mac, "") end
+        if tonumber(args.reload_wifi) == 1 then
+            luci.sys.call("(sleep 1; wifi reload >/dev/null 2>&1) &")
+        end
         return true, status
     elseif method == "web_get_rejected_list" or method == "get_rejected_devices" then
         local data = rejected_device_list(uci)
