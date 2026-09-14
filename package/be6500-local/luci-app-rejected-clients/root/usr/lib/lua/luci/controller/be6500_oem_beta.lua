@@ -686,11 +686,15 @@ local function set_iface_encryption(uci, section, value)
     local encryption = requested_encryption(value)
     if encryption == "sae" then
         uci:set("wireless", section, "encryption", "sae")
-        uci:set("wireless", section, "sae", "1")
+        uci:delete("wireless", section, "sae")
         uci:set("wireless", section, "ieee80211w", "2")
     elseif encryption == "sae-mixed" then
-        uci:set("wireless", section, "encryption", "psk2")
-        uci:set("wireless", section, "sae", "1")
+        -- Store the standard UCI value so this page, netifd and LuCI's native
+        -- wireless form all report the same WPA2/WPA3 mixed mode.  Older
+        -- builds used encryption=psk2 plus a private sae=1 marker;
+        -- stored_encryption() still accepts that format for migration.
+        uci:set("wireless", section, "encryption", "sae-mixed")
+        uci:delete("wireless", section, "sae")
         uci:set("wireless", section, "ieee80211w", "1")
     else
         uci:set("wireless", section, "encryption", encryption)

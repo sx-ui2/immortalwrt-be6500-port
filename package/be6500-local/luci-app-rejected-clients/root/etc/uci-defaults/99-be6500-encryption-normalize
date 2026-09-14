@@ -1,0 +1,26 @@
+#!/bin/sh
+
+# Migrate the legacy QWRT representation (psk2 + sae=1) to the standard
+# OpenWrt/LuCI encryption value.  This keeps the custom Wi-Fi page, netifd and
+# LuCI's native wireless form in agreement after a preserved-config upgrade.
+changed=0
+
+for section in $(uci show wireless 2>/dev/null | sed -n 's/^wireless\.\([^.=]*\)=wifi-iface$/\1/p'); do
+	[ "$(uci -q get "wireless.$section.sae")" = 1 ] || continue
+	encryption="$(uci -q get "wireless.$section.encryption")"
+	case "$encryption" in
+		sae|wpa3)
+			uci set "wireless.$section.encryption=sae"
+			uci set "wireless.$section.ieee80211w=2"
+			;;
+		*)
+			uci set "wireless.$section.encryption=sae-mixed"
+			uci set "wireless.$section.ieee80211w=1"
+			;;
+	esac
+	uci -q delete "wireless.$section.sae"
+	changed=1
+done
+
+[ "$changed" = 1 ] && uci commit wireless
+exit 0
