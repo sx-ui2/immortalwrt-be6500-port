@@ -2448,10 +2448,19 @@ local function extended_jdcapi(method, args, uci)
         return true, { status = 0, enable = uci:get("be6500_oem", "guest_qos", "enabled") == "1" and 1 or 0,
             upload = tonumber((uci:get("be6500_oem", "guest_qos", "upload"))) or 0, download = tonumber((uci:get("be6500_oem", "guest_qos", "download"))) or 0 }
     elseif method == "web_set_guest_limit_speed" then
+        local upload = tonumber(args.upload)
+        local download = tonumber(args.download)
+        if not upload or not download or upload < 0 or download < 0 then
+            return true, { status = 1, message = "访客限速数值无效" }
+        end
         if not uci:get("be6500_oem", "guest_qos") then uci:section("be6500_oem", "settings", "guest_qos", {}) end
-        uci:set("be6500_oem", "guest_qos", "enabled", tonumber(args.enable) == 1 and "1" or "0"); uci:set("be6500_oem", "guest_qos", "upload", tostring(tonumber(args.upload) or 0)); uci:set("be6500_oem", "guest_qos", "download", tostring(tonumber(args.download) or 0))
+        uci:set("be6500_oem", "guest_qos", "enabled", tonumber(args.enable) == 1 and "1" or "0"); uci:set("be6500_oem", "guest_qos", "upload", tostring(upload)); uci:set("be6500_oem", "guest_qos", "download", tostring(download))
         if not uci:commit("be6500_oem") then return true, { status = 1, message = "访客限速保存失败" } end
-        luci.sys.call("[ -x /usr/sbin/be6500-qos-apply ] && /usr/sbin/be6500-qos-apply >/dev/null 2>&1 &"); return true, status
+        local output = luci.sys.exec("/usr/sbin/be6500-qos-apply reload 2>&1")
+        if luci.sys.call("test -f /tmp/be6500-guest-qos.ok") ~= 0 then
+            return true, { status = 1, message = trim(output) ~= "" and trim(output) or "访客限速规则应用失败" }
+        end
+        return true, status
     elseif method == "web_get_credit_mode" then return true, { status = 0, mode = uci:get("be6500_oem", "qos", "mode") or "0" }
     elseif method == "web_set_credit_mode" then
         if not uci:get("be6500_oem", "qos") then uci:section("be6500_oem", "settings", "qos", {}) end

@@ -1,0 +1,40 @@
+#!/bin/sh
+
+table=be6500_guest_qos
+state=/tmp/be6500-guest-qos.ok
+
+rm -f "$state"
+nft delete table inet "$table" >/dev/null 2>&1 || true
+
+enabled="$(uci -q get be6500_oem.guest_qos.enabled)"
+[ "$enabled" = 1 ] || { touch "$state"; exit 0; }
+
+upload="$(uci -q get be6500_oem.guest_qos.upload)"
+download="$(uci -q get be6500_oem.guest_qos.download)"
+
+valid_rate() {
+	awk -v value="$1" 'BEGIN { exit !(value ~ /^[0-9]+([.][0-9]+)?$/ && value >= 0) }'
+}
+
+valid_rate "$upload" && valid_rate "$download" || {
+	echo '访客限速配置无效' >&2
+	exit 1
+}
+
+upload_kbytes="$(awk -v value="$upload" 'BEGIN { printf "%d", (value * 1000 + 7) / 8 }')"
+download_kbytes="$(awk -v value="$download" 'BEGIN { printf "%d", (value * 1000 + 7) / 8 }')"
+
+# Flush existing fw4 flow-offload entries before installing the new policy.
+[ "$1" = reload ] && /etc/init.d/firewall reload >/dev/null 2>&1
+
+nft add table inet "$table" || exit 1
+nft "add chain inet $table forward { type filter hook forward priority -10; policy accept; }" || exit 1
+
+# br-guest input is client upload; br-guest output is client download.
+[ "$upload_kbytes" -eq 0 ] || nft add rule inet "$table" forward \
+	iifname "br-guest" limit rate over "$upload_kbytes" kbytes/second counter drop || exit 1
+[ "$download_kbytes" -eq 0 ] || nft add rule inet "$table" forward \
+	oifname "br-guest" limit rate over "$download_kbytes" kbytes/second counter drop || exit 1
+
+touch "$state"
+exit 0
