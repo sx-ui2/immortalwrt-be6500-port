@@ -22,6 +22,12 @@
       return isFinite(an) && isFinite(bn) ? an - bn : String(a).localeCompare(String(b));
     }).map(function (key) { return value[key]; }).filter(function (item) { return item != null; });
   }
+  function deviceDisplayName(name, mac) {
+    name = String(name || '').trim();
+    if (name && name !== '*' && name !== '-' && name !== '未知设备' && name !== 'Unknown') return name;
+    var suffix = String(mac || '').replace(/[^0-9a-f]/gi, '').slice(-4).toUpperCase();
+    return suffix ? '设备-' + suffix : '未命名设备';
+  }
   function rpc(method, args) {
     return fetch(API, {
       method: 'POST', credentials: 'same-origin', cache: 'no-store',
@@ -476,7 +482,7 @@
       section('上网设置',
         row('上网方式', select('wan-proto', [['dhcp', '自动获取 IP'], ['pppoe', 'PPPoE 拨号'], ['static', '静态 IP'], ['wds', '无线中继']])) +
         '<div id="wan-vlan-fields">' + row('WAN VLAN ID', input('wan-vlan-id', 'number', '留空表示不使用 VLAN', 'min="1" max="4094"')) + '</div>' +
-        '<div id="wan-pppoe">' + row('宽带账号', input('wan-user', 'text', '运营商宽带账号')) + row('宽带密码', password('wan-pass', '宽带密码')) + row('MTU', input('wan-mtu', 'number', '1492', 'min="1280" max="1500"')) + '</div>' +
+        '<div id="wan-pppoe">' + row('宽带账号', input('wan-user', 'text', '运营商宽带账号')) + row('宽带密码', password('wan-pass', '宽带密码')) + row('MTU', input('wan-mtu', 'number', '1492', 'min="1280" max="1492"')) + '</div>' +
         '<div id="wan-static"><div class="native-grid">' + row('IP 地址', input('wan-ip', 'text', '')) + row('子网掩码', input('wan-mask', 'text', '')) + '</div>' + row('默认网关', input('wan-gateway', 'text', '')) + '</div>' +
         '<div id="wan-wds">' +
           row('选择上级 Wi-Fi', '<div class="native-scan-control">' + select('wan-wds-network', [['', '请扫描上级 Wi-Fi']]) + '<button type="button" class="btn cbi-button cbi-button-add" id="wan-wds-scan">扫描</button></div><p class="native-scan-detail" id="wan-wds-detail">选择网络后会自动识别频段、信号和加密方式</p>') +
@@ -569,6 +575,7 @@
       show('#ipv6-dns-fields', checked('ipv6-enabled') && value('ipv6-dns-mode') === 'custom');
     }
     id('wan-proto').addEventListener('change', function () {
+      if (value('wan-proto') === 'pppoe') set('wan-mtu', '1492');
       syncWan();
       if (value('wan-proto') === 'wds' && !wdsNetworks.length) scanWds();
     });
@@ -613,7 +620,7 @@
     Promise.all([rpc('get_wan_info', {}), rpc('web_get_wds_config', {}).catch(function () { return {}; })]).then(function (items) {
       var wan = items[0], wds = items[1] || {};
       wdsWasEnabled = Number(wds.enable != null ? wds.enable : wds.enabled) === 1;
-      set('wan-proto', wdsWasEnabled ? 'wds' : wan.proto); set('wan-vlan-id', wan.vlan_mode === 'tagged' && wan.vlan_id ? wan.vlan_id : ''); set('wan-user', wan.username); set('wan-pass', wan.password); set('wan-mtu', wan.mtu);
+      set('wan-proto', wdsWasEnabled ? 'wds' : wan.proto); set('wan-vlan-id', wan.vlan_mode === 'tagged' && wan.vlan_id ? wan.vlan_id : ''); set('wan-user', wan.username); set('wan-pass', wan.password); set('wan-mtu', wan.proto === 'pppoe' ? Math.min(Number(wan.mtu) || 1492, 1492) : wan.mtu);
       set('wan-ip', wan.config_ipaddr != null ? wan.config_ipaddr : wan.ipaddr); set('wan-mask', wan.config_netmask != null ? wan.config_netmask : wan.netmask); set('wan-gateway', wan.config_gateway != null ? wan.config_gateway : wan.gateway); set('wan-dns-mode', Number(wan.dns_enabled) === 1 ? 'custom' : 'auto'); set('wan-dns1', wan.dns1); set('wan-dns2', wan.dns2);
       set('wan-wds-key', wds.key || '');
       writeRuntime('wan-info-type', ({ pppoe: '宽带拨号上网', dhcp: '动态 IP 上网', static: '静态 IP 上网', wds: '无线中继' })[wdsWasEnabled ? 'wds' : wan.proto] || wan.proto);
@@ -729,7 +736,7 @@
     var deviceType = device.device_type || '其他设备';
     var vendor = device.vendor || device.brand || '暂未识别';
     return '<ul class="native-table-row data" data-index="' + index + '">' +
-      '<li class="name col-device-name"><b>' + esc(device.name || '未知设备') + '</b></li>' +
+      '<li class="name col-device-name"><b>' + esc(deviceDisplayName(device.name, device.uid || device.mac)) + '</b></li>' +
       '<li class="col-device-address"><code>' + esc(mac) + '</code><small>' + esc(device.ip || '未分配 IP') + '</small></li>' +
       '<li class="col-device-type" title="' + esc(deviceType) + '">' + esc(deviceType) + '</li>' +
       '<li class="col-device-vendor" title="' + esc(vendor) + '">' + esc(vendor) + '</li>' +
@@ -739,7 +746,6 @@
   }
   function devicesPage() {
     page('设备列表',
-      '<div class="native-device-tools"><button id="device-list-mode" class="active"><span>列表模式</span></button><i></i><button id="device-topology-mode"><span>拓扑图模式</span></button></div>' +
       '<div class="native-device-group"><h3>在线设备</h3><div class="native-table native-device-table"><ul class="native-table-head"><li class="col-device-name">设备名称</li><li class="col-device-address">MAC/IP</li><li class="col-device-type">设备类型</li><li class="col-device-vendor">品牌 / 厂商</li><li class="col-device-status">状态</li><li class="col-device-speed">实时速度</li><li class="col-device-actions">操作</li></ul><div id="device-online"><div class="native-empty">正在读取设备…</div></div></div></div>' +
       '<div class="native-device-group"><h3>离线设备</h3><div class="native-table native-device-table"><ul class="native-table-head"><li class="col-device-name">设备名称</li><li class="col-device-address">MAC/IP</li><li class="col-device-type">设备类型</li><li class="col-device-vendor">品牌 / 厂商</li><li class="col-device-status">状态</li><li class="col-device-speed">实时速度</li><li class="col-device-actions">操作</li></ul><div id="device-offline"><div class="native-empty">正在读取设备…</div></div></div></div>');
     var editing = null;
@@ -825,7 +831,6 @@
         if (window.parent && window.parent.setHeight) window.parent.setHeight(document.body.scrollHeight + 40, 850);
       }).catch(function (error) { notify(error.message, false); }).then(function () { deviceLoading = false; });
     }
-    bindClick('#device-topology-mode', function () { notify('拓扑图会在 Mesh 节点接入后显示', true); });
     load();
     window.__nativeDeviceTimer = setInterval(load, 2000);
   }
@@ -839,7 +844,7 @@
       row('启用', toggle('access-enabled', '')) +
       '<div class="native-info">添加、移除、启停及名单模式切换会暂存，点击“保存并应用”后统一生效并重启 Wi-Fi。</div>' +
       '<section class="native-access-list"><h3 id="access-list-title">黑名单设备列表</h3><div class="native-table native-access-table"><ul class="native-table-head"><li class="access-name">设备名称</li><li class="access-address">MAC</li><li class="access-type">设备类型</li><li class="access-vendor">品牌 / 厂商</li><li class="access-action">操作</li></ul><div id="access-list"><div class="native-empty">正在读取名单…</div></div></div>' +
-      '<div class="native-access-actions"><button type="button" id="access-manual-open">手动添加</button><button type="button" id="access-device-open">从连接设备添加</button></div></section>' +
+      '<div class="native-access-actions"><button type="button" id="access-manual-open">手动添加</button><button type="button" id="access-device-open">选择设备添加</button></div></section>' +
       buttons(['access-mode-save', '保存并应用']) +
       '<div class="native-modal-mask"></div><div class="modal cbi-modal native-modal" id="access-modal"><div class="native-modal-head"><h4 id="access-modal-title">手动添加</h4><button type="button" class="btn cbi-button cbi-button-neutral native-modal-close" aria-label="关闭">×</button></div><div class="native-modal-body">' +
       '<div id="access-device-row">' + row('选择设备', '<select id="access-device" class="native-plain-select"><option value="">-- 请选择 --</option></select>') + '</div>' +
@@ -858,17 +863,47 @@
       id('access-deny').classList.toggle('active', policy === 'deny'); id('access-allow').classList.toggle('active', policy === 'allow');
       id('access-list-title').textContent = policy === 'allow' ? '白名单设备列表' : '黑名单设备列表';
     }
+    function refreshDeviceOptions() {
+      var policy = value('access-policy') === 'allow' ? 'allow' : 'deny';
+      var listed = {};
+      activeList().forEach(function (item) { listed[normalizeMac(item.mac || item.macaddr)] = true; });
+      var candidates = {}, order = [];
+      state.devices.forEach(function (device) {
+        var mac = normalizeMac(device.uid || device.id || device.mac);
+        if (!mac || listed[mac] || candidates[mac]) return;
+        candidates[mac] = { mac: mac, name: device.name || '', rejected_at: '' };
+        order.push(mac);
+      });
+      if (policy === 'allow') asArray(state.rejected).forEach(function (device) {
+        var mac = normalizeMac(device.mac || device.uid);
+        if (!mac || listed[mac]) return;
+        if (!candidates[mac]) {
+          candidates[mac] = { mac: mac, name: device.name || '', rejected_at: device.rejected_at || '' };
+          order.push(mac);
+        } else if (device.rejected_at) {
+          candidates[mac].rejected_at = device.rejected_at;
+          if (!candidates[mac].name) candidates[mac].name = device.name || '';
+        }
+      });
+      id('access-device').innerHTML = '<option value="">-- 请选择 --</option>' + order.map(function (mac) {
+        var device = candidates[mac];
+        var rejected = device.rejected_at ? '（最后拒绝：' + device.rejected_at + '）' : '';
+        return '<option value="' + esc(mac) + '" data-name="' + esc(device.name) + '">' +
+          esc(deviceDisplayName(device.name, mac)) + '（' + esc(mac) + '）' + esc(rejected) + '</option>';
+      }).join('');
+    }
     function modal(open, connected) {
       document.querySelector('.native-modal-mask').classList.toggle('open', open); id('access-modal').classList.toggle('open', open);
-      if (open) { id('access-modal-title').textContent = connected ? '从连接设备添加' : '手动添加'; show('#access-device-row', connected); if (!connected) { set('access-name', ''); set('access-mac', ''); } }
+      if (open) { id('access-modal-title').textContent = connected ? '选择设备添加' : '手动添加'; show('#access-device-row', connected); if (connected) refreshDeviceOptions(); else { set('access-name', ''); set('access-mac', ''); } }
     }
     function render() {
       var list = activeList();
       id('access-list').innerHTML = list.length ? list.map(function (item) {
         var device = deviceFor(item.mac || item.macaddr);
-        return '<ul class="native-table-row"><li class="access-name"><b>' + esc(item.name || device.name || '未知设备') + '</b></li><li class="access-address"><code>' + esc(item.mac || item.macaddr) + '</code></li><li class="access-type">' + esc(device.device_type || item.device_type || '其他设备') + '</li><li class="access-vendor">' + esc(device.vendor || device.brand || item.vendor || item.brand || '暂未识别') + '</li><li class="access-action"><button class="edit access-remove" data-mac="' + esc(item.mac || item.macaddr) + '">移除</button></li></ul>';
+        return '<ul class="native-table-row"><li class="access-name"><b>' + esc(deviceDisplayName(item.name || device.name, item.mac || item.macaddr)) + '</b></li><li class="access-address"><code>' + esc(item.mac || item.macaddr) + '</code></li><li class="access-type">' + esc(device.device_type || item.device_type || '其他设备') + '</li><li class="access-vendor">' + esc(device.vendor || device.brand || item.vendor || item.brand || '暂未识别') + '</li><li class="access-action"><button class="edit access-remove" data-mac="' + esc(item.mac || item.macaddr) + '">移除</button></li></ul>';
       }).join('') : '<div class="native-empty">当前名单为空</div>';
       syncMode();
+      refreshDeviceOptions();
       document.querySelectorAll('.access-remove').forEach(function (button) {
         bindClick(button, function () {
           var mac = normalizeMac(button.dataset.mac);
@@ -879,13 +914,13 @@
       });
     }
     function load() {
-      return Promise.all([rpc('get_macfilter_info', {}), rpc('web_get_device_list', {})]).then(function (items) {
+      return Promise.all([rpc('get_macfilter_info', {}), rpc('web_get_device_list', {}), rpc('web_get_rejected_list', {})]).then(function (items) {
         state.access = items[0]; state.devices = asArray(items[1].device_list);
+        state.rejected = asArray(items[2].data || items[2].rejected_list);
         draft.deny = asArray(state.access.blacklist).map(function (item) { return Object.assign({}, item); });
         draft.allow = asArray(state.access.whitelist).map(function (item) { return Object.assign({}, item); });
         dirty = false;
         set('access-policy', state.access.macpolicy || 'deny'); check('access-enabled', state.access.enable);
-        id('access-device').innerHTML = '<option value="">-- 请选择 --</option>' + state.devices.map(function (device) { return '<option value="' + esc(device.uid) + '" data-name="' + esc(device.name || '') + '">' + esc(device.name || '未知设备') + '（' + esc(device.uid) + '）</option>'; }).join('');
         render();
       }).catch(function (error) { notify(error.message, false); });
     }
@@ -935,20 +970,22 @@
         id('rejected-list').innerHTML = state.rejected.length ? state.rejected.map(function (item, index) {
           var address = '<code>' + esc(item.mac || item.uid || '') + '</code>' + (item.ip ? '<small>' + esc(item.ip) + '</small>' : '');
           var action = policy === 'allow' ? '加入白名单' : '移出黑名单';
-          return '<ul class="native-table-row" data-rejected-index="' + index + '"><li style="width:16%"><b>' + esc(item.name || '未知设备') + '</b></li><li style="width:18%">' + address + '</li><li style="width:12%">' + esc(item.device_type || '其他设备') + '</li><li style="width:15%">' + esc(item.vendor || item.brand || '暂未识别') + '</li><li style="width:11%"><b>' + esc(item.network || '主 Wi-Fi') + '</b><small>' + esc(item.band || '') + '</small></li><li style="width:16%">' + esc(item.rejected_at || '-') + '</li><li style="width:12%"><button class="edit rejected-policy">' + action + '</button><button class="edit rejected-clear">清除</button></li></ul>';
+          return '<ul class="native-table-row" data-rejected-index="' + index + '"><li style="width:16%"><b>' + esc(deviceDisplayName(item.name, item.mac || item.uid)) + '</b></li><li style="width:18%">' + address + '</li><li style="width:12%">' + esc(item.device_type || '其他设备') + '</li><li style="width:15%">' + esc(item.vendor || item.brand || '暂未识别') + '</li><li style="width:11%"><b>' + esc(item.network || '主 Wi-Fi') + '</b><small>' + esc(item.band || '') + '</small></li><li style="width:16%">' + esc(item.rejected_at || '-') + '</li><li style="width:12%"><button class="edit rejected-policy">' + action + '</button><button class="edit rejected-clear">清除</button></li></ul>';
         }).join('') : '<div class="native-empty">暂无被访问控制拒绝的设备</div>';
         document.querySelectorAll('.rejected-policy').forEach(function (button) {
           bindClick(button, function () {
             var item = state.rejected[Number(button.closest('[data-rejected-index]').getAttribute('data-rejected-index'))];
             var mac = item.mac || item.uid;
             var listItem = { name: item.name || '未知设备', macaddr: mac, mod: policy === 'allow' ? 1 : 0 };
-            busy(button, rpc('set_macfilter', { enable: Number(state.rejectedAccess.enable) ? 1 : 0, macpolicy: policy, list: [listItem] }), policy === 'allow' ? '已加入白名单' : '已移出黑名单').then(load);
+            var change = rpc('set_macfilter', { enable: Number(state.rejectedAccess.enable) ? 1 : 0, macpolicy: policy, list: [listItem] })
+              .then(function () { return rpc('clear_rejected_devices', { mac: mac, ssid: item.ssid || '' }); });
+            busy(button, change, policy === 'allow' ? '已加入白名单' : '已移出黑名单').then(load);
           });
         });
         document.querySelectorAll('.rejected-clear').forEach(function (button) {
           bindClick(button, function () {
             var item = state.rejected[Number(button.closest('[data-rejected-index]').getAttribute('data-rejected-index'))];
-            busy(button, rpc('clear_rejected_devices', { mac: item.mac || item.uid, scope: item.scope || '' }), '记录已清除').then(load);
+            busy(button, rpc('clear_rejected_devices', { mac: item.mac || item.uid, ssid: item.ssid || '' }), '记录已清除').then(load);
           });
         });
         if (window.parent && window.parent.setHeight) window.parent.setHeight(document.body.scrollHeight + 40, 850);
@@ -1016,8 +1053,8 @@
   }
 
   function ddnsPage() {
-    page('DDNS', '<div class="native-settings-grid">' +
-      '<section class="native-settings-panel"><h2>Cloudflare DDNS</h2>' +
+    page('DDNS', '<style>#be6500-native-root .ddns-config-panel .native-row>.cbi-value-title{text-align:left!important;white-space:nowrap!important;word-break:keep-all!important}</style><div class="native-settings-grid">' +
+      '<section class="native-settings-panel ddns-config-panel"><h2>Cloudflare DDNS</h2>' +
       '<div class="native-check-line">' + toggle('ddns-enabled', '启用 IPv4 DDNS') + toggle('ddns6-enabled', '启用 IPv6 DDNS') + '</div>' +
       row('IPv4 完整域名', input('ddns-domain', 'text', 'home.example.com', 'maxlength="253"')) +
       row('IPv6 完整域名', input('ddns6-domain', 'text', 'home6.example.com', 'maxlength="253"')) +
@@ -1025,20 +1062,120 @@
       row('Cloudflare 邮箱', input('ddns-email', 'email', 'name@example.com', 'maxlength="253"')) +
       row('Global API Key', password('ddns-key', '')) +
       row('更新方式', select('ddns-interval', [['dial', '仅拨号成功后运行一次'], ['1', '每 1 分钟'], ['2', '每 2 分钟'], ['5', '每 5 分钟'], ['10', '每 10 分钟'], ['15', '每 15 分钟'], ['20', '每 20 分钟'], ['30', '每 30 分钟'], ['60', '每 60 分钟']])) +
-      '<p class="native-info">“仅拨号成功后运行一次”会在 WAN 拨号获得地址后更新，不建立定时任务；IPv6 DDNS 使用 AAAA 记录。</p>' + buttons(['ddns-save', '保存 DDNS 设置']) + '</section>' +
+      '<p class="native-info">“仅拨号成功后运行一次”会在 WAN 拨号获得地址后更新，不建立定时任务；IPv6 DDNS 使用 AAAA 记录，取消勾选并保存会删除对应的 AAAA 记录。</p>' + buttons(['ddns-save', '保存 DDNS 设置']) + '</section>' +
       '<section class="native-settings-panel"><h2>DDNS 状态</h2><div class="native-meta" id="ddns-status">' +
-      '<div><small>当前公网 IPv4</small><span id="ddns-status-ip4">正在查询…</span></div><div><small>IPv4 解析记录</small><span id="ddns-status-record4">—</span></div>' +
-      '<div><small>当前公网 IPv6</small><span id="ddns-status-ip6">正在查询…</span></div><div><small>IPv6 解析记录</small><span id="ddns-status-record6">—</span></div>' +
+      '<div><small>WAN 接口 IPv4</small><span id="ddns-status-ip4">正在读取…</span></div><div><small>IPv4 解析记录</small><span id="ddns-status-record4">—</span></div>' +
+      '<div><small>WAN 接口 IPv6</small><span id="ddns-status-ip6">—</span></div><div><small>IPv6 解析记录</small><span id="ddns-status-record6">—</span></div>' +
       '<div><small>上次运行时间</small><span id="ddns-status-time">—</span></div><div><small>上次结果</small><span id="ddns-status-result">—</span></div></div>' +
       '<div class="native-inline-actions"><button type="button" class="btn cbi-button cbi-button-neutral" id="ddns-refresh">刷新状态</button><button type="button" class="btn cbi-button cbi-button-action" id="ddns-run">立即更新</button></div></section></div>' +
       '<section class="native-settings-panel native-settings-wide"><h2>DDNS 运行日志</h2><pre id="ddns-log" class="native-log">正在读取日志…</pre></section>');
     initPasswordButtons();
     function loadConfig() { return rpc('get_cf_ddns', {}).then(function (result) { check('ddns-enabled', result.enabled); check('ddns6-enabled', result.enabled6); set('ddns-domain', result.domain); set('ddns6-domain', result.domain6 || result.domain); set('ddns-zone', result.zone); set('ddns-email', result.email); set('ddns-key', result.key); set('ddns-interval', result.interval || 'dial'); }); }
-    function loadStatus() { return Promise.all([rpc('get_cf_ddns_status', {}), rpc('get_cf_ddns_log', {})]).then(function (items) { var result = items[0]; id('ddns-status-ip4').textContent = result.ipv4 || '—'; id('ddns-status-record4').textContent = result.record4 || '—'; id('ddns-status-ip6').textContent = result.ipv6 || '—'; id('ddns-status-record6').textContent = result.record6 || '—'; id('ddns-status-time').textContent = result.last_time || '—'; id('ddns-status-result').textContent = result.last_result || '—'; id('ddns-log').textContent = items[1].log || '暂无日志'; }).catch(function (error) { notify(error.message || 'DDNS 状态读取失败', false); }); }
+    function loadStatus() { return Promise.all([rpc('get_cf_ddns_status', {}), rpc('get_cf_ddns_log', {})]).then(function (items) { var result = items[0], ipv6Enabled = Number(result.enabled6) === 1; id('ddns-status-ip4').textContent = result.ipv4 || '—'; id('ddns-status-record4').textContent = result.record4 || '—'; id('ddns-status-ip6').textContent = ipv6Enabled ? (result.ipv6 || '—') : '未启用'; id('ddns-status-record6').textContent = ipv6Enabled ? (result.record6 || '—') : '未启用'; id('ddns-status-time').textContent = result.last_time || '—'; id('ddns-status-result').textContent = result.last_result || '—'; id('ddns-log').textContent = items[1].log || '暂无日志'; }).catch(function (error) { notify(error.message || 'DDNS 状态读取失败', false); }); }
     bindClick('#ddns-save', function () { var button = this; busy(button, rpc('save_cf_ddns', { enabled: checked('ddns-enabled') ? 1 : 0, enabled6: checked('ddns6-enabled') ? 1 : 0, domain: value('ddns-domain'), domain6: value('ddns6-domain'), zone: value('ddns-zone'), email: value('ddns-email'), key: value('ddns-key'), interval: value('ddns-interval') }), 'DDNS 设置已保存').then(function () { return loadStatus(); }); });
     bindClick('#ddns-refresh', function () { busy(this, loadStatus(), '状态已刷新'); });
     bindClick('#ddns-run', function () { busy(this, rpc('run_cf_ddns', {}), 'DDNS 更新完成').then(loadStatus); });
-    loadConfig().catch(function (error) { notify(error.message, false); }); loadStatus();
+    loadConfig().then(loadStatus).catch(function (error) { notify(error.message, false); });
+  }
+
+  function certificatesPage() {
+    page('证书管理', '<style>.cert-toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin:18px 0}.cert-toolbar button{width:auto!important;min-width:88px!important;height:38px!important;min-height:38px!important;padding:0 15px!important;font-size:14px!important;line-height:36px!important}.cert-table{overflow-x:auto}.cert-table>ul,.cert-table>#cert-list>ul{min-width:1180px}.cert-table li{width:auto!important}.cert-table li:nth-child(1){flex:0 0 17%}.cert-table li:nth-child(2){flex:0 0 18%}.cert-table li:nth-child(3){flex:0 0 16%}.cert-table li:nth-child(4){flex:0 0 9%}.cert-table li:nth-child(5),.cert-table li:nth-child(6){flex:0 0 8%}.cert-table li:nth-child(7){flex:1;min-width:180px}.cert-state{display:inline-block;padding:3px 9px;border:1px solid;border-radius:5px}.cert-state-ok{color:#1597f5;border-color:#70c4ff;background:rgba(21,151,245,.08)}.cert-state-warn{color:#d79b16;border-color:#d79b16}.cert-state-bad{color:#e34b4b;border-color:#e34b4b}.cert-row-actions{display:flex;align-items:center;gap:7px;white-space:nowrap}.cert-row-actions .cbi-button{margin:0!important}.cert-check{width:18px;height:18px;vertical-align:middle;cursor:pointer}.cert-save-wrap{display:flex;justify-content:flex-end;margin:18px 0}.cert-save-wrap button{min-width:96px}.cert-dialog textarea{width:100%;min-height:130px}.cert-dialog .cbi-value-field{min-width:0}.cert-dialog-section{margin:12px 0 4px;padding-top:12px;border-top:1px solid var(--border-color-medium,rgba(127,127,127,.25));font-size:16px}</style><div class="cert-toolbar"><button class="btn cbi-button cbi-button-action" id="cert-open-issue">申请证书</button><button class="btn cbi-button cbi-button-action" id="cert-open-upload">上传证书</button></div>' +
+      '<style>.cert-toolbar button{min-width:72px!important;height:34px!important;min-height:34px!important;padding:0 12px!important;font-size:13px!important;line-height:32px!important}</style><div class="native-table cert-table"><ul class="native-table-head"><li>域名</li><li>其他域名</li><li>过期时间</li><li>状态</li><li>应用</li><li>自动续期</li><li>操作</li></ul><div id="cert-list"><div class="native-empty">正在读取证书…</div></div></div><div class="cbi-page-actions native-actions"><button type="button" class="btn cbi-button cbi-button-apply" id="cert-save">保存</button></div>' +
+      '<section class="native-settings-panel native-settings-wide"><h2>运行日志</h2><pre id="cert-log" class="native-log">暂无日志</pre></section>');
+    var tableStyle = document.createElement('style');
+    tableStyle.textContent = '.cert-table{overflow-x:auto!important;width:100%!important;box-sizing:border-box}.cert-table>ul,.cert-table>#cert-list>ul{display:flex!important;width:100%!important;min-width:1280px!important;box-sizing:border-box}.cert-table li{display:flex!important;align-items:center!important;justify-content:center!important;text-align:center!important;min-width:0!important;box-sizing:border-box}.cert-table li:nth-child(1){flex:0 0 20%!important}.cert-table li:nth-child(2){flex:0 0 19%!important}.cert-table li:nth-child(3){flex:0 0 17%!important}.cert-table li:nth-child(4){flex:0 0 10%!important}.cert-table li:nth-child(5){flex:0 0 7%!important}.cert-table li:nth-child(6){flex:0 0 9%!important}.cert-table li:nth-child(7){flex:0 0 18%!important}.cert-row-actions{justify-content:center!important;gap:7px}';
+    document.head.appendChild(tableStyle);
+    var config = {};
+    var savedSecretMask = '••••••••••••••••••••••••';
+    function field(form, name) { var node = form.querySelector('[name="' + name + '"]'); if (!node) return ''; var value = node.value.trim(); return node.dataset.savedSecret === '1' && value === savedSecretMask ? '' : value; }
+    function checkedField(form, name) { var node = form.querySelector('[name="' + name + '"]'); return !!(node && node.checked); }
+    function modal(title, body, submitText, submit) {
+      var host = window.parent && window.parent !== window ? window.parent : window;
+      host.L.require('ui').then(function (ui) {
+        if (!host.document.getElementById('be6500-cert-modal-theme')) {
+          var modalTheme = host.document.createElement('style');
+          modalTheme.id = 'be6500-cert-modal-theme';
+          modalTheme.textContent = '.be6500-cert-detail{box-sizing:border-box;width:100%;max-height:340px;min-height:120px;margin:0;padding:18px;border:1px solid var(--border-color-medium,rgba(127,127,127,.35));border-radius:6px;background:var(--background-color-high,transparent);color:var(--text-color-high,var(--text-color-highest,inherit));font:inherit;line-height:1.7;white-space:pre-wrap;overflow:auto;color-scheme:inherit}.cert-dialog{height:auto!important;min-height:0!important;margin-bottom:0!important}.cert-dialog .cbi-value{margin-bottom:.45rem!important}.cert-dialog .cert-dialog-section{height:auto!important;margin:.45rem 0 .25rem!important;padding-top:.55rem!important}.cert-dialog.native-page .native-password{display:flex!important;max-width:100%!important;border:0!important;background:transparent!important;box-sizing:border-box!important}.cert-dialog.native-page .native-password>.cbi-input-text{flex:1 1 auto!important;width:auto!important;min-width:0!important;box-sizing:border-box!important;border-radius:var(--border-radius,.25rem) 0 0 var(--border-radius,.25rem)!important}.cert-dialog.native-page .native-password>button{position:static!important;flex:0 0 2.5rem!important;width:2.5rem!important;min-width:0!important;margin:0!important;padding:.5em!important;box-sizing:border-box!important;border:1px solid var(--border-color-medium,rgba(127,127,127,.35))!important;border-left:0!important;border-radius:0 var(--border-radius,.25rem) var(--border-radius,.25rem) 0!important;background:var(--background-color-high,transparent)!important;color:inherit!important;font-weight:bold!important;line-height:normal!important}';
+          host.document.head.appendChild(modalTheme);
+        }
+        var form = host.document.createElement('div'); form.className = 'cbi-map native-page cert-dialog'; form.innerHTML = body;
+        var progress = host.document.createElement('div'); progress.className = 'alert-message info'; progress.style.display = 'none'; progress.style.marginTop = '12px'; progress.textContent = '正在处理，DNS 验证和 CA 签发通常需要 1–5 分钟，请勿重复点击或关闭页面。';
+        form.appendChild(progress);
+        var footer = host.document.createElement('div'); footer.className = 'right';
+        var cancel = host.document.createElement('button'); cancel.className = 'btn cbi-button cbi-button-neutral'; cancel.textContent = '取消';
+        var save = host.document.createElement('button'); save.className = 'btn cbi-button cbi-button-positive important'; save.textContent = submitText;
+        var closeOnly = submitText === '关闭';
+        cancel.onclick = function () { ui.hideModal(); }; save.onclick = closeOnly ? function () { ui.hideModal(); } : function () {
+          var originalText = save.textContent;
+          save.disabled = true; cancel.disabled = true; save.textContent = originalText + '中…'; progress.style.display = '';
+          Promise.resolve(submit(form)).then(function (result) {
+            ui.hideModal(); notify((result && result.message) || originalText + '成功', true); return load();
+          }).catch(function (error) {
+            progress.textContent = '操作失败：' + (error.message || '请查看运行日志'); progress.className = 'alert-message error';
+            notify(error.message || '操作失败', false);
+          }).finally(function () { save.disabled = false; cancel.disabled = false; save.textContent = originalText; });
+        };
+        if (!closeOnly) footer.appendChild(cancel);
+        footer.appendChild(save); ui.showModal(title, [form, footer]);
+        [['certlocal', 'cert'], ['keylocal', 'key']].forEach(function (pair) { var upload = form.querySelector('[name="' + pair[0] + '"]'), target = form.querySelector('[name="' + pair[1] + '"]'); if (upload && target) upload.addEventListener('change', function () { var file = upload.files && upload.files[0]; if (!file) return; var reader = new FileReader(); reader.onload = function () { target.value = String(reader.result || ''); }; reader.readAsText(file); }); });
+        form.querySelectorAll('.cert-password-toggle').forEach(function (button) { button.addEventListener('click', function () { var input = button.parentNode.querySelector('input'); if (!input) return; var hidden = input.type === 'password'; input.type = hidden ? 'text' : 'password'; button.textContent = hidden ? '◉' : '*'; button.setAttribute('aria-pressed', hidden ? 'true' : 'false'); }); });
+        form.querySelectorAll('input[data-saved-secret="1"]').forEach(function (input) {
+          input.addEventListener('focus', function () { input.select(); });
+          input.addEventListener('input', function () { if (input.value !== savedSecretMask) delete input.dataset.savedSecret; });
+        });
+        var dnsProvider = form.querySelector('select[name="dns_provider"]');
+        var secretControl = form.querySelector('.native-password');
+        if (dnsProvider && secretControl) {
+          var providerRect = dnsProvider.getBoundingClientRect();
+          secretControl.style.setProperty('width', providerRect.width + 'px', 'important');
+          secretControl.style.setProperty('height', providerRect.height + 'px', 'important');
+          secretControl.querySelectorAll('input,button').forEach(function (control) {
+            control.style.setProperty('height', providerRect.height + 'px', 'important');
+            control.style.setProperty('min-height', providerRect.height + 'px', 'important');
+          });
+        }
+      });
+    }
+    function inputRow(label, name, valueText, placeholder, type) { return '<div class="cbi-value"><label class="cbi-value-title">' + label + '</label><div class="cbi-value-field"><input class="cbi-input-text" type="' + (type || 'text') + '" name="' + name + '" value="' + esc(valueText || '') + '" placeholder="' + esc(placeholder || '') + '"></div></div>'; }
+    function passwordRow(label, name, placeholder, saved) { return '<div class="cbi-value"><label class="cbi-value-title">' + label + '</label><div class="cbi-value-field"><div class="native-password"><input class="cbi-input-text" type="password" name="' + name + '" value="' + (saved ? savedSecretMask : '') + '"' + (saved ? ' data-saved-secret="1"' : '') + ' placeholder="' + esc(saved ? '' : (placeholder || '')) + '" autocomplete="new-password"><button type="button" class="btn cbi-button cbi-button-neutral cert-password-toggle" data-password="1" aria-label="显示或隐藏密钥">*</button></div></div></div>'; }
+    function selectRow(label, name, options, current) { return '<div class="cbi-value"><label class="cbi-value-title">' + label + '</label><div class="cbi-value-field"><select class="cbi-input-select" name="' + name + '">' + options.map(function (o) { return '<option value="' + o[0] + '"' + (o[0] === current ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') + '</select></div></div>'; }
+    function saveIssue(form) {
+      var acme = { name: '', email: field(form, 'acme_email'), provider: field(form, 'ca') };
+      var dns = { name: '', provider: field(form, 'dns_provider'), email: field(form, 'dns_email'), secret: field(form, 'secret') };
+      return rpc('save_cert_acme_account', acme).then(function () { return rpc('save_cert_dns_account', dns); }).then(function () {
+        return rpc('save_cert_settings', { domain: field(form, 'domain'), other_domains: field(form, 'others'), acme_email: acme.email, dns_provider: dns.provider, dns_email: dns.email, dns_secret: dns.secret, auto_renew: checkedField(form, 'auto') ? 1 : 0, cert_file: field(form, 'certfile'), key_file: field(form, 'keyfile') });
+      });
+    }
+    function openIssue() { modal('申请证书',
+      '<h3 class="cert-dialog-section">证书信息</h3>' + inputRow('主域名', 'domain', '', '例如 example.com 或 *.example.com') + inputRow('其他域名', 'others', '', '使用逗号分隔') + inputRow('证书路径', 'certfile', '', '留空按域名自动生成') + inputRow('私钥路径', 'keyfile', '', '留空按域名自动生成') + '<div class="cbi-value"><label class="cbi-value-title">自动续期</label><div class="cbi-value-field"><input type="checkbox" name="auto" checked> 启用</div></div>' +
+      '<h3 class="cert-dialog-section">ACME 账户</h3>' + inputRow('邮箱', 'acme_email', config.acme_email, 'ACME 账户邮箱', 'email') + selectRow('证书机构', 'ca', [['letsencrypt', "Let's Encrypt"], ['zerossl', 'ZeroSSL'], ['buypass', 'Buypass'], ['google', 'Google Trust Services']], config.ca || 'letsencrypt') +
+      '<h3 class="cert-dialog-section">DNS 账户</h3>' + selectRow('服务商', 'dns_provider', [['cloudflare_token', 'Cloudflare API Token'], ['cloudflare_global', 'Cloudflare Global API Key']], config.dns_provider || 'cloudflare_token') + inputRow('邮箱', 'dns_email', config.dns_email, 'Global API Key 模式填写', 'email') + passwordRow('API Token / Key', 'secret', '请输入凭据', Number(config.secret_saved) === 1),
+      '申请', function (form) { return saveIssue(form).then(function (result) { return rpc('issue_certificate', { id: result.id }); }); }); }
+    function openUpload() { modal('上传证书', '<p class="alert-message info">系统会自动校验证书及私钥内容。</p>' + inputRow('域名', 'domain', '', '证书主域名') + inputRow('证书文件', 'certlocal', '', '', 'file') + inputRow('私钥文件', 'keylocal', '', '', 'file') + '<div class="cbi-value"><label class="cbi-value-title">证书内容</label><div class="cbi-value-field"><textarea class="cbi-input-text" name="cert" rows="6"></textarea></div></div><div class="cbi-value"><label class="cbi-value-title">私钥内容</label><div class="cbi-value-field"><textarea class="cbi-input-text" name="key" rows="6"></textarea></div></div>' + inputRow('证书路径', 'certfile', '', '留空自动生成默认路径') + inputRow('私钥路径', 'keyfile', '', '留空自动生成默认路径'), '保存', function (form) { return rpc('save_cert_settings', { domain: field(form, 'domain'), other_domains: '', acme_email: config.acme_email || 'router@localhost.local', dns_provider: config.dns_provider || 'cloudflare_token', dns_email: config.dns_email, dns_secret: '', auto_renew: config.auto_renew, cert_file: field(form, 'certfile'), key_file: field(form, 'keyfile') }).then(function (result) { return rpc('upload_certificate', { id: result.id, certificate: field(form, 'cert'), private_key: field(form, 'key') }); }); }); }
+    var certPollTimer = null;
+    function load() { return Promise.all([rpc('get_cert_settings', {}), rpc('get_certificate_log', {})]).then(function (items) { config = items[0] || {}; id('cert-log').textContent = items[1].log || '暂无日志'; var certs = asArray(config.certificates); id('cert-list').innerHTML = certs.length ? certs.map(function (cert) { return '<ul class="native-table-row" data-cert-id="' + esc(cert.id) + '"><li><b>' + esc(cert.domain || '已上传证书') + '</b></li><li>' + esc(cert.other_domains || '-') + '</li><li>' + esc(cert.expires_at || '-') + '</li><li><span class="cert-state ' + (cert.cert_state === '正常' ? 'cert-state-ok' : (cert.cert_state === '申请中' || cert.cert_state === '即将过期' ? 'cert-state-warn' : 'cert-state-bad')) + '">' + esc(cert.cert_state || '未安装') + '</span></li><li><input class="cert-check cert-apply-box" type="checkbox" name="cert-applied" aria-label="应用到 HTTPS" data-id="' + esc(cert.id) + '"' + (Number(cert.applied) ? ' checked' : '') + (Number(cert.present) ? '' : ' disabled') + '></li><li><input class="cert-check cert-auto-box" type="checkbox" aria-label="自动续期" data-id="' + esc(cert.id) + '"' + (Number(cert.auto_renew) ? ' checked' : '') + '></li><li><div class="cert-row-actions"><button class="btn cbi-button cbi-button-neutral cert-detail" data-id="' + esc(cert.id) + '">详情</button><button class="btn cbi-button cbi-button-action cert-renew" data-id="' + esc(cert.id) + '">更新</button><button class="btn cbi-button cbi-button-negative cert-remove" data-id="' + esc(cert.id) + '">删除</button></div></li></ul>'; }).join('') : '<div class="native-empty">暂无证书</div>';
+      document.querySelectorAll('.cert-apply-box').forEach(function (box) { box.addEventListener('change', function () { if (!box.checked) return; document.querySelectorAll('.cert-apply-box').forEach(function (other) { if (other !== box) other.checked = false; }); }); });
+      document.querySelectorAll('.cert-renew').forEach(function (b) { bindClick(b, function () { busy(b, rpc('renew_certificate', { id: b.dataset.id }), '证书已更新').then(load); }); });
+      document.querySelectorAll('.cert-remove').forEach(function (b) { bindClick(b, function () {
+        var certId = b.dataset.id;
+        confirmDialog('删除证书', '确定删除当前证书吗？如果它正在用于管理页面 HTTPS，删除后将同时停止应用该证书。').then(function (confirmed) {
+          if (!confirmed) return;
+          busy(b, rpc('delete_certificate', { id: certId }), '证书已删除').then(function () {
+            return load();
+          }).catch(function () {});
+        });
+      }); });
+      document.querySelectorAll('.cert-detail').forEach(function (b) { bindClick(b, function () { var cert = certs.find(function (item) { return item.id === b.dataset.id; }) || {}; modal('证书详情', '<pre class="be6500-cert-detail">' + esc(cert.details || '暂无证书详情') + '\n\n证书路径：' + esc(cert.cert_file || '') + '\n私钥路径：' + esc(cert.key_file || '') + '</pre>', '关闭', function () { return Promise.resolve(); }); }); });
+      if (certPollTimer) { clearTimeout(certPollTimer); certPollTimer = null; }
+      var hasPending = false;
+      for (var ci = 0; ci < certs.length; ci++) {
+        if (certs[ci] && certs[ci].cert_state === '申请中') { hasPending = true; break; }
+      }
+      if (hasPending) certPollTimer = setTimeout(function () { load().catch(function () {}); }, 3000);
+    }); }
+    bindClick('#cert-open-issue', openIssue); bindClick('#cert-open-upload', openUpload);
+    bindClick('#cert-save', function () { var autoStates = [].map.call(document.querySelectorAll('.cert-auto-box'), function (box) { return box.dataset.id + ':' + (box.checked ? '1' : '0'); }).join(','), applyBox = document.querySelector('.cert-apply-box:checked'); busy(this, rpc('save_certificate_preferences', { auto_states: autoStates, applied_id: applyBox ? applyBox.dataset.id : '' }), '证书设置已保存').then(load); });
+    load().catch(function (error) { notify(error.message || '证书状态读取失败', false); });
   }
 
   function portPage() {
@@ -1310,6 +1447,7 @@
     else if (/management\/dhcp\.html$/.test(path)) dhcpPage();
     else if (/qosLimit\.html$/.test(path)) qosPage();
     else if (/DDNS\.html$/.test(path)) ddnsPage();
+    else if (/Certificates\.html$/.test(path)) certificatesPage();
     else if (/portForward\.html$/.test(path)) portPage();
     else if (/DMZ\.html$/.test(path)) dmzPage();
     else if (/UPnP\.html$/.test(path)) upnpPage();

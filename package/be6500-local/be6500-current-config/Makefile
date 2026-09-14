@@ -1,7 +1,7 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=be6500-current-config
-PKG_RELEASE:=3
+PKG_RELEASE:=4
 
 include $(INCLUDE_DIR)/package.mk
 
@@ -25,6 +25,7 @@ define Package/be6500-current-config/install
 	$(CP) ./files/etc/config/* $(1)/usr/share/be6500-current-config/
 	$(INSTALL_DIR) $(1)/etc/uci-defaults
 	$(INSTALL_BIN) ./files/98-be6500-default-password $(1)/etc/uci-defaults/98-be6500-default-password
+	$(INSTALL_BIN) ./files/97-be6500-remove-ifname-migration $(1)/etc/uci-defaults/97-be6500-remove-ifname-migration
 	$(INSTALL_BIN) ./files/99-be6500-current-config $(1)/etc/uci-defaults/99-be6500-current-config
 endef
 

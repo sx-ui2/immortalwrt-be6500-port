@@ -1,0 +1,36 @@
+#!/bin/sh
+
+# Older image defaults could leave both a regular default_radioN AP and a
+# be6500_main_* AP on the same radio.  Keep the standard default_radioN
+# section used by the LuCI helper and remove only an equivalent duplicate.
+changed=0
+
+for index in 0 1 2; do
+	canonical="default_radio${index}"
+	device="radio${index}"
+	[ "$(uci -q get "wireless.$canonical")" = "wifi-iface" ] || continue
+
+	canonical_ssid="$(uci -q get "wireless.$canonical.ssid")"
+	canonical_network="$(uci -q get "wireless.$canonical.network")"
+	canonical_mode="$(uci -q get "wireless.$canonical.mode")"
+
+	for section in $(uci show wireless 2>/dev/null | sed -n 's/^wireless\.\([^.=]*\)=wifi-iface$/\1/p'); do
+		[ "$section" = "$canonical" ] && continue
+		[ "$(uci -q get "wireless.$section.device")" = "$device" ] || continue
+		[ "$(uci -q get "wireless.$section.mode")" = "${canonical_mode:-ap}" ] || continue
+		[ "$(uci -q get "wireless.$section.network")" = "${canonical_network:-lan}" ] || continue
+		[ "$(uci -q get "wireless.$section.ssid")" = "$canonical_ssid" ] || continue
+		[ "$(uci -q get "wireless.$section.be6500_role")" = "main" ] || continue
+
+		uci -q delete "wireless.$section"
+		changed=1
+	done
+
+	if [ "$(uci -q get "wireless.$canonical.be6500_role")" != "main" ]; then
+		uci -q set "wireless.$canonical.be6500_role=main"
+		changed=1
+	fi
+done
+
+[ "$changed" -eq 0 ] || uci -q commit wireless
+exit 0

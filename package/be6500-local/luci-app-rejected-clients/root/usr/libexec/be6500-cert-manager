@@ -1,0 +1,202 @@
+#!/bin/sh
+
+CONFIG=be6500_cert
+SECTION=main
+CERT_DIR=/etc/be6500-certificates
+ACME_HOME=/root/.acme.sh
+LOG=/tmp/be6500-cert-manager.log
+
+get() { uci -q get "$CONFIG.$SECTION.$1" 2>/dev/null || uci -q get "$CONFIG.main.$1"; }
+setv() { uci -q set "$CONFIG.$SECTION.$1=$2"; }
+valid_id() { case "$1" in cert_[a-zA-Z0-9_]*) return 0;; *) return 1;; esac; }
+init_config() {
+	mkdir -p "$CERT_DIR"
+	chmod 700 "$CERT_DIR"
+	[ -e "/etc/config/$CONFIG" ] || : >"/etc/config/$CONFIG"
+	if ! uci -q get "$CONFIG.$SECTION" >/dev/null; then
+		uci -q set "$CONFIG.$SECTION=settings"
+		setv auto_renew 1
+		setv ca letsencrypt
+		setv cert_file "$CERT_DIR/fullchain.pem"
+		setv key_file "$CERT_DIR/privkey.pem"
+		uci -q commit "$CONFIG"
+	fi
+	if [ "$(uci -q get "$CONFIG.main.legacy_migrated")" != 1 ] && [ -n "$(uci -q get "$CONFIG.main.domain")" ] && ! uci -q show "$CONFIG" 2>/dev/null | grep -q "=certificate$"; then
+		local option value
+		uci -q set "$CONFIG.cert_legacy=certificate"
+		for option in domain other_domains auto_renew cert_file key_file; do
+			value="$(uci -q get "$CONFIG.main.$option")"; [ -z "$value" ] || uci -q set "$CONFIG.cert_legacy.$option=$value"
+		done
+		uci -q set "$CONFIG.main.applied_id=cert_legacy"
+		uci -q set "$CONFIG.main.legacy_migrated=1"
+		uci -q commit "$CONFIG"
+	fi
+	chmod 600 "/etc/config/$CONFIG" 2>/dev/null
+}
+cert_file() { local value; value="$(get cert_file)"; printf '%s' "${value:-$CERT_DIR/fullchain.pem}"; }
+key_file() { local value; value="$(get key_file)"; printf '%s' "${value:-$CERT_DIR/privkey.pem}"; }
+prepare_paths() {
+	mkdir -p "$(dirname "$(cert_file)")" "$(dirname "$(key_file)")" || return 1
+}
+cert_dates() {
+	if [ -s "$(cert_file)" ] && command -v openssl >/dev/null; then
+		openssl x509 -in "$(cert_file)" -noout -subject -issuer -dates 2>/dev/null | tr '\n' '\t'
+	fi
+}
+ensure_acme() {
+	[ -x "$ACME_HOME/acme.sh" ] && return 0
+	local email
+	email="$(get acme_email)"
+	[ -n "$email" ] || { echo '请先填写 ACME 账户邮箱'; return 1; }
+	if [ -x /usr/lib/acme/client/acme.sh ]; then
+		(cd /usr/lib/acme/client && HOME=/root ./acme.sh --install --home "$ACME_HOME" --accountemail "$email" --nocron) >>"$LOG" 2>&1 || return 1
+	else
+		command -v curl >/dev/null || { echo '缺少 ACME 客户端和 curl'; return 1; }
+		curl -fsSL https://get.acme.sh -o /tmp/be6500-acme-install.sh >>"$LOG" 2>&1 || return 1
+		sh /tmp/be6500-acme-install.sh email="$email" >>"$LOG" 2>&1 || return 1
+	fi
+	[ -x "$ACME_HOME/acme.sh" ] || { echo 'ACME 客户端安装失败'; return 1; }
+}
+fail_log() { tail -n 24 "$LOG" 2>/dev/null; exit 1; }
+apply_cert() {
+	[ -s "$(cert_file)" ] && [ -s "$(key_file)" ] || { echo '证书或私钥不存在'; return 1; }
+	local old_cert old_key old_https old_redirect
+	old_cert="$(uci -q get uhttpd.main.cert)"
+	old_key="$(uci -q get uhttpd.main.key)"
+	old_https="$(uci -q get uhttpd.main.listen_https)"
+	old_redirect="$(uci -q get uhttpd.main.redirect_https)"
+	uci -q set uhttpd.main.cert="$(cert_file)"
+	uci -q set uhttpd.main.key="$(key_file)"
+	uci -q set uhttpd.main.redirect_https='1'
+	if ! uci -q get uhttpd.main.listen_https >/dev/null; then
+		uci -q add_list uhttpd.main.listen_https='0.0.0.0:443'
+		uci -q add_list uhttpd.main.listen_https='[::]:443'
+	fi
+	uci -q commit uhttpd
+	uci -q set "$CONFIG.main.applied_id=$SECTION"
+	uci -q commit "$CONFIG"
+	if [ "$old_cert" != "$(cert_file)" ] || [ "$old_key" != "$(key_file)" ] || [ -z "$old_https" ] || [ "$old_redirect" != 1 ]; then
+		(sleep 2; /etc/init.d/uhttpd restart) >>"$LOG" 2>&1 </dev/null &
+	fi
+}
+disable_https() {
+	local had_https
+	had_https="$(uci -q get uhttpd.main.listen_https)"
+	uci -q delete uhttpd.main.cert
+	uci -q delete uhttpd.main.key
+	uci -q delete uhttpd.main.listen_https
+	uci -q set uhttpd.main.redirect_https='0'
+	uci -q commit uhttpd
+	uci -q delete "$CONFIG.main.applied_id"
+	uci -q commit "$CONFIG"
+	[ -z "$had_https" ] || (sleep 2; /etc/init.d/uhttpd restart) >>"$LOG" 2>&1 </dev/null &
+}
+install_cron() {
+	local marker='# be6500 certificate auto renew'
+	sed -i "\|$marker|d" /etc/crontabs/root 2>/dev/null
+	uci -q show "$CONFIG" 2>/dev/null | sed -n "s/^$CONFIG\.\(cert_[A-Za-z0-9_]*\)=certificate$/\1/p" | while read -r cert_id; do
+		[ "$(uci -q get "$CONFIG.$cert_id.auto_renew")" = 1 ] || continue
+		echo "17 4 * * * /usr/libexec/be6500-cert-manager renew $cert_id --cron >/dev/null 2>&1 $marker" >>/etc/crontabs/root
+	done
+	/etc/init.d/cron restart >/dev/null 2>&1
+}
+
+init_config
+action="$1"; shift 2>/dev/null
+if [ "$action" != save ] && valid_id "$1"; then SECTION="$1"; shift; fi
+case "$action" in
+	info)
+		[ -s "$(cert_file)" ] && present=1 || present=0
+		printf 'CERT_INFO\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+			"$(get domain)" "$(get other_domains)" "$(get acme_email)" "$(get dns_provider)" \
+			"$(get dns_email)" "$(get auto_renew)" "$present" "$(cert_file)" "$(key_file)"
+		cert_dates
+		;;
+	save)
+		valid_id "$1" || { echo '证书 ID 不正确'; exit 1; }
+		SECTION="$1"; shift
+		uci -q set "$CONFIG.$SECTION=certificate"
+		setv domain "$1"; setv other_domains "$2"; setv acme_email "$3"; setv dns_provider "$4"
+		setv dns_email "$5"; [ -n "$6" ] && setv dns_secret "$6"; setv auto_renew "$7"
+		setv cert_file "$8"; setv key_file "$9"
+		uci -q commit "$CONFIG"; chmod 600 "/etc/config/$CONFIG"; install_cron; echo '证书设置已保存'
+		;;
+	auto)
+		[ "$1" = 1 ] && setv auto_renew 1 || setv auto_renew 0
+		uci -q commit "$CONFIG"; chmod 600 "/etc/config/$CONFIG"; install_cron
+		echo '自动续期设置已保存'
+		;;
+	preferences)
+		[ "$1" = 1 ] && setv auto_renew 1 || setv auto_renew 0
+		uci -q commit "$CONFIG"; chmod 600 "/etc/config/$CONFIG"; install_cron
+		if [ "$2" = 1 ]; then apply_cert || exit $?; else disable_https || exit $?; fi
+		echo '证书设置已保存'
+		;;
+	issue|renew)
+		domain="$(get domain)"; email="$(get acme_email)"; provider="$(get dns_provider)"; dns_email="$(get dns_email)"; secret="$(get dns_secret)"
+		[ -n "$domain" ] || { echo '请先填写主域名'; exit 1; }
+		: >"$LOG"; chmod 600 "$LOG"
+		ensure_acme || fail_log
+		prepare_paths || { echo '无法创建证书路径'; exit 1; }
+		case "$provider" in
+			cloudflare_token) export CF_Token="$secret"; dns=dns_cf ;;
+			cloudflare_global) export CF_Email="$dns_email" CF_Key="$secret"; dns=dns_cf ;;
+			*) echo '当前仅支持 Cloudflare API Token 或 Global API Key'; exit 1 ;;
+		esac
+		args="-d $domain"; oldifs="$IFS"; IFS=','
+		for name in $(get other_domains); do [ -n "$name" ] && args="$args -d $name"; done
+		IFS="$oldifs"
+		ca="$(get ca)"; [ -n "$ca" ] || ca=letsencrypt
+		"$ACME_HOME/acme.sh" --home "$ACME_HOME" --config-home "$ACME_HOME" --set-default-ca --server "$ca" >>"$LOG" 2>&1 || fail_log
+		if [ "$action" = renew ]; then
+			ecc_arg=''
+			[ -d "$ACME_HOME/${domain}_ecc" ] && ecc_arg='--ecc'
+			force_arg=''
+			[ "$1" = '--force' ] && force_arg='--force'
+			if ! "$ACME_HOME/acme.sh" --home "$ACME_HOME" --config-home "$ACME_HOME" --renew -d "$domain" $ecc_arg $force_arg >>"$LOG" 2>&1; then
+				grep -q 'Skipping. Next renewal time' "$LOG" || fail_log
+			fi
+		else
+			# Domains are validated by the LuCI controller before reaching this command.
+			if ! eval '"$ACME_HOME/acme.sh" --home "$ACME_HOME" --config-home "$ACME_HOME" --issue --dns "$dns" '"$args" >>"$LOG" 2>&1; then
+				# acme.sh returns a non-zero status when the requested domain set
+				# already has a valid certificate.  This is not an issuance error:
+				# continue below so the existing certificate can be installed into
+				# this record's independently selected output paths.
+				grep -Eq 'Domains not changed\.|Skipping\. Next renewal time' "$LOG" || fail_log
+			fi
+		fi
+		ecc_arg=''; [ -d "$ACME_HOME/${domain}_ecc" ] && ecc_arg='--ecc'
+		"$ACME_HOME/acme.sh" --home "$ACME_HOME" --config-home "$ACME_HOME" --install-cert -d "$domain" $ecc_arg --key-file "$(key_file)" --fullchain-file "$(cert_file)" --reloadcmd "/usr/libexec/be6500-cert-manager reload-if-active $SECTION" >>"$LOG" 2>&1 || fail_log
+		chmod 600 "$(key_file)" "$(cert_file)"
+		[ "$(uci -q get "$CONFIG.main.applied_id")" != "$SECTION" ] || apply_cert
+		install_cron; echo '证书已签发'
+		;;
+	apply) apply_cert && echo '证书已应用到路由器 HTTPS' ;;
+	disable) disable_https && echo '已关闭强制 HTTPS' ;;
+	reload-if-active)
+		if [ "$(uci -q get "$CONFIG.main.applied_id")" = "$SECTION" ]; then
+			(sleep 2; /etc/init.d/uhttpd restart) >>"$LOG" 2>&1 </dev/null &
+		fi
+		;;
+	selfsigned)
+		domain="$(get domain)"; [ -n "$domain" ] || domain=router.local
+		command -v openssl >/dev/null || { echo '缺少 openssl-util'; exit 1; }
+		prepare_paths || { echo '无法创建证书路径'; exit 1; }
+		openssl req -x509 -newkey rsa:2048 -sha256 -nodes -days 3650 -subj "/CN=$domain" -keyout "$(key_file)" -out "$(cert_file)" >"$LOG" 2>&1 || exit $?
+		chmod 600 "$(key_file)" "$(cert_file)"; apply_cert; echo '自签证书已生成并应用'
+		;;
+	delete)
+		rm -f "$(cert_file)" "$(key_file)"
+		if [ "$(uci -q get "$CONFIG.main.applied_id")" = "$SECTION" ]; then disable_https; fi
+		if [ "$SECTION" = cert_legacy ]; then
+			for option in domain other_domains auto_renew cert_file key_file; do uci -q delete "$CONFIG.main.$option"; done
+			uci -q set "$CONFIG.main.legacy_migrated=1"
+		fi
+		[ "$SECTION" = main ] || uci -q delete "$CONFIG.$SECTION"
+		uci -q commit "$CONFIG"; install_cron
+		echo '证书已删除'
+		;;
+	log) tail -n 160 "$LOG" 2>/dev/null ;;
+	*) echo 'unsupported action'; exit 2 ;;
+esac

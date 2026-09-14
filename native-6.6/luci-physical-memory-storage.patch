@@ -77,72 +77,9 @@
  				E('td', { 'class': 'td left', 'width': '33%' }, [ fields[i] ]),
 --- a/modules/luci-mod-status/htdocs/luci-static/resources/view/status/include/25_storage.js
 +++ b/modules/luci-mod-status/htdocs/luci-static/resources/view/status/include/25_storage.js
-@@ -15,6 +15,17 @@ var callMountPoints = rpc.declare({
- 	expect: { result: [] }
- });
- 
-+var callSystemBoard = rpc.declare({
-+	object: 'system',
-+	method: 'board'
-+});
-+
-+var callBlockDevices = rpc.declare({
-+	object: 'luci',
-+	method: 'getBlockDevices',
-+	expect: { '': {} }
-+});
-+
- var MountSkipList = [
- 	"/rom",
- 	"/tmp",
-@@ -42,6 +53,8 @@ return baseclass.extend({
- 		return Promise.all([
- 			L.resolveDefault(callSystemInfo(), {}),
- 			L.resolveDefault(callMountPoints(), {}),
-+			L.resolveDefault(callBlockDevices(), {}),
-+			L.resolveDefault(callSystemBoard(), {}),
- 		]);
- 	},
- 
-@@ -49,7 +62,9 @@ return baseclass.extend({
- 		var systeminfo = data[0],
- 		    mounts = data[1],
- 		    root = L.isObject(systeminfo.root) ? systeminfo.root : {},
--		    tmp = L.isObject(systeminfo.tmp) ? systeminfo.tmp : {};
-+		    tmp = L.isObject(systeminfo.tmp) ? systeminfo.tmp : {},
-+		    blocks = L.isObject(data[2]) ? data[2] : {},
-+		    boardinfo = L.isObject(data[3]) ? data[3] : {};
- 
- 		const existenceChk = function(fields, name, values) {
- 			if (!fields.hasOwnProperty(name))
-@@ -57,6 +72,15 @@ return baseclass.extend({
- 		};
- 
- 		var fields = {};
-+		Object.keys(blocks).forEach(function(dev) {
-+			var entry = blocks[dev];
-+
-+			if (entry.type == 'disk' && entry.size > 0)
-+				existenceChk(fields,
-+					dev.indexOf('mmcblk') == 0 ? '物理 eMMC 容量' : entry.dev,
-+					{ text: String.format('%1024.2mB', entry.size) });
-+		});
-+
--		existenceChk(fields, _('Disk space'), { used: root.used * 1024, size: root.total * 1024 });
-+		existenceChk(fields, boardinfo.rootfs_type == 'initramfs' ? '临时根目录（initramfs）' : _('Disk space'), { used: root.used * 1024, size: root.total * 1024 });
- 		existenceChk(fields, _('Temp space'), { used: tmp.used * 1024, size: tmp.total * 1024 });
- 
-@@ -78,7 +102,9 @@ return baseclass.extend({
- 		table.appendChild(E('tr', { 'class': 'tr' }, [
- 				E('td', { 'class': 'td left', 'width': '33%' }, [ key ]),
- 				E('td', { 'class': 'td left' }, [
--					(fields[key].used != null) ? progressbar(fields[key].used, fields[key].size, true) : '?'
-+					(fields[key].text != null)
-+						? fields[key].text
-+						: (fields[key].used != null) ? progressbar(fields[key].used, fields[key].size, true) : '?'
- 				])
- 			]));
- 		});
+@@ -50 +50 @@ return baseclass.extend({
+-		    mounts = data[1],
++		    mounts = [],
 --- a/modules/luci-mod-status/root/usr/share/rpcd/acl.d/luci-mod-status-index.json
 +++ b/modules/luci-mod-status/root/usr/share/rpcd/acl.d/luci-mod-status-index.json
 @@ -21,7 +21,7 @@

@@ -5,6 +5,19 @@ set -eu
 file=/www/luci-static/resources/view/firewall/zones.js
 marker=be6500_expose
 
+# LuCI's nftables status page considers every rule printed by iptables-save
+# to be a legacy rule.  With iptables-nft this is incorrect: mwan3's
+# compatibility rules are part of the same nf_tables ruleset.  Disable that
+# warning only when the installed iptables frontend explicitly reports the
+# nf_tables backend; retain the warning for a real xtables-legacy frontend.
+nft_status=/www/luci-static/resources/view/status/nftables.js
+nft_marker=be6500_nft_backend_checked
+if [ -f "$nft_status" ] &&
+	/usr/sbin/iptables -V 2>/dev/null | grep -q '(nf_tables)' &&
+	! grep -q "$nft_marker" "$nft_status"; then
+	sed -i "s/checkLegacyRules:function(ipt4save,ipt6save){if(/checkLegacyRules:function(ipt4save,ipt6save){\/\* ${nft_marker} *\/ return;if(/" "$nft_status"
+fi
+
 [ -f "$file" ] || exit 0
 grep -q "$marker" "$file" && exit 0
 

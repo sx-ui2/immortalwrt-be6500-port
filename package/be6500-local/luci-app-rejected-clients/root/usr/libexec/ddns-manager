@@ -4,25 +4,71 @@ CONFIG="cfddns"
 LOG="/tmp/cf-ddns.log"
 
 uci_get() { uci -q get "$CONFIG.config.$1"; }
+ensure_config() {
+	[ -f "/etc/config/$CONFIG" ] || {
+		mkdir -p /etc/config || return 1
+		: > "/etc/config/$CONFIG" || return 1
+	}
+}
 uci_set() {
-	uci -q get "$CONFIG.config" >/dev/null || uci set "$CONFIG.config=service"
-	uci set "$CONFIG.config.$1=$2"
+	ensure_config || return 1
+	uci -q get "$CONFIG.config" >/dev/null || uci set "$CONFIG.config=service" || return 1
+	uci set "$CONFIG.config.$1=$2" || return 1
 }
 now() { date '+%Y-%m-%d %H:%M:%S'; }
 log_msg() { printf '%s %s\n' "$(now)" "$*" >> "$LOG"; }
 json_get() { jsonfilter -e "$1" 2>/dev/null; }
-public_ip4() { curl -4 -fsS --max-time 8 https://api.ipify.org 2>/dev/null || curl -4 -fsS --max-time 8 https://ifconfig.co/ip 2>/dev/null | tr -d '\r\n'; }
-public_ip6() { curl -6 -fsS --max-time 8 https://api64.ipify.org 2>/dev/null || curl -6 -fsS --max-time 8 https://ifconfig.co/ip 2>/dev/null | tr -d '\r\n'; }
+interface_status() { ifstatus "$1" 2>/dev/null; }
+interface_l3_device() { interface_status "$1" | json_get '@.l3_device'; }
+interface_ip4() {
+	status="$(interface_status wan)"
+	ip="$(printf '%s' "$status" | json_get '@["ipv4-address"][0].address')"
+	[ -n "$ip" ] || {
+		device="$(printf '%s' "$status" | json_get '@.l3_device')"
+		[ -n "$device" ] && ip="$(ip -o -4 addr show dev "$device" scope global 2>/dev/null | awk 'NR == 1 { sub(/\/.*/, "", $4); print $4 }')"
+	}
+	printf '%s' "$ip"
+}
+interface_ip6() {
+	status="$(interface_status wan6)"
+	ip="$(printf '%s' "$status" | json_get '@["ipv6-address"][*].address' | awk '!/^fe80:/ { print; exit }')"
+	[ -n "$ip" ] || {
+		device="$(printf '%s' "$status" | json_get '@.l3_device')"
+		[ -n "$device" ] || device="$(interface_l3_device wan)"
+		[ -n "$device" ] && ip="$(ip -o -6 addr show dev "$device" scope global 2>/dev/null | awk 'NR == 1 { sub(/\/.*/, "", $4); print $4 }')"
+	}
+	printf '%s' "$ip"
+}
 
-cf_api() {
-	method="$1"; path="$2"; body="$3"; email="$(uci_get email)"; key="$(uci_get key)"
+cf_api_with_auth() {
+	method="$1"; path="$2"; body="$3"; email="$4"; key="$5"
 	[ -n "$email" ] && [ -n "$key" ] || return 2
 	set -- -fsS --max-time 20 -X "$method" -H "X-Auth-Email: $email" -H "X-Auth-Key: $key" -H "Content-Type: application/json"
 	[ -z "$body" ] || set -- "$@" --data "$body"
 	curl "$@" "https://api.cloudflare.com/client/v4/$path"
 }
+cf_api() { cf_api_with_auth "$1" "$2" "$3" "$(uci_get email)" "$(uci_get key)"; }
 zone_id() { zone="$(uci_get zone)"; [ -n "$zone" ] || return 2; cf_api GET "zones?name=$zone" | json_get '@.result[0].id'; }
 record_content() { zid="$(zone_id)" || return 2; [ -n "$zid" ] || return 3; cf_api GET "zones/$zid/dns_records?type=$1&name=$2" | json_get '@.result[0].content'; }
+
+delete_record() {
+	type="$1"; name="$2"; [ -n "$name" ] || return 0
+	zone="$3"; email="$4"; key="$5"
+	[ -n "$zone" ] || zone="$(uci_get zone)"
+	[ -n "$email" ] || email="$(uci_get email)"
+	[ -n "$key" ] || key="$(uci_get key)"
+	zid="$(cf_api_with_auth GET "zones?name=$zone" '' "$email" "$key" | json_get '@.result[0].id')" || return 2
+	[ -n "$zid" ] || return 3
+	resp="$(cf_api_with_auth GET "zones/$zid/dns_records?type=$type&name=$name&per_page=100" '' "$email" "$key")" || return 4
+	ids="$(printf '%s' "$resp" | json_get '@.result[*].id')"
+	[ -n "$ids" ] || { printf '%s record absent\n' "$type"; return 0; }
+	count=0
+	for rid in $ids; do
+		cf_api_with_auth DELETE "zones/$zid/dns_records/$rid" '' "$email" "$key" | jsonfilter -e '@.success' | grep -qx true || return 5
+		count=$((count + 1))
+	done
+	printf '%s removed %s record(s)\n' "$type" "$count"
+}
 
 update_record() {
 	type="$1"; name="$2"; ip="$3"; [ -n "$name" ] && [ -n "$ip" ] || return 2
@@ -38,6 +84,10 @@ update_record() {
 
 write_schedule() {
 	interval="$(uci_get interval)"; rm -f /etc/hotplug.d/iface/95-cf-ddns
+	mkdir -p /etc/crontabs || return 1
+	crontab -l 2>/dev/null | grep -v '/usr/libexec/ddns-manager run' >/tmp/cf-ddns-cron.$$
+	crontab /tmp/cf-ddns-cron.$$ || { rm -f /tmp/cf-ddns-cron.$$; return 1; }
+	rm -f /tmp/cf-ddns-cron.$$
 	if [ "$interval" = dial ]; then
 		mkdir -p /etc/hotplug.d/iface
 		printf '%s\n' '#!/bin/sh' '[ "$ACTION" = ifup ] || exit 0' '[ "$INTERFACE" = wan ] || [ "$INTERFACE" = wan6 ] || exit 0' '(/usr/libexec/ddns-manager run >/dev/null 2>&1) &' > /etc/hotplug.d/iface/95-cf-ddns
@@ -46,23 +96,73 @@ write_schedule() {
 		case "$interval" in ''|*[!0-9]*) interval=10;; esac
 		crontab -l 2>/dev/null | grep -v '/usr/libexec/ddns-manager run' >/tmp/cf-ddns-cron.$$
 		printf '*/%s * * * * /usr/libexec/ddns-manager run >/dev/null 2>&1\n' "$interval" >>/tmp/cf-ddns-cron.$$
-		crontab /tmp/cf-ddns-cron.$$; rm -f /tmp/cf-ddns-cron.$$
+		crontab /tmp/cf-ddns-cron.$$ || { rm -f /tmp/cf-ddns-cron.$$; return 1; }
+		rm -f /tmp/cf-ddns-cron.$$
 		/etc/init.d/cron enable >/dev/null 2>&1; /etc/init.d/cron restart >/dev/null 2>&1
 	fi
 }
 
 cmd_info() { printf 'config\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$(uci_get enabled)" "$(uci_get domain)" "$(uci_get zone)" "$(uci_get email)" "$(uci_get key)" "$(uci_get interval)" "$(uci_get enabled6)" "$(uci_get domain6)"; }
 cmd_status() {
-	ip4="$(public_ip4)"; ip6="$(public_ip6)"; domain="$(uci_get domain)"; domain6="$(uci_get domain6)"; [ -n "$domain6" ] || domain6="$domain"
-	rec4=-; rec6=-; [ -z "$domain" ] || rec4="$(record_content A "$domain" 2>/dev/null || echo -)"; [ -z "$domain6" ] || rec6="$(record_content AAAA "$domain6" 2>/dev/null || echo -)"
-	printf 'status\t%s\t%s\t%s\t%s\t%s\t%s\n' "${ip4:--}" "${rec4:--}" "${ip6:--}" "${rec6:--}" "$(uci_get last_time)" "${last_result:-暂无运行记录}"
+	ip4="$(interface_ip4)"; domain="$(uci_get domain)"; last_result="$(uci_get last_result)"
+	rec4=-; [ -z "$domain" ] || rec4="$(record_content A "$domain" 2>/dev/null || echo -)"
+	ip6=-; rec6=-
+	if [ "$(uci_get enabled6)" = 1 ]; then
+		ip6="$(interface_ip6)"; domain6="$(uci_get domain6)"; [ -n "$domain6" ] || domain6="$domain"
+		[ -z "$domain6" ] || rec6="$(record_content AAAA "$domain6" 2>/dev/null || echo -)"
+	fi
+	printf 'status\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "${ip4:--}" "${rec4:--}" "${ip6:--}" "${rec6:--}" "$(uci_get last_time)" "${last_result:-暂无运行记录}" "$(uci_get enabled6)"
 }
-cmd_save() { uci_set enabled "$1"; uci_set domain "$2"; uci_set zone "$3"; uci_set email "$4"; uci_set key "$5"; uci_set interval "${6:-10}"; uci_set enabled6 "$7"; uci_set domain6 "$8"; uci commit "$CONFIG"; write_schedule; echo 'DDNS 设置已保存'; }
+cmd_save() {
+	ensure_config || { echo '无法创建 DDNS 配置文件' >&2; return 1; }
+	enabled6="$7"
+	old_domain6="$(uci_get domain6)"; [ -n "$old_domain6" ] || old_domain6="$(uci_get domain)"
+	old_zone="$(uci_get zone)"; old_email="$(uci_get email)"; old_key="$(uci_get key)"
+	uci_set enabled "$1" &&
+	uci_set domain "$2" &&
+	uci_set zone "$3" &&
+	uci_set email "$4" &&
+	uci_set key "$5" &&
+	uci_set interval "${6:-10}" &&
+	uci_set enabled6 "$7" &&
+	uci_set domain6 "$8" &&
+	uci commit "$CONFIG" || { echo 'DDNS 配置写入失败' >&2; return 1; }
+	write_schedule || { echo 'DDNS 定时任务配置失败' >&2; return 1; }
+	if [ "$enabled6" != 1 ] && [ -n "$old_domain6" ]; then
+		out="$(delete_record AAAA "$old_domain6" "$old_zone" "$old_email" "$old_key" 2>&1)" || {
+			log_msg "IPv6 DDNS 已关闭，但删除 $old_domain6 的 AAAA 记录失败"
+			echo 'IPv6 DDNS 已关闭，但 Cloudflare 旧 AAAA 记录删除失败' >&2
+			return 1
+		}
+		log_msg "$out"
+	fi
+	if [ "$enabled6" = 1 ]; then echo 'DDNS 设置已保存'; else echo 'DDNS 设置已保存，IPv6 AAAA 记录已移除'; fi
+}
 cmd_run() {
-	result=""
-	if [ "$(uci_get enabled)" = 1 ]; then ip4="$(public_ip4)"; [ -z "$ip4" ] || { out="$(update_record A "$(uci_get domain)" "$ip4" 2>&1)"; result="A: $out"; log_msg "$out"; }; fi
-	if [ "$(uci_get enabled6)" = 1 ]; then ip6="$(public_ip6)"; domain6="$(uci_get domain6)"; [ -n "$domain6" ] || domain6="$(uci_get domain)"; [ -z "$ip6" ] || { out="$(update_record AAAA "$domain6" "$ip6" 2>&1)"; result="$result AAAA: $out"; log_msg "$out"; }; fi
-	[ -n "$result" ] || result='DDNS 未启用'; uci_set last_time "$(now)"; uci_set last_result "$result"; uci commit "$CONFIG"; echo "$result"
+	result=""; failed=0
+	if [ "$(uci_get enabled)" = 1 ]; then
+		ip4="$(interface_ip4)"
+		if [ -n "$ip4" ]; then
+			out="$(update_record A "$(uci_get domain)" "$ip4" 2>&1)" || failed=1
+			result="A: ${out:-更新失败}"
+			log_msg "$result"
+		else
+			result='A: WAN 接口暂无 IPv4 地址'; failed=1; log_msg "$result"
+		fi
+	fi
+	if [ "$(uci_get enabled6)" = 1 ]; then
+		ip6="$(interface_ip6)"; domain6="$(uci_get domain6)"; [ -n "$domain6" ] || domain6="$(uci_get domain)"
+		if [ -n "$ip6" ]; then
+			out="$(update_record AAAA "$domain6" "$ip6" 2>&1)" || failed=1
+			result="$result${result:+ }AAAA: ${out:-更新失败}"
+			log_msg "AAAA: ${out:-更新失败}"
+		else
+			result="$result${result:+ }AAAA: WAN 接口暂无 IPv6 地址"; failed=1; log_msg 'AAAA: WAN 接口暂无 IPv6 地址'
+		fi
+	fi
+	[ -n "$result" ] || result='DDNS 未启用'
+	uci_set last_time "$(now)"; uci_set last_result "$result"; uci commit "$CONFIG"; echo "$result"
+	return "$failed"
 }
 
 case "$1" in

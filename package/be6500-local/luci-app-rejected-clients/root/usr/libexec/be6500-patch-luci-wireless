@@ -76,8 +76,8 @@ fi
 # prevents a previously opened LuCI tab from reusing the unfiltered class file.
 for header in /usr/share/ucode/luci/template/header.ut; do
 	[ ! -f "$header" ] || sed -i \
-		-e 's#luci\.js?v=26\.236\.50592~9b8ee64-{{ pkgs_update_time }}#luci.js?v=26.236.50592~9b8ee64-be6500v15-{{ pkgs_update_time }}#' \
-		-e 's#be6500v[0-9]*-{{ pkgs_update_time }}#be6500v15-{{ pkgs_update_time }}#' "$header"
+		-e 's#luci\.js?v=26\.236\.50592~9b8ee64-{{ pkgs_update_time }}#luci.js?v=26.236.50592~9b8ee64-be6500v18-{{ pkgs_update_time }}#' \
+		-e 's#be6500v[0-9]*-{{ pkgs_update_time }}#be6500v18-{{ pkgs_update_time }}#' "$header"
 done
 
 grep -q 'be6500SplitMode' "$view"

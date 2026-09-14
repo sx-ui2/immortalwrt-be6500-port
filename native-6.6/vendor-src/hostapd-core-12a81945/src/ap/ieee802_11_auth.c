@@ -13,6 +13,9 @@
 
 #include "utils/includes.h"
 
+#include <stdio.h>
+#include <unistd.h>
+
 #include "utils/common.h"
 #include "utils/eloop.h"
 #include "radius/radius.h"
@@ -27,6 +30,191 @@
 #include "ieee802_11_auth.h"
 
 #define RADIUS_ACL_TIMEOUT 30
+
+#define WIFI_REJECT_RECORD_FILE "/tmp/wifi_reject.json"
+#define WIFI_REJECT_RECORD_MAX 100
+
+/* utils/json.h defines enum json_type, which conflicts with json-c pulled in
+ * by the QCA ucode headers. json.o is already linked into hostapd, so declare
+ * only the escaping helper needed here. */
+void json_escape_string(char *txt, size_t maxlen, const char *data, size_t len);
+
+struct wifi_reject_record {
+	int used;
+	u8 mac[ETH_ALEN];
+	u8 bssid[ETH_ALEN];
+	u8 ssid[SSID_MAX_LEN];
+	size_t ssid_len;
+	char ifname[IFNAMSIZ + 1];
+	char phy[16];
+	char reason[16];
+	long long first_seen;
+	long long last_seen;
+	unsigned int count;
+};
+
+static struct wifi_reject_record
+	wifi_reject_records[WIFI_REJECT_RECORD_MAX];
+static int wifi_reject_records_initialized;
+
+static void wifi_reject_json_string(FILE *f, const void *data, size_t len)
+{
+	char escaped[SSID_MAX_LEN * 6 + 1];
+
+	json_escape_string(escaped, sizeof(escaped), data, len);
+	fprintf(f, "\"%s\"", escaped);
+}
+
+static void wifi_reject_write_json(void)
+{
+	char tmp[sizeof(WIFI_REJECT_RECORD_FILE) + 32];
+	FILE *f;
+	int i, first = 1;
+
+	os_snprintf(tmp, sizeof(tmp), "%s.tmp.%ld", WIFI_REJECT_RECORD_FILE,
+		    (long) getpid());
+	f = fopen(tmp, "w");
+	if (!f)
+		return;
+
+	fputs("[", f);
+	for (i = 0; i < WIFI_REJECT_RECORD_MAX; i++) {
+		struct wifi_reject_record *record = &wifi_reject_records[i];
+		if (!record->used)
+			continue;
+		if (!first)
+			fputs(",", f);
+		first = 0;
+
+		fprintf(f, "{\"mac\":\"" MACSTR "\",\"ssid\":",
+			MAC2STR(record->mac));
+		wifi_reject_json_string(f, record->ssid, record->ssid_len);
+		fputs(",\"ifname\":", f);
+		wifi_reject_json_string(f, record->ifname,
+					os_strlen(record->ifname));
+		fputs(",\"phy\":", f);
+		wifi_reject_json_string(f, record->phy,
+					os_strlen(record->phy));
+		fprintf(f, ",\"bssid\":\"" MACSTR "\",\"reason\":",
+			MAC2STR(record->bssid));
+		wifi_reject_json_string(f, record->reason,
+					os_strlen(record->reason));
+		fprintf(f, ",\"first_seen\":%lld,\"last_seen\":%lld,\"count\":%u}",
+			record->first_seen, record->last_seen, record->count);
+	}
+	fputs("]\n", f);
+	if (fclose(f) < 0) {
+		unlink(tmp);
+		return;
+	}
+	if (rename(tmp, WIFI_REJECT_RECORD_FILE) < 0)
+		unlink(tmp);
+}
+
+static const char * wifi_reject_acl_reason(struct hostapd_data *hapd,
+					    const u8 *addr)
+{
+	int mode, in_accept, in_deny;
+
+	if (!hapd || !hapd->conf || !addr)
+		return NULL;
+	mode = hapd->conf->macaddr_acl;
+	in_accept = hostapd_acl_maclist_found(hapd->conf, true, addr, NULL);
+	in_deny = hostapd_acl_maclist_found(hapd->conf, false, addr, NULL);
+
+	/* Mirror hostapd_check_acl() ordering exactly so the recorded reason is
+	 * the branch that actually rejected this Authentication/Association. */
+	if (mode == ACCEPT_IF_WHITELIST_AND_NOT_BLACKLIST) {
+		if (!in_accept)
+			return "mac_whitelist";
+		if (in_deny)
+			return "mac_blacklist";
+		return NULL;
+	}
+	if (in_accept)
+		return NULL;
+	if (in_deny)
+		return "mac_blacklist";
+	if (mode == DENY_UNLESS_ACCEPTED)
+		return "mac_whitelist";
+
+	return NULL;
+}
+
+static void wifi_reject_record(struct hostapd_data *hapd, const u8 *addr,
+			       const char *reason)
+{
+	struct wifi_reject_record *record = NULL;
+	struct os_time now;
+	int i, free_index = -1, oldest_index = -1;
+	long long oldest_seen = 0;
+	size_t ssid_len;
+
+	if (!hapd || !hapd->conf || !hapd->iface || !addr || !reason ||
+	    os_get_time(&now) < 0)
+		return;
+
+	ssid_len = hapd->conf->ssid.ssid_len;
+	if (ssid_len > SSID_MAX_LEN)
+		ssid_len = SSID_MAX_LEN;
+
+	/* /tmp is RAM-backed; discard stale data after a hostapd restart. */
+	if (!wifi_reject_records_initialized) {
+		wifi_reject_records_initialized = 1;
+		unlink(WIFI_REJECT_RECORD_FILE);
+	}
+
+	for (i = 0; i < WIFI_REJECT_RECORD_MAX; i++) {
+		struct wifi_reject_record *candidate = &wifi_reject_records[i];
+
+		if (!candidate->used) {
+			if (free_index < 0)
+				free_index = i;
+			continue;
+		}
+		if (ether_addr_equal(candidate->mac, addr) &&
+		    candidate->ssid_len == ssid_len &&
+		    os_memcmp(candidate->ssid, hapd->conf->ssid.ssid,
+			       ssid_len) == 0) {
+			record = candidate;
+			break;
+		}
+		if (oldest_index < 0 || candidate->last_seen < oldest_seen) {
+			oldest_index = i;
+			oldest_seen = candidate->last_seen;
+		}
+	}
+
+	if (record) {
+		record->last_seen = now.sec;
+		os_strlcpy(record->reason, reason, sizeof(record->reason));
+		if (record->count != (unsigned int) -1)
+			record->count++;
+		wifi_reject_write_json();
+		return;
+	}
+
+	if (free_index < 0)
+		free_index = oldest_index;
+	if (free_index < 0)
+		return;
+
+	record = &wifi_reject_records[free_index];
+	os_memset(record, 0, sizeof(*record));
+	record->used = 1;
+	os_memcpy(record->mac, addr, ETH_ALEN);
+	os_memcpy(record->bssid, hapd->own_addr, ETH_ALEN);
+	os_memcpy(record->ssid, hapd->conf->ssid.ssid, ssid_len);
+	record->ssid_len = ssid_len;
+	os_strlcpy(record->ifname, hapd->conf->iface,
+		   sizeof(record->ifname));
+	os_strlcpy(record->phy, hapd->iface->phy, sizeof(record->phy));
+	os_strlcpy(record->reason, reason, sizeof(record->reason));
+	record->first_seen = now.sec;
+	record->last_seen = now.sec;
+	record->count = 1;
+	wifi_reject_write_json();
+}
 
 
 struct hostapd_cached_radius_acl {
@@ -373,10 +561,21 @@ int hostapd_allowed_address(struct hostapd_data *hapd, const u8 *addr,
 			    int is_probe_req)
 {
 	int res;
+	const char *reject_reason;
 
 	os_memset(out, 0, sizeof(*out));
 
 	res = hostapd_check_acl(hapd, addr, &out->vlan_id);
+	/*
+	 * Record only a real Authentication/Association management frame.  A
+	 * probe request and internal ACL re-checks pass through this function too,
+	 * but must not create a Wi-Fi ACL rejection record.
+	 */
+	if (res == HOSTAPD_ACL_REJECT && msg && !is_probe_req) {
+		reject_reason = wifi_reject_acl_reason(hapd, addr);
+		if (reject_reason)
+			wifi_reject_record(hapd, addr, reject_reason);
+	}
 	if (res != HOSTAPD_ACL_PENDING)
 		return res;
 

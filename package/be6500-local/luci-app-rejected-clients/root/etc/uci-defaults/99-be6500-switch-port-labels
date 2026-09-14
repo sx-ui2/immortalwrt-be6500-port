@@ -1,0 +1,36 @@
+#!/bin/sh
+
+. /lib/functions.sh
+. /usr/share/libubox/jshn.sh
+
+[ "$(board_name)" = "jdcloud,be6500" ] || exit 0
+[ -s /etc/board.json ] || exit 0
+
+json_load "$(cat /etc/board.json)" || exit 0
+json_select switch || exit 0
+json_select switch1 || exit 0
+json_select ports || exit 0
+json_get_keys port_keys
+
+for port_key in $port_keys; do
+	json_select "$port_key" || continue
+	json_get_var port_num num
+	case "$port_num" in
+		1) json_add_int index 3 ;;
+		2) json_add_int index 2 ;;
+		3) json_add_int index 1 ;;
+	esac
+	json_select ..
+done
+
+json_select ..
+json_select ..
+json_select ..
+
+tmp="/tmp/board.json.be6500.$$"
+json_dump -i >"$tmp" || exit 0
+mv "$tmp" /etc/board.json
+rm -f /tmp/luci-indexcache
+rm -f /tmp/luci-modulecache/* 2>/dev/null
+
+exit 0

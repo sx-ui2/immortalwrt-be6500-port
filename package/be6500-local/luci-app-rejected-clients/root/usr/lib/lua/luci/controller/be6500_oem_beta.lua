@@ -403,19 +403,24 @@ local function save_wan(uci)
         and uci:get("network", "iptv", "be6500_vlan_id") == vlan_id then
         return nil, "互联网 VLAN ID 不能与已启用的 IPTV VLAN ID 相同"
     end
-    uci:set("network", "wan", "ifname", vlan_mode == "tagged" and ("eth0." .. vlan_id) or "eth0")
     uci:set("network", "wan", "be6500_vlan_mode", vlan_mode)
     if vlan_mode == "tagged" then
         uci:set("network", "wan", "be6500_vlan_id", vlan_id)
     else
         uci:delete("network", "wan", "be6500_vlan_id")
     end
+    uci:set("network", "wan", "device", vlan_mode == "tagged" and ("eth0." .. vlan_id) or "eth0")
+    uci:delete("network", "wan", "ifname")
     if mode == "pppoe" then
         local username = clean(luci.http.formvalue("pppoe_user"), 128)
         local password = clean(luci.http.formvalue("pppoe_pass"), 128)
         if username == "" then return nil, "请输入宽带账号" end
         uci:set("network", "wan", "username", username)
         if password ~= "" then uci:set("network", "wan", "password", password) end
+        -- Remove a DHCP/static MTU left behind when changing protocols.
+        -- The PPP handler then applies its normal 1492-byte MTU/MRU while
+        -- leaving the Ethernet parent at 1500.
+        uci:delete("network", "wan", "mtu")
     elseif mode == "static" then
         local ipaddr = clean(luci.http.formvalue("wan_ip"), 15)
         local netmask = clean(luci.http.formvalue("wan_mask"), 15)
@@ -1245,11 +1250,58 @@ local function known_wireless_clients()
     return result
 end
 
+local function usable_device_name(name)
+    name = trim(name or "")
+    if name == "" or name == "*" or name == "-" or name == "未知设备" or name == "Unknown" then return nil end
+    return name:gsub("%.lan%.$", ""):gsub("%.lan$", "")
+end
+
+local function device_name_catalog(uci)
+    local names = { saved = {}, lease = {}, static = {}, hint = {} }
+    local leases = io.open("/tmp/dhcp.leases", "r")
+    if leases then
+        for line in leases:lines() do
+            local mac, hostname = line:match("^%d+%s+(%S+)%s+%S+%s+(%S+)")
+            if mac and valid_mac(mac) and usable_device_name(hostname) then
+                names.lease[mac:upper()] = usable_device_name(hostname)
+            end
+        end
+        leases:close()
+    end
+    uci:foreach("dhcp", "host", function(section)
+        local mac = type(section.mac) == "table" and section.mac[1] or section.mac
+        if mac and valid_mac(mac) and usable_device_name(section.name) then
+            names.static[tostring(mac):upper()] = usable_device_name(section.name)
+        end
+    end)
+    uci:foreach("be6500_oem", "device", function(section)
+        local mac = tostring(section.mac or ""):upper()
+        if valid_mac(mac) and usable_device_name(section.name) then names.saved[mac] = usable_device_name(section.name) end
+    end)
+    local hints = require("luci.jsonc").parse(luci.sys.exec("ubus call luci-rpc getHostHints 2>/dev/null") or "") or {}
+    for mac, hint in pairs(hints) do
+        local name = type(hint) == "table" and usable_device_name(hint.name) or nil
+        if valid_mac(mac) and name then names.hint[mac:upper()] = name end
+    end
+    return names
+end
+
+local function resolved_device_name(uci, catalog, mac, preferred)
+    mac = tostring(mac or ""):upper()
+    local saved = uci:get("be6500_oem", oem_device_section(mac), "name")
+        or uci:get("be6500_oem", "dev_" .. mac:lower():gsub(":", "_"), "name")
+    local name = usable_device_name(preferred) or usable_device_name(saved)
+        or catalog.saved[mac] or catalog.lease[mac] or catalog.static[mac] or catalog.hint[mac]
+    if name then return name end
+    return "设备-" .. mac:gsub(":", ""):sub(-4)
+end
+
 local function access_entries(uci, policy)
-    local result = {}
+    local result, catalog = {}, device_name_catalog(uci)
     uci:foreach("be6500_oem", "access", function(section)
         if section.policy == policy and valid_mac(section.mac) then
-            result[#result + 1] = { mac = section.mac:upper(), name = section.name or "未知设备" }
+            local mac = section.mac:upper()
+            result[#result + 1] = { mac = mac, name = resolved_device_name(uci, catalog, mac, section.name) }
         end
     end)
     table.sort(result, function(a, b) return a.mac < b.mac end)
@@ -1358,15 +1410,21 @@ end
 local function load_vendor_prefixes()
     if vendor_prefixes then return vendor_prefixes end
     vendor_prefixes = {}
-    local file = io.open("/usr/share/nmap/nmap-mac-prefixes", "r")
-    if file then
-        for line in file:lines() do
-            local prefix, name = line:match("^%s*([%x]+)%s+(.+)%s*$")
-            if prefix and #prefix == 6 and name then
-                vendor_prefixes[prefix:upper()] = trim(name)
+    local files = {
+        "/usr/share/arp-scan/ieee-oui.txt",
+        "/usr/share/nmap/nmap-mac-prefixes"
+    }
+    for _, path in ipairs(files) do
+        local file = io.open(path, "r")
+        if file then
+            for line in file:lines() do
+                local prefix, name = line:match("^%s*([%x]+)%s+(.+)%s*$")
+                if prefix and (#prefix == 6 or #prefix == 7 or #prefix == 9 or #prefix == 12) and name then
+                    vendor_prefixes[prefix:upper()] = trim(name)
+                end
             end
+            file:close()
         end
-        file:close()
     end
     for prefix, name in pairs(builtin_vendors) do
         if not vendor_prefixes[prefix] then vendor_prefixes[prefix] = name end
@@ -1377,9 +1435,15 @@ end
 local function device_identity(name, mac)
     name = tostring(name or "")
     mac = tostring(mac or ""):upper()
-    local prefix = mac:gsub(":", ""):sub(1, 6)
+    local compact_mac = mac:gsub(":", "")
     local vendor = ""
-    if not mac_is_private(mac) then vendor = load_vendor_prefixes()[prefix] or "" end
+    if not mac_is_private(mac) then
+        local prefixes = load_vendor_prefixes()
+        for length = 12, 6, -1 do
+            local prefix = compact_mac:sub(1, length)
+            if prefixes[prefix] then vendor = prefixes[prefix]; break end
+        end
+    end
 
     local combined = (name .. " " .. vendor):lower()
     local device_type
@@ -1422,6 +1486,89 @@ local function device_identity(name, mac)
         end
     end
     return device_type, vendor
+end
+
+local wifi_reject_file = "/tmp/wifi_reject.json"
+
+local function wifi_reject_rows(uci)
+    local file = io.open(wifi_reject_file, "r")
+    if not file then return {} end
+    local raw = file:read("*a") or ""
+    file:close()
+    local records = require("luci.jsonc").parse(raw)
+    if type(records) ~= "table" then return {} end
+
+    local catalog, leases, rows = device_name_catalog(uci), {}, {}
+    local lease_file = io.open("/tmp/dhcp.leases", "r")
+    if lease_file then
+        for line in lease_file:lines() do
+            local mac, ip, hostname = line:match("^%d+%s+(%S+)%s+(%S+)%s+(%S+)")
+            if mac and valid_mac(mac) then
+                leases[mac:upper()] = { ip = ip or "", name = hostname or "" }
+            end
+        end
+        lease_file:close()
+    end
+
+    local guest_ssids = {}
+    uci:foreach("wireless", "wifi-iface", function(section)
+        if section.network == "guest" and section.ssid then guest_ssids[tostring(section.ssid)] = true end
+    end)
+
+    for _, record in ipairs(records) do
+        local mac = tostring(type(record) == "table" and record.mac or ""):upper()
+        if valid_mac(mac) then
+            local lease = leases[mac] or {}
+            local name = resolved_device_name(uci, catalog, mac, lease.name)
+            local device_type, vendor = device_identity(name, mac)
+            if vendor == "暂未识别" and mac_is_private(mac) then vendor = "私有 MAC（厂商隐藏）" end
+            local ssid = clean(record.ssid, 64)
+            local reason = tostring(record.reason or "")
+            local reason_name = reason == "mac_whitelist" and "白名单拒绝"
+                or reason == "mac_blacklist" and "黑名单拒绝" or "访问控制拒绝"
+            local last_seen = tonumber(record.last_seen) or 0
+            local count = math.max(1, tonumber(record.count) or 1)
+            rows[#rows + 1] = {
+                id = mac .. "@" .. ssid, uid = mac, mac = mac,
+                name = name, ip = lease.ip or "", ssid = ssid,
+                ifname = clean(record.ifname, 32), phy = clean(record.phy, 32),
+                bssid = clean(record.bssid, 17), reason = reason, reason_name = reason_name,
+                first_seen = tonumber(record.first_seen) or last_seen,
+                last_seen = last_seen, count = count,
+                rejected_at = last_seen > 0 and os.date("%Y-%m-%d %H:%M:%S", last_seen) or "-",
+                network = guest_ssids[ssid] and "访客 Wi-Fi" or (ssid ~= "" and ssid or "主 Wi-Fi"),
+                band = reason_name .. " · " .. tostring(count) .. " 次",
+                scope = guest_ssids[ssid] and "guest" or "main",
+                device_type = device_type, vendor = vendor, brand = vendor
+            }
+        end
+    end
+    table.sort(rows, function(a, b) return a.last_seen > b.last_seen end)
+    return rows
+end
+
+local function clear_wifi_reject_rows(mac, ssid)
+    mac = tostring(mac or ""):upper()
+    ssid = tostring(ssid or "")
+    if mac == "" then os.remove(wifi_reject_file); return true end
+    if not valid_mac(mac) then return false end
+    local file = io.open(wifi_reject_file, "r")
+    if not file then return true end
+    local records = require("luci.jsonc").parse(file:read("*a") or "")
+    file:close()
+    if type(records) ~= "table" then records = {} end
+    local kept = {}
+    for _, record in ipairs(records) do
+        local same_mac = type(record) == "table" and tostring(record.mac or ""):upper() == mac
+        local same_ssid = ssid == "" or tostring(record.ssid or "") == ssid
+        if not (same_mac and same_ssid) then kept[#kept + 1] = record end
+    end
+    local temporary = wifi_reject_file .. ".luci"
+    local output = io.open(temporary, "w")
+    if not output then return false end
+    output:write(require("luci.jsonc").stringify(kept), "\n")
+    output:close()
+    return os.rename(temporary, wifi_reject_file) and true or false
 end
 
 local function fingerprint_identity(signature)
@@ -1659,70 +1806,6 @@ local function build_device_list(uci)
     return result
 end
 
-local rejected_store = "/tmp/be6500-rejected-devices"
-local rejected_lock = "/tmp/be6500-rejected-devices.lock"
-
-local function lock_rejected_store()
-    for _ = 1, 5 do
-        if luci.sys.call("mkdir " .. rejected_lock .. " >/dev/null 2>&1") == 0 then return true end
-        luci.sys.call("sleep 1")
-    end
-    return false
-end
-
-local function unlock_rejected_store()
-    luci.sys.call("rmdir " .. rejected_lock .. " >/dev/null 2>&1")
-end
-
-local function clear_rejected_record(mac, scope)
-    mac = tostring(mac or ""):upper()
-    scope = tostring(scope or "")
-    if mac ~= "" and not valid_mac(mac) then return false end
-    if not lock_rejected_store() then return false end
-    local input = io.open(rejected_store, "r")
-    if not input then unlock_rejected_store(); return true end
-    local temporary = rejected_store .. ".api"
-    local output = io.open(temporary, "w")
-    if not output then input:close(); unlock_rejected_store(); return false end
-    for line in input:lines() do
-        local _, item_mac, item_scope = line:match("^([^\t]+)\t([^\t]+)\t([^\t]+)")
-        local remove = mac == "" or (tostring(item_mac or ""):upper() == mac and (scope == "" or item_scope == scope))
-        if not remove then output:write(line, "\n") end
-    end
-    input:close(); output:close()
-    local renamed = os.rename(temporary, rejected_store)
-    unlock_rejected_store()
-    return renamed and true or false
-end
-
-local function rejected_device_list(uci)
-    local known = {}
-    for _, device in ipairs(build_device_list(uci)) do known[tostring(device.uid or ""):upper()] = device end
-    local result, input = {}, io.open(rejected_store, "r")
-    if not input then return result end
-    for line in input:lines() do
-        local epoch, mac, scope, band, detail = line:match("^(%d+)\t([^\t]+)\t([^\t]+)\t([^\t]*)\t(.*)$")
-        if not epoch then epoch, mac, scope, detail = line:match("^(%d+)\t([^\t]+)\t([^\t]+)\t(.*)$"); band = "" end
-        mac = tostring(mac or ""):upper()
-        if epoch and valid_mac(mac) then
-            local device = known[mac]
-            local name = device and device.name or uci:get("be6500_oem", oem_device_section(mac), "name") or "未知设备"
-            local device_type, vendor = device_identity(name, mac)
-            result[#result + 1] = {
-                uid = mac, id = mac, mac = mac, ip = device and device.ip or "", name = name,
-                device_type = device and device.device_type or device_type,
-                vendor = device and device.vendor or vendor, brand = device and device.vendor or vendor,
-                scope = scope, network = scope == "guest" and "访客 Wi-Fi" or "主 Wi-Fi",
-                band = band or "", status = "连接被拒绝", detail = detail or "访问控制拒绝",
-                timestamp = tonumber(epoch) or 0, rejected_at = os.date("%Y-%m-%d %H:%M:%S", tonumber(epoch) or 0)
-            }
-        end
-    end
-    input:close()
-    table.sort(result, function(a, b) return a.timestamp > b.timestamp end)
-    return result
-end
-
 local function firewall_reload()
     luci.sys.call("/etc/init.d/firewall reload >/dev/null 2>&1 &")
 end
@@ -1750,7 +1833,9 @@ local function file_exists(path)
     return true
 end
 
-local iptv_ports = { lan1 = "1", lan2 = "2", lan3 = "3" }
+-- The chassis is wired in reverse switch-port order: physical LAN1 is QCA8386
+-- port 3, LAN2 is port 2 and LAN3 is port 1.
+local iptv_ports = { lan1 = "3", lan2 = "2", lan3 = "1" }
 
 local function configure_iptv_switch(uci, source_port, stb_port)
     local stale, lan_vlan = {}, nil
@@ -1936,6 +2021,7 @@ local function extended_jdcapi(method, args, uci)
         local link_up = runtime.up and (active_wds ~= nil or physical_wan_has_carrier())
         local gateway = first_gateway(runtime, 4)
         local mtu = tonumber((uci:get("network", active_wds and "wwan" or "wan", "mtu"))) or (proto == "pppoe" and 1492 or 1500)
+        if proto == "pppoe" and mtu > 1492 then mtu = 1492 end
         local detail = {
             ipaddr = ipaddr, netmask = netmask, gateway = gateway, mtu = mtu,
             dns_enabled = custom_dns and 1 or 0,
@@ -1992,18 +2078,25 @@ local function extended_jdcapi(method, args, uci)
                 return true, { status = 1, message = "互联网 VLAN ID 不能与 IPTV VLAN ID 相同" }
             end
             uci:set("network", "wan", "be6500_vlan_mode", vlan_mode)
-            uci:set("network", "wan", "ifname", vlan_mode == "tagged" and ("eth0." .. tostring(vlan_id)) or "eth0")
             if vlan_mode == "tagged" then uci:set("network", "wan", "be6500_vlan_id", tostring(vlan_id))
             else uci:delete("network", "wan", "be6500_vlan_id") end
         end
+        -- netifd in 24.10 binds an interface through the `device` option.
+        -- Keeping only the legacy `ifname` value can leave PPPoE attached to
+        -- an old bridge/DSA alias after switching the uplink mode.  Always
+        -- restore the BE6500 production WAN mapping when saving Internet
+        -- settings, including configurations created by older builds.
+        uci:set("network", "wan", "device", wan_link_ifname(uci))
+        uci:delete("network", "wan", "ifname")
         if proto == "pppoe" then
             if clean(args.username, 128) == "" then return true, { status = 1 } end
             uci:set("network", "wan", "username", clean(args.username, 128))
             local password = clean(args.password, 128)
             if password ~= "" or not uci:get("network", "wan", "password") then uci:set("network", "wan", "password", password) end
-            local mtu = tonumber(args.mtu) or 1492
-            if mtu < 1280 then mtu = 1280 elseif mtu > 1492 then mtu = 1492 end
-            uci:set("network", "wan", "mtu", tostring(mtu))
+            -- Do not apply the PPP payload MTU to the Ethernet parent.  The
+            -- pppoe plugin negotiates 1492 by default while eth0 must remain
+            -- at least 1500 for discovery/session control traffic.
+            uci:delete("network", "wan", "mtu")
             uci:set("network", "wan", "keepalive", "0 1")
             uci:delete("network", "wan", "ipaddr"); uci:delete("network", "wan", "netmask"); uci:delete("network", "wan", "gateway")
         elseif proto == "static" then
@@ -2125,11 +2218,11 @@ local function extended_jdcapi(method, args, uci)
     elseif method == "get_wire_dhcp_status" or method == "get_wan_connection_status" then
         local runtime = ubus_interface("wan")
         return true, { status = 0, connected = runtime.up and physical_wan_has_carrier() and 1 or 0 }
-    elseif method == "get_router_wan_ifname" then return true, { status = 0, ifname = uci:get("network", "wan", "ifname") or "eth0" }
+    elseif method == "get_router_wan_ifname" then return true, { status = 0, ifname = uci:get("network", "wan", "device") or "eth0" }
     elseif method == "set_router_wan_ifname" then
         local ifname = clean(args.ifname, 16)
         if ifname ~= "eth0" then return true, { status = 1, message = "当前交换机布局仅支持 eth0 作为 WAN" } end
-        uci:set("network", "wan", "ifname", ifname); uci:commit("network"); return true, status
+        uci:set("network", "wan", "device", ifname); uci:delete("network", "wan", "ifname"); uci:commit("network"); return true, status
     elseif method == "get_iptv_info" then
         local runtime = ubus_interface("iptv")
         local source_port = uci:get("network", "iptv", "be6500_source_port") or "lan1"
@@ -2297,7 +2390,6 @@ local function extended_jdcapi(method, args, uci)
         local policy = args.macpolicy == "allow" and "allow" or "deny"
         if not uci:get("be6500_oem", "access") then uci:section("be6500_oem", "settings", "access", {}) end
         uci:set("be6500_oem", "access", "policy", policy); uci:set("be6500_oem", "access", "enabled", tostring(args.enable) == "0" and "0" or "1")
-        local clear_after = {}
         if tonumber(args.replace) == 1 then
             replace_access_entries(uci, "deny", args.blacklist)
             replace_access_entries(uci, "allow", args.whitelist)
@@ -2308,30 +2400,27 @@ local function extended_jdcapi(method, args, uci)
                 local existing = find_access(uci, policy, mac)
                 if tostring(item.mod) == "0" then
                     if existing then uci:delete("be6500_oem", existing) end
-                    if policy == "deny" then clear_after[#clear_after + 1] = mac end
                 else
                     if not existing then existing = uci:section("be6500_oem", "access", nil, { policy = policy, mac = mac }) end
                     uci:set("be6500_oem", existing, "name", clean(item.name, 64))
-                    if policy == "allow" then clear_after[#clear_after + 1] = mac end
                 end
             end
         end
         local committed = uci:commit("be6500_oem")
         if not committed then return true, { status = 1, message = "访问控制配置保存失败" } end
         apply_mac_policy(uci, policy)
-        for _, mac in ipairs(clear_after) do clear_rejected_record(mac, "") end
         if tonumber(args.reload_wifi) == 1 then
             luci.sys.call("(sleep 1; wifi reload >/dev/null 2>&1) &")
         end
         return true, status
     elseif method == "web_get_rejected_list" or method == "get_rejected_devices" then
-        local data = rejected_device_list(uci)
-        return true, { status = 0, data = data, rejected_list = data }
+        local rows = wifi_reject_rows(uci)
+        return true, { status = 0, data = rows, rejected_list = rows }
     elseif method == "clear_rejected_devices" then
-        local mac = tostring(args.mac or args.uid or ""):upper()
-        if mac ~= "" and not valid_mac(mac) then return true, { status = 1, message = "MAC 地址格式不正确" } end
-        if not clear_rejected_record(mac, args.scope) then return true, { status = 1, message = "拒绝记录清除失败" } end
-        return true, status
+        if clear_wifi_reject_rows(args.mac, args.ssid) then
+            return true, { status = 0, message = "拒绝记录已清除" }
+        end
+        return true, { status = 1, message = "拒绝记录清除失败" }
     elseif method == "web_get_dhcp_static_ip" then
         local data = {}; uci:foreach("dhcp", "host", function(section)
             local mac = type(section.mac) == "table" and section.mac[1] or section.mac
@@ -2540,6 +2629,171 @@ local function extended_jdcapi(method, args, uci)
         if defaults then uci:set("firewall", defaults, "be6500_nat_type", nat_type) end
         uci:foreach("firewall", "zone", function(section) if section.name == "wan" then uci:set("firewall", section[".name"], "fullcone", nat_type == "nat1" and "1" or "0"); return false end end)
         uci:commit("firewall"); firewall_reload(); return true, status
+    elseif method == "get_cert_settings" then
+        luci.sys.call("/usr/libexec/be6500-cert-manager info >/dev/null 2>&1")
+        local function cert_get(option) return trim(luci.sys.exec("uci -q get be6500_cert.main." .. option .. " 2>/dev/null") or "") end
+        local cert_file = cert_get("cert_file"); if cert_file == "" then cert_file = "/etc/be6500-certificates/fullchain.pem" end
+        local key_file = cert_get("key_file"); if key_file == "" then key_file = "/etc/be6500-certificates/privkey.pem" end
+        local q = (require "luci.util").shellquote
+        local present = luci.sys.call("test -s " .. q(cert_file) .. " -a -s " .. q(key_file)) == 0
+        local details = present and (luci.sys.exec("openssl x509 -in " .. q(cert_file) .. " -noout -subject -issuer -dates 2>/dev/null") or "") or ""
+        local active_cert = trim(luci.sys.exec("uci -q get uhttpd.main.cert 2>/dev/null") or "")
+        local active_key = trim(luci.sys.exec("uci -q get uhttpd.main.key 2>/dev/null") or "")
+        local https_enabled = present and active_cert == cert_file and active_key == key_file and
+            luci.sys.call("uci -q get uhttpd.main.listen_https >/dev/null 2>&1") == 0
+        local expires_at, cert_state = "-", "未安装"
+        if present then
+            local end_raw = trim(luci.sys.exec("openssl x509 -in " .. q(cert_file) .. " -noout -enddate -dateopt iso_8601 2>/dev/null | sed 's/^notAfter=//; s/Z$//' ") or "")
+            if end_raw ~= "" then
+                expires_at = end_raw
+            end
+            if luci.sys.call("openssl x509 -in " .. q(cert_file) .. " -noout -checkend 0 >/dev/null 2>&1") ~= 0 then cert_state = "已过期"
+            elseif luci.sys.call("openssl x509 -in " .. q(cert_file) .. " -noout -checkend 2592000 >/dev/null 2>&1") ~= 0 then cert_state = "即将过期"
+            else cert_state = "正常" end
+        end
+        local certificates, applied_id = {}, cert_get("applied_id")
+        uci:foreach("be6500_cert", "certificate", function(section)
+            local section_id = section[".name"]
+            local section_cert = section.cert_file or ("/etc/be6500-certificates/" .. section_id .. "/fullchain.pem")
+            local section_key = section.key_file or ("/etc/be6500-certificates/" .. section_id .. "/privkey.pem")
+            local section_present = luci.sys.call("test -s " .. q(section_cert) .. " -a -s " .. q(section_key)) == 0
+            local section_details, section_expiry, section_state = "", "-", "未安装"
+            local operation_state = trim(luci.sys.exec("cat /tmp/be6500-cert-" .. section_id .. ".status 2>/dev/null") or "")
+            if section_present then
+                section_details = luci.sys.exec("openssl x509 -in " .. q(section_cert) .. " -noout -subject -issuer -dates 2>/dev/null") or ""
+                section_expiry = trim(luci.sys.exec("openssl x509 -in " .. q(section_cert) .. " -noout -enddate -dateopt iso_8601 2>/dev/null | sed 's/^notAfter=//; s/Z$//' ") or "")
+                if luci.sys.call("openssl x509 -in " .. q(section_cert) .. " -noout -checkend 0 >/dev/null 2>&1") ~= 0 then section_state = "已过期"
+                elseif luci.sys.call("openssl x509 -in " .. q(section_cert) .. " -noout -checkend 2592000 >/dev/null 2>&1") ~= 0 then section_state = "即将过期"
+                else section_state = "正常" end
+            elseif operation_state == "applying" then
+                section_state = "申请中"
+            elseif operation_state == "failed" then
+                section_state = "失败"
+            end
+            certificates[#certificates + 1] = { id = section_id, domain = section.domain or "", other_domains = section.other_domains or "",
+                auto_renew = section.auto_renew == "1" and 1 or 0, present = section_present and 1 or 0,
+                applied = applied_id == section_id and 1 or 0, cert_file = section_cert, key_file = section_key,
+                expires_at = section_expiry ~= "" and section_expiry or "-", cert_state = section_state, details = section_details }
+        end)
+        return true, { status = 0, domain = cert_get("domain"), other_domains = cert_get("other_domains"),
+            acme_name = cert_get("acme_name"), acme_email = cert_get("acme_email"), ca = cert_get("ca"),
+            dns_name = cert_get("dns_name"), dns_provider = cert_get("dns_provider"), dns_email = cert_get("dns_email"),
+            secret_saved = cert_get("dns_secret") ~= "" and 1 or 0, auto_renew = cert_get("auto_renew") == "1" and 1 or 0,
+            present = present and 1 or 0, applied = https_enabled and 1 or 0, details = details,
+            expires_at = expires_at, cert_state = cert_state,
+            cert_file = cert_file, key_file = key_file, certificates = certificates }
+    elseif method == "save_cert_settings" then
+        local domain = clean(args.domain, 253):lower()
+        local others = clean(args.other_domains, 1024):lower():gsub("%s+", "")
+        local email = clean(args.acme_email, 253)
+        local provider = tostring(args.dns_provider) == "cloudflare_global" and "cloudflare_global" or "cloudflare_token"
+        local dns_email, secret = clean(args.dns_email, 253), clean(args.dns_secret, 512)
+        local cert_id = clean(args.id, 80)
+        if not cert_id:match("^cert_[A-Za-z0-9_]+$") then cert_id = "cert_" .. tostring(os.time()) .. tostring(math.random(100, 999)) end
+        local cert_file = clean(args.cert_file, 512); local key_file = clean(args.key_file, 512)
+        if cert_file == "" then cert_file = "/etc/be6500-certificates/" .. cert_id .. "/fullchain.pem" end
+        if key_file == "" then key_file = "/etc/be6500-certificates/" .. cert_id .. "/privkey.pem" end
+        local function valid_domain(name)
+            name = tostring(name or "")
+            if name:sub(1, 2) == "*." then name = name:sub(3) end
+            return name:match("^[a-z0-9][a-z0-9%.%-]*[a-z0-9]$") ~= nil
+        end
+        if domain == "" or not valid_domain(domain) then return true, { status = 1, message = "请填写正确的主域名" } end
+        for name in others:gmatch("[^,]+") do if not valid_domain(name) then return true, { status = 1, message = "附加域名格式不正确：" .. name } end end
+        if email == "" or not email:match("^[^@]+@[^@]+$") then return true, { status = 1, message = "请填写正确的 ACME 邮箱" } end
+        if provider == "cloudflare_global" and dns_email == "" then return true, { status = 1, message = "Global API Key 模式需要 Cloudflare 邮箱" } end
+        local function valid_path(path) return path:sub(1, 1) == "/" and not path:find("%.%.", 1, true) and not path:find("[%z\1-\31]") end
+        if not valid_path(cert_file) or not valid_path(key_file) or cert_file == key_file then
+            return true, { status = 1, message = "证书和私钥必须使用两个不同的绝对路径，且不能包含 .." }
+        end
+        local q = (require "luci.util").shellquote
+        local renew_enabled = args.auto_renew == true or tonumber(args.auto_renew) == 1
+        local command = "/usr/libexec/be6500-cert-manager save " .. table.concat({ q(cert_id), q(domain), q(others), q(email), q(provider), q(dns_email), q(secret), q(renew_enabled and "1" or "0"), q(cert_file), q(key_file) }, " ")
+        local code, output = marked_command(command)
+        if code ~= 0 then return true, { status = 1, message = output ~= "" and output or "证书设置保存失败" } end
+        return true, { status = 0, message = output, id = cert_id }
+    elseif method == "save_cert_acme_account" then
+        local name, email = clean(args.name, 80), clean(args.email, 253)
+        local ca = tostring(args.provider or "letsencrypt")
+        local allowed = { letsencrypt = true, zerossl = true, buypass = true, google = true }
+        if not allowed[ca] then ca = "letsencrypt" end
+        if email == "" or not email:match("^[^@]+@[^@]+$") then return true, { status = 1, message = "请填写正确的账户邮箱" } end
+        if name == "" then name = "install-" .. ca end
+        local q = (require "luci.util").shellquote
+        luci.sys.call("uci set be6500_cert.main.acme_name=" .. q(name) .. "; uci set be6500_cert.main.acme_email=" .. q(email) .. "; uci set be6500_cert.main.ca=" .. q(ca) .. "; uci commit be6500_cert; chmod 600 /etc/config/be6500_cert")
+        return true, { status = 0 }
+    elseif method == "save_cert_dns_account" then
+        local name = clean(args.name, 80); if name == "" then name = "cloudflare" end
+        local provider = tostring(args.provider) == "cloudflare_global" and "cloudflare_global" or "cloudflare_token"
+        local email, secret = clean(args.email, 253), clean(args.secret, 512)
+        if provider == "cloudflare_global" and email == "" then return true, { status = 1, message = "Global API Key 模式需要 Cloudflare 邮箱" } end
+        local q = (require "luci.util").shellquote
+        local command = "uci set be6500_cert.main.dns_name=" .. q(name) .. "; uci set be6500_cert.main.dns_provider=" .. q(provider) .. "; uci set be6500_cert.main.dns_email=" .. q(email)
+        if secret ~= "" then command = command .. "; uci set be6500_cert.main.dns_secret=" .. q(secret) end
+        luci.sys.call(command .. "; uci commit be6500_cert; chmod 600 /etc/config/be6500_cert")
+        return true, { status = 0 }
+    elseif method == "set_certificate_auto_renew" then
+        local enabled = tonumber(args.enabled) == 1 and "1" or "0"
+        local cert_id = clean(args.id, 80)
+        if not cert_id:match("^cert_[A-Za-z0-9_]+$") then return true, { status = 1, message = "证书 ID 不正确" } end
+        local code, output = marked_command("/usr/libexec/be6500-cert-manager auto " .. cert_id .. " " .. enabled)
+        return true, { status = code == 0 and 0 or 1, message = output }
+    elseif method == "save_certificate_preferences" then
+        local output, code = "", 0
+        for item in tostring(args.auto_states or ""):gmatch("[^,]+") do
+            local cert_id, enabled = item:match("^(cert_[A-Za-z0-9_]+):([01])$")
+            if cert_id then code, output = marked_command("/usr/libexec/be6500-cert-manager auto " .. cert_id .. " " .. enabled); if code ~= 0 then break end end
+        end
+        local applied_id = clean(args.applied_id, 80)
+        if code == 0 then
+            if applied_id == "" then code, output = marked_command("/usr/libexec/be6500-cert-manager disable")
+            elseif applied_id:match("^cert_[A-Za-z0-9_]+$") then code, output = marked_command("/usr/libexec/be6500-cert-manager apply " .. applied_id)
+            else return true, { status = 1, message = "应用的证书 ID 不正确" } end
+        end
+        return true, { status = code == 0 and 0 or 1, message = output }
+    elseif method == "issue_certificate" or method == "renew_certificate" or method == "apply_certificate" or method == "selfsign_certificate" then
+        local actions = { issue_certificate = "issue", renew_certificate = "renew", apply_certificate = "apply", selfsign_certificate = "selfsigned" }
+        local cert_id = clean(args.id, 80)
+        if not cert_id:match("^cert_[A-Za-z0-9_]+$") then return true, { status = 1, message = "证书 ID 不正确" } end
+        if method == "issue_certificate" then
+            local q = (require "luci.util").shellquote
+            local state_file = "/tmp/be6500-cert-" .. cert_id .. ".status"
+            local task_log = "/tmp/be6500-cert-" .. cert_id .. ".log"
+            luci.sys.call("echo applying >" .. q(state_file) .. "; (/usr/libexec/be6500-cert-manager issue " ..
+                q(cert_id) .. " >" .. q(task_log) .. " 2>&1; rc=$?; if [ $rc -eq 0 ]; then echo success >" ..
+                q(state_file) .. "; else echo failed >" .. q(state_file) .. "; fi) </dev/null >/dev/null 2>&1 &")
+            return true, { status = 0, message = "证书申请已开始" }
+        end
+        local code, output = marked_command("/usr/libexec/be6500-cert-manager " .. actions[method] .. " " .. cert_id)
+        if code ~= 0 then return true, { status = 1, message = output ~= "" and output or "证书操作失败，请查看日志" } end
+        return true, { status = 0, message = output }
+    elseif method == "upload_certificate" then
+        local certificate, private_key = tostring(args.certificate or ""), tostring(args.private_key or "")
+        if not certificate:find("-----BEGIN CERTIFICATE-----", 1, true) or not private_key:find("-----BEGIN", 1, true) or not private_key:find("PRIVATE KEY-----", 1, true) then
+            return true, { status = 1, message = "证书或私钥 PEM 内容不正确" }
+        end
+        if #certificate > 131072 or #private_key > 32768 then return true, { status = 1, message = "证书文件过大" } end
+        local cert_id = clean(args.id, 80)
+        if not cert_id:match("^cert_[A-Za-z0-9_]+$") then return true, { status = 1, message = "证书 ID 不正确" } end
+        local cert_file = trim(luci.sys.exec("uci -q get be6500_cert." .. cert_id .. ".cert_file") or ""); if cert_file == "" then cert_file = "/etc/be6500-certificates/" .. cert_id .. "/fullchain.pem" end
+        local key_file = trim(luci.sys.exec("uci -q get be6500_cert." .. cert_id .. ".key_file") or ""); if key_file == "" then key_file = "/etc/be6500-certificates/" .. cert_id .. "/privkey.pem" end
+        local q = (require "luci.util").shellquote
+        luci.sys.call("mkdir -p " .. q(cert_file:match("^(.*)/[^/]+$") or "/etc/be6500-certificates") .. " " .. q(key_file:match("^(.*)/[^/]+$") or "/etc/be6500-certificates"))
+        local cert_tmp, key_tmp = cert_file .. ".tmp", key_file .. ".tmp"
+        local cf = io.open(cert_tmp, "w"); local kf = io.open(key_tmp, "w")
+        if not cf or not kf then if cf then cf:close() end; if kf then kf:close() end; return true, { status = 1, message = "无法写入证书目录" } end
+        cf:write(certificate); cf:close(); kf:write(private_key); kf:close()
+        local check = luci.sys.call("openssl x509 -in " .. q(cert_tmp) .. " -noout >/dev/null 2>&1 && openssl pkey -in " .. q(key_tmp) .. " -noout >/dev/null 2>&1")
+        if check ~= 0 then luci.sys.call("rm -f " .. q(cert_tmp) .. " " .. q(key_tmp)); return true, { status = 1, message = "证书或私钥校验失败" } end
+        luci.sys.call("mv " .. q(cert_tmp) .. " " .. q(cert_file) .. "; mv " .. q(key_tmp) .. " " .. q(key_file) .. "; chmod 600 " .. q(cert_file) .. " " .. q(key_file))
+        return true, { status = 0, message = "证书已上传" }
+    elseif method == "delete_certificate" then
+        local cert_id = clean(args.id, 80)
+        if not cert_id:match("^cert_[A-Za-z0-9_]+$") then return true, { status = 1, message = "证书 ID 不正确" } end
+        local code, output = marked_command("/usr/libexec/be6500-cert-manager delete " .. cert_id)
+        return true, { status = code == 0 and 0 or 1, message = output }
+    elseif method == "get_certificate_log" then
+        return true, { status = 0, log = luci.sys.exec("/usr/libexec/be6500-cert-manager log 2>/dev/null") or "" }
     elseif method == "get_cf_ddns" then
         local fields = split_tabs(luci.sys.exec("/usr/libexec/be6500-ddns-manager info 2>/dev/null") or "")
         return true, { status = 0, enabled = tonumber(fields[2]) or 0, domain = fields[3] or "", zone = fields[4] or "",
@@ -2570,7 +2824,8 @@ local function extended_jdcapi(method, args, uci)
     elseif method == "get_cf_ddns_status" then
         local fields = split_tabs(luci.sys.exec("/usr/libexec/be6500-ddns-manager status 2>/dev/null") or "")
         return true, { status = 0, ipv4 = fields[2] or "-", record4 = fields[3] or "-", ipv6 = fields[4] or "-",
-            record6 = fields[5] or "-", last_time = fields[6] ~= "" and fields[6] or "-", last_result = fields[7] ~= "" and fields[7] or "暂无运行记录" }
+            record6 = fields[5] or "-", last_time = fields[6] ~= "" and fields[6] or "-", last_result = fields[7] ~= "" and fields[7] or "暂无运行记录",
+            enabled6 = tonumber(fields[8]) or 0 }
     elseif method == "run_cf_ddns" then
         local code, output = marked_command("/usr/libexec/be6500-ddns-manager run")
         if code ~= 0 then return true, { status = 1, message = output ~= "" and output or "DDNS 更新失败" } end

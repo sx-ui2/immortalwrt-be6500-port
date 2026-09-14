@@ -11,12 +11,13 @@ define Package/luci-app-rejected-clients
   CATEGORY:=LuCI
   SUBMENU:=3. Applications
   TITLE:=Network settings and device management page
-  DEPENDS:=+luci-base +luci-compat +luci-lua-runtime +rpcd +rpcd-mod-file +jsonfilter +ip-full +iwinfo +nftables \
-	+libustream-openssl +ca-bundle \
+  DEPENDS:=+luci-base +luci-compat +luci-lua-runtime +luci-theme-bootstrap +uhttpd +uhttpd-mod-ubus +rpcd +rpcd-mod-file +jsonfilter +ip-full +iwinfo +nftables \
+	+libustream-openssl +ca-bundle +curl +openssl-util +acme-acmesh +acme-acmesh-dnsapi \
 	+luci-app-ddns +luci-app-upnp +luci-app-sqm +luci-app-nlbwmon \
 	+luci-i18n-package-manager-zh-cn +luci-i18n-ddns-zh-cn \
 	+luci-i18n-nlbwmon-zh-cn +luci-i18n-sqm-zh-cn +luci-i18n-upnp-zh-cn \
-	+udpxy +tcpdump +mwan3 +kmod-macvlan +arp-scan-database
+	+luci-i18n-diskman-zh-cn +luci-i18n-usb-printer-zh-cn \
+	+udpxy +tcpdump +kmod-macvlan +arp-scan-database +zram-swap +losetup
   PKGARCH:=all
 endef
 
@@ -38,23 +39,32 @@ define Package/luci-app-rejected-clients/install
 	$(INSTALL_DIR) $(1)/usr/share/be6500-luci-overrides/status/include
 	$(INSTALL_DATA) ./htdocs/luci-static/resources/view/status/include/10_system.js $(1)/usr/share/be6500-luci-overrides/status/include/10_system.js
 	$(INSTALL_DATA) ./htdocs/luci-static/resources/view/status/include/20_memory.js $(1)/usr/share/be6500-luci-overrides/status/include/20_memory.js
+	$(INSTALL_DATA) ./htdocs/luci-static/resources/view/status/include/25_storage.js $(1)/usr/share/be6500-luci-overrides/status/include/25_storage.js
 	$(INSTALL_DATA) ./htdocs/luci-static/resources/view/status/include/29_ports.js $(1)/usr/share/be6500-luci-overrides/status/include/29_ports.js
 	$(INSTALL_DIR) $(1)/usr/libexec
 	$(INSTALL_BIN) ./root/usr/libexec/rejected-mac $(1)/usr/libexec/rejected-mac
 	$(INSTALL_BIN) ./root/usr/libexec/ddns-manager $(1)/usr/libexec/ddns-manager
+	ln -sf ddns-manager $(1)/usr/libexec/be6500-ddns-manager
+	$(INSTALL_BIN) ./root/usr/libexec/be6500-cert-manager $(1)/usr/libexec/be6500-cert-manager
 	$(INSTALL_BIN) ./root/usr/libexec/be6500-wifi-apply $(1)/usr/libexec/be6500-wifi-apply
 	$(INSTALL_BIN) ./root/usr/libexec/be6500-led-control $(1)/usr/libexec/be6500-led-control
 	$(INSTALL_BIN) ./root/usr/libexec/be6500-led-blink.uc $(1)/usr/libexec/be6500-led-blink.uc
 	$(INSTALL_BIN) ./root/usr/libexec/be6500-radio0-auto-channel $(1)/usr/libexec/be6500-radio0-auto-channel
 	$(INSTALL_BIN) ./root/usr/libexec/be6500-patch-luci-wireless $(1)/usr/libexec/be6500-patch-luci-wireless
 	$(INSTALL_BIN) ./root/usr/libexec/be6500-patch-luci-firewall $(1)/usr/libexec/be6500-patch-luci-firewall
+	$(INSTALL_BIN) ./root/usr/libexec/be6500-fw4-multiwan $(1)/usr/libexec/be6500-fw4-multiwan
 	$(INSTALL_DIR) $(1)/etc/uci-defaults
 	$(INSTALL_BIN) ./root/etc/uci-defaults/95-be6500-luci-wireless $(1)/etc/uci-defaults/95-be6500-luci-wireless
 	$(INSTALL_BIN) ./root/etc/uci-defaults/99-be6500-wireless-runtime-fix $(1)/etc/uci-defaults/99-be6500-wireless-runtime-fix
+	$(INSTALL_BIN) ./root/etc/uci-defaults/99-be6500-wireless-dedupe $(1)/etc/uci-defaults/99-be6500-wireless-dedupe
+	$(INSTALL_BIN) ./root/etc/uci-defaults/99-be6500-switch-port-labels $(1)/etc/uci-defaults/99-be6500-switch-port-labels
 	$(INSTALL_DIR) $(1)/etc/rc.button
 	$(INSTALL_BIN) ./root/etc/rc.button/joy $(1)/etc/rc.button/joy
 	$(INSTALL_DIR) $(1)/etc/init.d
 	$(INSTALL_BIN) ./root/etc/init.d/be6500-led $(1)/etc/init.d/be6500-led
+	$(INSTALL_BIN) ./root/etc/init.d/be6500-fw4-multiwan $(1)/etc/init.d/be6500-fw4-multiwan
+	$(INSTALL_DIR) $(1)/etc/hotplug.d/iface
+	$(INSTALL_BIN) ./root/etc/hotplug.d/iface/95-be6500-fw4-multiwan $(1)/etc/hotplug.d/iface/95-be6500-fw4-multiwan
 	$(INSTALL_DIR) $(1)/usr/sbin
 	$(INSTALL_BIN) ./root/usr/sbin/be6500-switch-wifi-mode $(1)/usr/sbin/be6500-switch-wifi-mode
 	$(INSTALL_DIR) $(1)/sbin
@@ -66,6 +76,7 @@ define Package/luci-app-rejected-clients/install
 	$(INSTALL_DIR) $(1)/etc/config
 	$(INSTALL_CONF) ./root/etc/config/be6500_oem $(1)/etc/config/be6500_oem
 	$(INSTALL_CONF) ./root/etc/config/be6500_oem_api $(1)/etc/config/be6500_oem_api
+	$(INSTALL_CONF) ./root/etc/wgetrc $(1)/etc/wgetrc
 endef
 
 $(eval $(call BuildPackage,luci-app-rejected-clients))

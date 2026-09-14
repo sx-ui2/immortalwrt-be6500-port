@@ -961,6 +961,7 @@ body {
 #be6500-native-root .native-modal-close{min-width:0!important;padding:.25em .65em!important;font-size:1.15rem!important;line-height:1!important}
 #be6500-native-root .native-modal-body{padding:.75rem 0 0!important}
 #be6500-native-root .native-modal .native-actions{width:auto!important;margin:.75rem 0 0!important;padding:.5rem 0 0!important}
+#be6500-native-root #access-modal .native-control>.native-plain-select{width:20rem!important;min-width:0!important;max-width:100%!important;height:31px!important;min-height:31px!important;padding:.5em 2.2em .5em .8em!important;font-size:13px!important;line-height:normal!important;box-sizing:border-box!important}
 @media(max-width:700px){#be6500-native-root .native-row{display:block!important}#be6500-native-root .native-row>.cbi-value-title,#be6500-native-root .native-row>.native-control{width:100%!important;max-width:none!important}#be6500-native-root .native-actions{margin-left:0!important}}
 #be6500-native-root .native-luci-dropdown>.cbi-dropdown{width:100%}
 #be6500-native-root .native-luci-dropdown .cbi-dropdown li{align-items:center!important;gap:.55rem!important}

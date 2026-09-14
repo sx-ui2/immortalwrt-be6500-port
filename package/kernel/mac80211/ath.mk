@@ -26,6 +26,9 @@ ifdef CONFIG_PACKAGE_MAC80211_DEBUGFS
 	ATH5K_DEBUG \
 	ATH6KL_DEBUG \
 	WIL6210_DEBUGFS
+
+  # QSDK ath12k exposes CFR through debugfs on the BE6500 build.
+  config-y += ATH12K_CFR
 endif
 
 ifdef CONFIG_PACKAGE_MAC80211_TRACING
@@ -60,6 +63,10 @@ config-$(CONFIG_ATH10K_LEDS) += ATH10K_LEDS
 config-$(CONFIG_ATH10K_THERMAL) += ATH10K_THERMAL
 config-$(CONFIG_ATH11K_THERMAL) += ATH11K_THERMAL
 
+# IPQ53xx uses the integrated AHB radio path.  Do not inherit the generic
+# PCI-only ath12k defaults or the on-SoC radios will never probe.
+config-$(CONFIG_TARGET_qualcommax_ipq53xx) += ATH12K_AHB ATH12K_POWER_OPTIMIZATION
+
 config-$(call config_package,ath9k-htc) += ATH9K_HTC
 config-$(call config_package,ath10k,regular) += ATH10K ATH10K_PCI
 config-$(call config_package,ath10k-sdio,sdio) += ATH10K ATH10K_SDIO
@@ -68,6 +75,7 @@ config-$(call config_package,ath11k) += ATH11K
 config-$(call config_package,ath11k-ahb) += ATH11K_AHB
 config-$(call config_package,ath11k-pci) += ATH11K_PCI
 config-$(call config_package,ath12k) += ATH12K
+config-$(CONFIG_PACKAGE_kmod-ath12k) += ATH12K_SPECTRAL
 
 config-$(call config_package,ath5k) += ATH5K ATH5K_PCI
 
@@ -382,10 +390,20 @@ define KernelPackage/ath12k
   TITLE:=Qualcomm 802.11be wireless chipset support
   URL:=https://wireless.wiki.kernel.org/en/users/drivers/ath12k
   DEPENDS+= @PCI_SUPPORT +kmod-ath +@DRIVER_11AC_SUPPORT +@DRIVER_11AX_SUPPORT \
-  +kmod-crypto-michael-mic +kmod-qrtr-mhi \
+  +kmod-crypto-michael-mic +kmod-qrtr-mhi +kmod-hwmon-core \
   +@DRIVER_11BE_SUPPORT
-  FILES:=$(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/ath12k.ko
-  AUTOLOAD:=$(call AutoProbe,ath12k)
+  FILES:=$(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/ath12k.ko \
+	 $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/wifi7/ath12k_wifi7.ko
+ifeq ($(CONFIG_PACKAGE_QCN_EXTN),y)
+ifneq ($(CONFIG_KERNEL_IPQ_MEM_PROFILE),256)
+  FILES+=$(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/qcn_extns/wifi6/ath12k_wifi6.ko \
+	 $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/qcn_extns/sa_test/sa_test.ko
+endif
+endif
+ifeq ($(CONFIG_PACKAGE_MAC80211_ATHDEBUG),y)
+  FILES+=$(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/ath_debug/ath_debug.ko
+endif
+  AUTOLOAD:=$(call AutoProbe,ath12k ath12k_wifi7 ath_debug)
 endef
 
 define KernelPackage/ath12k/description

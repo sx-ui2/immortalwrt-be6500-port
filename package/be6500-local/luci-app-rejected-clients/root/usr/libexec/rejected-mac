@@ -117,14 +117,14 @@ clients() {
 		membership=none; list_has "$scope" allowlist "$mac" && membership=allow; list_has "$scope" denylist "$mac" && membership=deny
 		device_section="dev_$(printf '%s' "$mac" | tr 'A-F:' 'a-f_')"; alias="$(uci -q get "$CONFIG.$device_section.name")"
 		prefix="$(printf '%s' "$mac" | tr -d ':' | cut -c1-6)"
-		vendor="$(awk -v p="$prefix" 'toupper($1)==p {$1="";sub(/^ /,"");print;exit}' /usr/share/nmap/nmap-mac-prefixes 2>/dev/null)"
+		vendor="$(awk -F '\t' -v p="$prefix" 'toupper($1)==p {$1="";sub(/^[[:space:]]+/,"");print;exit}' /usr/share/arp-scan/ieee-oui.txt 2>/dev/null)"
 		display_name="${alias:-$name}"
 		printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$mac" "$display_name" "$ip" "$band" "$signal" "$rx" "$tx" "$connected" "$membership" "$ifname" "$vendor" "$name" "$scope" "$ipv6"
 	done <"$tmp"
 	while read -r expires mac ip name clientid; do
 		mac="$(normalize_mac "$mac")"; grep -q "^$mac$(printf '\t')" "$tmp" && continue
 		ip neigh show "$ip" 2>/dev/null | grep -qi "lladdr $(printf '%s' "$mac"|tr 'A-F' 'a-f')" || continue
-		[ "$name" = '*' ] && name=''; device_section="dev_$(printf '%s' "$mac" | tr 'A-F:' 'a-f_')"; alias="$(uci -q get "$CONFIG.$device_section.name")"; prefix="$(printf '%s' "$mac"|tr -d ':'|cut -c1-6)"; vendor="$(awk -v p="$prefix" 'toupper($1)==p{$1="";sub(/^ /,"");print;exit}' /usr/share/nmap/nmap-mac-prefixes 2>/dev/null)"
+		[ "$name" = '*' ] && name=''; device_section="dev_$(printf '%s' "$mac" | tr 'A-F:' 'a-f_')"; alias="$(uci -q get "$CONFIG.$device_section.name")"; prefix="$(printf '%s' "$mac"|tr -d ':'|cut -c1-6)"; vendor="$(awk -F '\t' -v p="$prefix" 'toupper($1)==p{$1="";sub(/^[[:space:]]+/,"");print;exit}' /usr/share/arp-scan/ieee-oui.txt 2>/dev/null)"
 		ipv6="$(awk -F '\t' -v m="$mac" '$1==m{print $2;exit}' "$v6tmp")"
 		fdb_port="$(brctl showmacs br-lan 2>/dev/null | awk -v m="$mac" 'toupper($2)==m&&$3=="no"{print $1;exit}')"; wired_if=''
 		for port in lan2 lan3 lan4;do raw_port="$(cat "/sys/class/net/$port/brport/port_no" 2>/dev/null)"; port_no="$(printf '%d' "$raw_port" 2>/dev/null)"; [ -n "$fdb_port" ]&&[ "$fdb_port" = "$port_no" ]&&wired_if="$port";done
@@ -136,12 +136,6 @@ clients() {
 		elif [ -n "$seen" ];then old_scope="${seen%%$(printf '\t')*}"; rest="${seen#*$(printf '\t')}"; old_band="${rest%%$(printf '\t')*}"; old_if="${rest#*$(printf '\t')}"; printf '%s\t%s\t%s\t%s\t-\t0\t0\t0\tnone\t%s\t%s\t%s\t%s\t%s\n' "$mac" "${alias:-$name}" "$ip" "$old_band" "$old_if" "$vendor" "$name" "$old_scope" "$ipv6";fi
 	done </tmp/dhcp.leases
 	rm -f "$tmp" "$v6tmp" "$wiredtmp"
-}
-
-list_rejected() {
-	awk -F '\t' '
-	NF>=4{key=toupper($2) "/" $3;order[++n]=key;latest[key]=n;row[key]=toupper($2) "\t" $3 "\t" strftime("%a %b %d %H:%M:%S %Y",$1) " " $4}
-	END{shown=0;for(i=n;i>=1&&shown<30;i--){key=order[i];if(latest[key]!=i)continue;print row[key];shown++}}' /tmp/device-manager-rejected 2>/dev/null
 }
 
 set_mode() {
@@ -422,7 +416,10 @@ network_save() {
 	[ "$iptv_mode" = vlan ] || [ -n "$iptv_source_port" ] || { echo 'LAN 口接入 IPTV 时必须选择接光猫 IPTV 口的上联 LAN 口' >&2;exit 2; }
 	[ "$iptv_mode" != lan ] || [ "$iptv_port" = none ] || [ -z "$iptv_port" ] || [ "$iptv_port" != "$iptv_source_port" ] || { echo 'IPTV 上联口不能同时作为机顶盒输出口' >&2;exit 2; }
 	[ "$udpxy_port" -ge 1 ] 2>/dev/null&&[ "$udpxy_port" -le 65535 ]||{ echo 'udpxy 端口无效' >&2;exit 2;}
-	wan_dev=wan;[ -n "$vlan" ]&&wan_dev="wan.$vlan";uci -q del_list network.@device[0].ports=wan;uci -q delete wireless.dm_bridge;uci -q delete dhcp.lan.ignore;uci set network.lan.proto=static
+	# The production/QWRT topology exposes the physical WAN as eth0.  Using
+	# the diagnostic DSA alias `wan` here makes PPPoE discovery leave through
+	# a non-existent device after a clean installation.
+	wan_dev=eth0;[ -n "$vlan" ]&&wan_dev="eth0.$vlan";uci -q del_list network.@device[0].ports=wan;uci -q delete wireless.dm_bridge;uci -q delete dhcp.lan.ignore;uci set network.lan.proto=static
 	uci -q get $CONFIG.network >/dev/null||uci set $CONFIG.network=network;uci set $CONFIG.network.uplink_mode="$proto"
 	uci set network.lan.ipaddr="$lan_ip";uci set network.lan.netmask="$lan_mask";uci -q delete network.lan.dns
 	uci -q get network.guest >/dev/null||uci set network.guest=interface;uci set network.guest.proto=static;uci set network.guest.ipaddr="$guest_ip";uci set network.guest.netmask="$guest_mask";uci -q delete network.guest.type;uci set network.guest.device=br-guest;uci set network.dm_guest=device;uci set network.dm_guest.name=br-guest;uci set network.dm_guest.type=bridge;uci set network.dm_guest.bridge_empty=1
@@ -519,12 +516,8 @@ network_save() {
 	fi
 	uci -q get udpxy.@udpxy[0] >/dev/null||uci add udpxy udpxy >/dev/null;uci set udpxy.@udpxy[0].disabled="$([ "$udpxy_on" = 1 ]&&echo 0||echo 1)";uci set udpxy.@udpxy[0].status="$udpxy_on";uci set udpxy.@udpxy[0].port="$udpxy_port";uci set udpxy.@udpxy[0].bind=br-lan;uci set udpxy.@udpxy[0].source="$udpxy_source"
 	uci -q delete network.wan2;uci -q delete network.dm_macvlan2;uci -q del_list firewall.@zone[1].network=wan2
-	for s in dm_wan dm_wan2 dm_wan_member dm_wan2_member dm_policy dm_rule;do uci -q delete mwan3.$s;done
 	if [ "$multi_on" = 1 ];then
 		uci set network.dm_macvlan2=device;uci set network.dm_macvlan2.name=dm-macvlan2;uci set network.dm_macvlan2.type=macvlan;uci set network.dm_macvlan2.ifname="$wan_dev";uci set network.wan2=interface;uci set network.wan2.device=dm-macvlan2;uci set network.wan2.proto=pppoe;uci set network.wan2.username="${multi_user:-$user}";[ -n "$multi_pass" ]&&uci set network.wan2.password="$multi_pass"||uci set network.wan2.password="$(uci -q get network.wan.password)";uci set network.wan2.metric=20;uci add_list firewall.@zone[1].network=wan2
-		for i in wan wan2;do uci set mwan3.dm_$i=interface;uci set mwan3.dm_$i.enabled=1;uci add_list mwan3.dm_$i.track_ip=223.5.5.5;uci add_list mwan3.dm_$i.track_ip=119.29.29.29;uci set mwan3.dm_$i.reliability=1;uci set mwan3.dm_$i.family=ipv4;done
-		uci set mwan3.dm_wan_member=member;uci set mwan3.dm_wan_member.interface=wan;uci set mwan3.dm_wan_member.metric=1;uci set mwan3.dm_wan_member.weight=1;uci set mwan3.dm_wan2_member=member;uci set mwan3.dm_wan2_member.interface=wan2;uci set mwan3.dm_wan2_member.metric="$([ "$multi_mode" = backup ]&&echo 2||echo 1)";uci set mwan3.dm_wan2_member.weight=1
-		uci set mwan3.dm_policy=policy;uci add_list mwan3.dm_policy.use_member=dm_wan_member;uci add_list mwan3.dm_policy.use_member=dm_wan2_member;uci set mwan3.dm_policy.last_resort=default;uci set mwan3.dm_rule=rule;uci set mwan3.dm_rule.dest_ip=0.0.0.0/0;uci set mwan3.dm_rule.use_policy=dm_policy;uci set mwan3.dm_rule.family=ipv4
 	fi
 	if [ "$iptv_on" = 1 ];then
 		uci show firewall|grep -q "\.name='IPTV'"||{ uci set firewall.dm_iptv=zone;uci set firewall.dm_iptv.name=IPTV;uci set firewall.dm_iptv.network=IPTV;uci set firewall.dm_iptv.input=ACCEPT;uci set firewall.dm_iptv.output=ACCEPT;uci set firewall.dm_iptv.forward=REJECT; }
@@ -533,11 +526,11 @@ network_save() {
 		uci set firewall.dm_iptv_igmp=rule;uci set firewall.dm_iptv_igmp.name=DeviceManager-Allow-IPTV-IGMP;uci set firewall.dm_iptv_igmp.src=IPTV;uci set firewall.dm_iptv_igmp.proto=igmp;uci set firewall.dm_iptv_igmp.target=ACCEPT
 	else uci -q delete firewall.dm_lan_iptv;uci -q delete firewall.dm_iptv_lan;uci -q delete firewall.dm_iptv_igmp;fi
 	ensure_guest_firewall
-	uci commit network;uci commit wireless;uci commit dhcp;uci commit udpxy;uci commit firewall;uci commit mwan3;uci commit $CONFIG
+	uci commit network;uci commit wireless;uci commit dhcp;uci commit udpxy;uci commit firewall;uci commit $CONFIG
 	(/etc/init.d/network reload;sleep 3;wifi down;sleep 1;wifi up;sleep 5
 	 up0="$(ubus call network.wireless status 2>/dev/null|jsonfilter -e '@.radio0.up')";up1="$(ubus call network.wireless status 2>/dev/null|jsonfilter -e '@.radio1.up')"
 	 if [ "$up0" != true ] || [ "$up1" != true ];then logger -t device-manager 'Network-save Wi-Fi recovery retry';uci -q delete wireless.radio0.disabled;uci -q delete wireless.radio1.disabled;uci commit wireless;wifi up;fi
-	 /etc/init.d/firewall reload;/etc/init.d/dnsmasq restart;/etc/init.d/udpxy restart;/etc/init.d/mwan3 restart) >/dev/null 2>&1 &
+	 /etc/init.d/firewall reload;/etc/init.d/dnsmasq restart;/etc/init.d/udpxy restart;/etc/init.d/be6500-fw4-multiwan restart) >/dev/null 2>&1 &
 	echo '上网与 IPTV 设置已保存，网络正在重新连接'
 }
 
@@ -758,7 +751,7 @@ wifi_save() {
 }
 
 case "$1" in
-	status) status;; clients) clients;; list) list_rejected;; mode) set_mode "$2" "$3";;
+	status) status;; clients) clients;; mode) set_mode "$2" "$3";;
 	allow|deny|remove) change_list "$1" "$2" "$3";; disconnect) disconnect_client "$2" "$3";; rename) rename_client "$2" "$3";;
 	set_limit) set_limit "$2" "$3" "$4";; set_binding) set_binding "$2" "$3" "$4";; set_guest_limit) set_guest_limit "$2" "$3" "$4";;
 	wifi_info) wifi_info;; wifi_save) wifi_save "$@";; wifi_mode) wifi_mode "$@";;
