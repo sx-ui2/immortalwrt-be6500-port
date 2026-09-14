@@ -17,16 +17,6 @@ if [ -f "$sysupgrade_archive" ] || [ -f "$sysupgrade_tar" ]; then
 	exit 0
 fi
 
-# A preserved configuration may already be present even after the upgrade
-# helper has removed its temporary archive.  The BE6500 profile is our stable
-# marker for that case; never replace it with the packaged snapshot.
-if uci -q get wireless.main >/dev/null 2>&1 &&
-	uci -q get wireless.radio2 >/dev/null 2>&1; then
-	logger -t be6500-current-config \
-		"existing BE6500 wireless profile detected; keeping /etc/config" 2>/dev/null || true
-	exit 0
-fi
-
 default_dir="${BE6500_CURRENT_CONFIG_DEFAULT_DIR:-/usr/share/be6500-current-config}"
 config_dir="${BE6500_CURRENT_CONFIG_DIR:-/etc/config}"
 
