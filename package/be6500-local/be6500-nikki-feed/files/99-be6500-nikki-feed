@@ -1,0 +1,30 @@
+#!/bin/sh
+
+. /etc/openwrt_release 2>/dev/null || exit 0
+
+case "$DISTRIB_RELEASE" in
+	*24.10*) branch='openwrt-24.10' ;;
+	*25.12*) branch='openwrt-25.12' ;;
+	SNAPSHOT) branch='SNAPSHOT' ;;
+	*) exit 0 ;;
+esac
+
+arch="$DISTRIB_ARCH"
+case "$arch" in
+	''|*[!A-Za-z0-9._-]*) exit 1 ;;
+esac
+
+key='/usr/share/be6500-nikki-feed/key-build.pub'
+feed='https://nikkinikki.pages.dev/'"$branch/$arch"'/nikki'
+conf='/etc/opkg/customfeeds.conf'
+
+[ -x /usr/sbin/opkg-key ] || exit 1
+[ -s "$key" ] || exit 1
+
+/usr/sbin/opkg-key add "$key" >/dev/null 2>&1 || exit 1
+mkdir -p /etc/opkg
+touch "$conf"
+sed -i '/^[[:space:]]*src\/gz[[:space:]][[:space:]]*nikki[[:space:]]/d' "$conf"
+printf 'src/gz nikki %s\n' "$feed" >> "$conf"
+
+exit 0
