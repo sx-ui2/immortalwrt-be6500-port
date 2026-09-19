@@ -147,9 +147,10 @@
     var mount = document.getElementById('be6500-native-root') || document.body;
     mount.innerHTML = '<main class="cbi-map native-page">' + open + body + '</div></main>';
     normalizeControls(mount);
+    initPasswordButtons(mount);
     if (window.__be6500ControlObserver) window.__be6500ControlObserver.disconnect();
     window.__be6500ControlObserver = new MutationObserver(function (changes) {
-      changes.forEach(function (change) { change.addedNodes.forEach(function (node) { if (node.nodeType === 1) normalizeControls(node); }); });
+      changes.forEach(function (change) { change.addedNodes.forEach(function (node) { if (node.nodeType === 1) { normalizeControls(node); initPasswordButtons(node); } }); });
     });
     window.__be6500ControlObserver.observe(mount, { childList: true, subtree: true });
     initToggleImages();
@@ -393,14 +394,23 @@
     var parts = String(ip || '').split('.');
     return parts.length === 4 && parts.every(function (part) { return /^\d+$/.test(part) && Number(part) >= 0 && Number(part) <= 255; });
   }
-  function initPasswordButtons() {
-    document.querySelectorAll('[data-password]').forEach(function (button) {
+  function initPasswordButtons(root) {
+    root = root || document;
+    var buttons = [];
+    if (root.matches && root.matches('[data-password]')) buttons.push(root);
+    if (root.querySelectorAll) buttons = buttons.concat([].slice.call(root.querySelectorAll('[data-password]')));
+    buttons.forEach(function (button) {
+      if (button.classList.contains('cert-password-toggle') || button.getAttribute('data-password-bound') === '1') return;
+      button.setAttribute('data-password-bound', '1');
       bindClick(button, function () {
         var field = id(button.getAttribute('data-password'));
         if (field) {
           field.type = field.type === 'password' ? 'text' : 'password';
-          button.textContent = '*';
-          button.setAttribute('aria-pressed', field.type === 'text' ? 'true' : 'false');
+          var visible = field.type === 'text';
+          button.textContent = visible ? '◉' : '*';
+          button.setAttribute('aria-pressed', visible ? 'true' : 'false');
+          button.setAttribute('aria-label', visible ? '隐藏密码' : '显示密码');
+          button.setAttribute('title', visible ? '隐藏密码' : '显示密码');
         }
       });
     });
@@ -1149,7 +1159,7 @@
         if (!closeOnly) footer.appendChild(cancel);
         footer.appendChild(save); ui.showModal(title, [form, footer]);
         [['certlocal', 'cert'], ['keylocal', 'key']].forEach(function (pair) { var upload = form.querySelector('[name="' + pair[0] + '"]'), target = form.querySelector('[name="' + pair[1] + '"]'); if (upload && target) upload.addEventListener('change', function () { var file = upload.files && upload.files[0]; if (!file) return; var reader = new FileReader(); reader.onload = function () { target.value = String(reader.result || ''); }; reader.readAsText(file); }); });
-        form.querySelectorAll('.cert-password-toggle').forEach(function (button) { button.addEventListener('click', function () { var input = button.parentNode.querySelector('input'); if (!input) return; var hidden = input.type === 'password'; input.type = hidden ? 'text' : 'password'; button.textContent = hidden ? '◉' : '*'; button.setAttribute('aria-pressed', hidden ? 'true' : 'false'); }); });
+        form.querySelectorAll('.cert-password-toggle').forEach(function (button) { button.addEventListener('click', function () { var input = button.parentNode.querySelector('input'); if (!input) return; var hidden = input.type === 'password'; input.type = hidden ? 'text' : 'password'; button.textContent = hidden ? '◉' : '*'; button.setAttribute('aria-pressed', hidden ? 'true' : 'false'); button.setAttribute('aria-label', hidden ? '隐藏密钥' : '显示密钥'); button.setAttribute('title', hidden ? '隐藏密钥' : '显示密钥'); }); });
         form.querySelectorAll('input[data-saved-secret="1"]').forEach(function (input) {
           input.addEventListener('focus', function () { input.select(); });
           input.addEventListener('input', function () { if (input.value !== savedSecretMask) delete input.dataset.savedSecret; });
