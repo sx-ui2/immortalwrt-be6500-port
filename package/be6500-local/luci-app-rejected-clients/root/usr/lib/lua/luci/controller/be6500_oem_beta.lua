@@ -927,6 +927,7 @@ function action_native_wifi()
         local device0, device1, device2 = radio_device(uci, 0), radio_device(uci, 1), radio_device(uci, 2)
         local was_unified = uci:get("wireless", role, "unified") == "1"
         local bands = body.bands or {}
+        local mlo_requested = role == "main" and body.mlo and true or false
         local any_enabled = (bands["2g"] and bands["2g"].enabled) or
             (bands["5g"] and bands["5g"].enabled) or (bands["52g"] and bands["52g"].enabled)
         if role == "guest" and any_enabled then ensure_guest_network(uci, guest_options) end
@@ -974,7 +975,7 @@ function action_native_wifi()
             set_value("main", "wifi5_compatible", compatible and "1" or "0")
             set_value("main", "wifi5_bands", table.concat(stored_bands, ","))
 
-            local mlo = body.mlo and true or false
+            local mlo = mlo_requested
             local mlo_enabled_count = 0
             for _, key in ipairs({ "2g", "5g", "52g" }) do
                 if bands[key] and bands[key].enabled then mlo_enabled_count = mlo_enabled_count + 1 end
@@ -992,9 +993,12 @@ function action_native_wifi()
                 uci:revert("wireless")
                 return json_reply({ ok = false, message = "MLO 至少需要启用两个 Wi-Fi 频段" })
             end
-            if mlo and unified_encryption ~= "sae" then
+            -- QSDK supports transition mode on an MLD: legacy stations use
+            -- WPA2-PSK while an MLO station negotiates SAE.  Only reject
+            -- security modes which do not advertise SAE at all.
+            if mlo and unified_encryption ~= "sae" and unified_encryption ~= "sae-mixed" then
                 uci:revert("wireless")
-                return json_reply({ ok = false, message = "MLO 需要 WPA3-SAE（不能使用 WPA2/WPA3 混合模式）" })
+                return json_reply({ ok = false, message = "MLO 需要 WPA3-SAE 或 WPA2/WPA3 混合模式" })
             end
             local mld_addr = tostring(uci:get("wireless", "main", "mld_addr") or ""):upper()
             if not valid_mac(mld_addr) then
