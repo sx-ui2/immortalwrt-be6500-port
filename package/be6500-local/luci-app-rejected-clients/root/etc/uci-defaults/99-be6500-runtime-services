@@ -1,0 +1,13 @@
+#!/bin/sh
+
+# Install-time scripts in this local package are deliberately enabled here so
+# they run on a clean image before firewall and network services come up.
+if [ -x /etc/init.d/be6500-fw4-flow-offload ]; then
+	/etc/init.d/be6500-fw4-flow-offload enable
+	# uci-defaults runs before firewall on the first clean boot.  Patch the
+	# template immediately as well as enabling S01 for subsequent boots.
+	/usr/libexec/be6500-patch-fw4-flow-offload
+fi
+[ -x /etc/init.d/be6500-fw4-multiwan ] && /etc/init.d/be6500-fw4-multiwan enable
+[ -x /etc/init.d/be6500-guest-qos ] && /etc/init.d/be6500-guest-qos enable
+exit 0

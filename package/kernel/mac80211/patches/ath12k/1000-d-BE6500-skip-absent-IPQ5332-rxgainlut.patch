@@ -1,0 +1,18 @@
+--- a/drivers/net/wireless/ath/ath12k/qmi.c
++++ b/drivers/net/wireless/ath/ath12k/qmi.c
+@@ -5296,4 +5296,15 @@ static int ath12k_qmi_event_server_arriv
+ 	if (resp.rxgainlut_support_valid)
+ 		ab->rxgainlut_support = !!resp.rxgainlut_support;
++
++	/*
++	 * The BE6500 factory firmware set has no IPQ5332 rxgainlut.bXXXX or
++	 * rxgainlut.bin.  Its only rxgainlut blob belongs to the external
++	 * QCN9224 and must not be supplied to the integrated radio.  The factory
++	 * image runs this radio without a separate AHB LUT, so avoid a futile
++	 * QMI download and the misleading startup warning.
++	 */
++	if (ab->hw_rev == ATH12K_HW_IPQ5332_HW10 &&
++	    of_machine_is_compatible("jdcloud,be6500"))
++		ab->rxgainlut_support = false;
+ 	if (resp.ext_fw_bin_download_support_valid)
+ 		ab->qmi.ext_fw_bin_download_support = !!resp.ext_fw_bin_download_support;

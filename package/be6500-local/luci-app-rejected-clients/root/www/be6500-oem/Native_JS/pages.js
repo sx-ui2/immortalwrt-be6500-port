@@ -269,6 +269,8 @@
       section('Wi-Fi 模式', row('工作模式', select('wifi-mode', [['0','双频模式'],['1','三频模式']])) + '<p class="native-info" id="wifi-mode-state">正在读取芯片驱动模式…</p>' + buttons(['wifi-mode-save','保存模式'])) +
       section('多频合一',
         row('启用', toggle('wifi-unified', '2.4GHz、5.2GHz 和 5.8GHz 使用相同名称与密码')) +
+        row('MLO', toggle('wifi-mlo', '启用多链路操作（需要 WPA3-SAE、至少两个频段）')) +
+        '<p class="native-info" id="wifi-mlo-state">MLO 会把多个频段组成一个 Wi-Fi 7 多链路网络。</p>' +
         '<div id="wifi-unified-fields">' +
         row('名称', input('wifi-unified-ssid', 'text', '请输入统一 Wi-Fi 名称', 'maxlength="32"')) +
         row('隐藏网络', toggle('wifi-unified-hidden', '隐藏统一 SSID')) +
@@ -327,6 +329,17 @@
         channel.value = list.indexOf(Number(selected)) >= 0 ? selected : '0';
       }
       renderWifi5Bands(tri);
+      var mloAllowed = unified && !checked('wifi5-compatible') &&
+        ['2g','5g','52g'].filter(function(key){ return (key !== '52g' || tri) && checked('wifi-' + key + '-enabled'); }).length >= 2;
+      var mlo = id('wifi-mlo');
+      var mloState = id('wifi-mlo-state');
+      if (mlo) {
+        mlo.disabled = !mloAllowed;
+        if (!mloAllowed) mlo.checked = false;
+      }
+      if (mloState) mloState.textContent = mloAllowed
+        ? 'MLO 会把多个频段组成一个 Wi-Fi 7 多链路网络。启用后仅允许 WPA3-SAE。'
+        : 'MLO 需要开启多频合一、关闭 Wi-Fi 5 兼容模式，并启用至少两个频段。';
       ['wifi-unified','wifi-2g','wifi-5g','wifi-52g'].forEach(syncWifiSecurity);
     }
     function selectedWifi5Bands() {
@@ -350,12 +363,13 @@
         ['2g','5g','52g'].forEach(function(key){var b=(data.bands||{})[key]||{},prefix='wifi-'+key;check(prefix+'-enabled',b.enabled?1:0);set(prefix+'-ssid',b.ssid||'');check(prefix+'-hidden',b.hidden?1:0);set(prefix+'-encryption',b.encryption||'none');set(prefix+'-password',b.password||'');set(prefix+'-radius-address',b.radius_address||'');set(prefix+'-radius-port',b.radius_port||1812);set(prefix+'-radius-secret',b.radius_secret||'');set(prefix+'-channel',b.channel||0);set(prefix+'-bandwidth',b.bandwidth||20);if(key==='5g'||key==='52g')normalizeWifiWidth(key);set(prefix+'-power',b.power==null?2:b.power);});
         var common=(data.bands||{})['2g']||{};
         check('wifi-unified',data.unified?1:0);set('wifi-unified-ssid',common.ssid||'');check('wifi-unified-hidden',common.hidden?1:0);set('wifi-unified-encryption',common.encryption||'none');set('wifi-unified-password',common.password||'');set('wifi-unified-radius-address',common.radius_address||'');set('wifi-unified-radius-port',common.radius_port||1812);set('wifi-unified-radius-secret',common.radius_secret||'');
+        check('wifi-mlo',data.mlo?1:0);
         check('wifi5-compatible',data.wifi5_compatible?1:0);var selected=Array.isArray(data.wifi5_bands)?data.wifi5_bands.map(Number):[0];[0,1,2].forEach(function(index){check('wifi5-band-'+index,selected.indexOf(index)>=0);});syncWifiOptions();
       }).catch(function(e){notify(e.message,false);});
     }
     bindClick('#wifi-mode-save',function(){var button=this,next=Number(value('wifi-mode'));confirmDialog('切换 Wi-Fi 工作模式','该操作会切换 QCN9224 芯片固件工作模式并立即重启路由器，所有无线连接会暂时中断。确认继续吗？').then(function(ok){if(!ok)return;busy(button,fetch('/cgi-bin/luci/admin/network/be6500_oem_beta/native_wifi_mode',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode:next})}).then(function(r){return r.json();}).then(function(data){if(!data.ok)throw new Error(data.message||'模式切换失败');return data;}),'模式已保存').then(function(data){if(data&&data.reboot){applyingModal('路由器正在重启；恢复连接后将重新检测芯片驱动模式…');window.setTimeout(function poll(){fetch('/cgi-bin/luci/',{cache:'no-store'}).then(function(r){if(r.ok)window.location.reload();else throw 0;}).catch(function(){window.setTimeout(poll,3000);});},15000);}else load();});});});
-    id('wifi-mode').addEventListener('change',syncWifiOptions);id('wifi-unified').addEventListener('change',function(){if(!checked('wifi-unified'))splitUnifiedWifiNames();syncWifiOptions();});id('wifi5-compatible').addEventListener('change',syncWifiOptions);['wifi-unified','wifi-2g','wifi-5g','wifi-52g'].forEach(function(prefix){id(prefix+'-encryption').addEventListener('change',function(){syncWifiSecurity(prefix);});});['5g','52g'].forEach(function(key){id('wifi-'+key+'-channel').addEventListener('change',function(){normalizeWifiWidth(key);});id('wifi-'+key+'-bandwidth').addEventListener('change',function(){normalizeWifiWidth(key);});});
-    bindClick('#wifi-save',function(){var button=this,bands={},unified=checked('wifi-unified');['2g','5g','52g'].forEach(function(key){var prefix='wifi-'+key;bands[key]={enabled:checked(prefix+'-enabled'),ssid:value(prefix+'-ssid'),hidden:checked(prefix+'-hidden'),encryption:value(prefix+'-encryption'),password:value(prefix+'-password'),radius_address:value(prefix+'-radius-address'),radius_port:Number(value(prefix+'-radius-port')),radius_secret:value(prefix+'-radius-secret'),channel:Number(value(prefix+'-channel')),bandwidth:Number(value(prefix+'-bandwidth')),power:Number(value(prefix+'-power'))};if(unified){bands[key].ssid=value('wifi-unified-ssid');bands[key].hidden=checked('wifi-unified-hidden');bands[key].encryption=value('wifi-unified-encryption');bands[key].password=value('wifi-unified-password');bands[key].radius_address=value('wifi-unified-radius-address');bands[key].radius_port=Number(value('wifi-unified-radius-port'));bands[key].radius_secret=value('wifi-unified-radius-secret');}});busy(button,fetch(endpoint,{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({bands:bands,unified:unified,wifi5_compatible:checked('wifi5-compatible'),wifi5_bands:selectedWifi5Bands()})}).then(function(r){return r.json();}).then(function(data){if(!data.ok)throw new Error(data.message||'保存失败');return data;}),'Wi-Fi 设置已保存').then(function(){load();});});
+    id('wifi-mode').addEventListener('change',syncWifiOptions);id('wifi-unified').addEventListener('change',function(){if(!checked('wifi-unified'))splitUnifiedWifiNames();syncWifiOptions();});id('wifi5-compatible').addEventListener('change',syncWifiOptions);['2g','5g','52g'].forEach(function(key){id('wifi-'+key+'-enabled').addEventListener('change',syncWifiOptions);});['wifi-unified','wifi-2g','wifi-5g','wifi-52g'].forEach(function(prefix){id(prefix+'-encryption').addEventListener('change',function(){syncWifiSecurity(prefix);});});['5g','52g'].forEach(function(key){id('wifi-'+key+'-channel').addEventListener('change',function(){normalizeWifiWidth(key);});id('wifi-'+key+'-bandwidth').addEventListener('change',function(){normalizeWifiWidth(key);});});
+    bindClick('#wifi-save',function(){var button=this,bands={},unified=checked('wifi-unified');['2g','5g','52g'].forEach(function(key){var prefix='wifi-'+key;bands[key]={enabled:checked(prefix+'-enabled'),ssid:value(prefix+'-ssid'),hidden:checked(prefix+'-hidden'),encryption:value(prefix+'-encryption'),password:value(prefix+'-password'),radius_address:value(prefix+'-radius-address'),radius_port:Number(value(prefix+'-radius-port')),radius_secret:value(prefix+'-radius-secret'),channel:Number(value(prefix+'-channel')),bandwidth:Number(value(prefix+'-bandwidth')),power:Number(value(prefix+'-power'))};if(unified){bands[key].ssid=value('wifi-unified-ssid');bands[key].hidden=checked('wifi-unified-hidden');bands[key].encryption=value('wifi-unified-encryption');bands[key].password=value('wifi-unified-password');bands[key].radius_address=value('wifi-unified-radius-address');bands[key].radius_port=Number(value('wifi-unified-radius-port'));bands[key].radius_secret=value('wifi-unified-radius-secret');}});busy(button,fetch(endpoint,{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({bands:bands,unified:unified,mlo:checked('wifi-mlo'),wifi5_compatible:checked('wifi5-compatible'),wifi5_bands:selectedWifi5Bands()})}).then(function(r){return r.json();}).then(function(data){if(!data.ok)throw new Error(data.message||'保存失败');return data;}),'Wi-Fi 设置已保存').then(function(){load();});});
     load();
   }
   function validateIPv4(ip) {

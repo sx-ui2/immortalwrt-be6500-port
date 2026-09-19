@@ -1,0 +1,13 @@
+#!/bin/sh /etc/rc.common
+
+# Must run before firewall (START=19) so the template is already protected
+# when fw4 constructs its first ruleset after boot.
+START=01
+
+start() {
+	/usr/libexec/be6500-patch-fw4-flow-offload
+}
+
+reload() {
+	/usr/libexec/be6500-patch-fw4-flow-offload
+}

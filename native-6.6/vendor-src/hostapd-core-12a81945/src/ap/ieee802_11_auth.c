@@ -15,6 +15,7 @@
 
 #include <stdio.h>
 #include <unistd.h>
+#include <fcntl.h>
 
 #include "utils/common.h"
 #include "utils/eloop.h"
@@ -32,11 +33,12 @@
 #define RADIUS_ACL_TIMEOUT 30
 
 #define WIFI_REJECT_RECORD_FILE "/tmp/wifi_reject.json"
+#define WIFI_REJECT_LOCK_FILE "/tmp/wifi_reject.lock"
 #define WIFI_REJECT_RECORD_MAX 100
 
-/* utils/json.h defines enum json_type, which conflicts with json-c pulled in
- * by the QCA ucode headers. json.o is already linked into hostapd, so declare
- * only the escaping helper needed here. */
+/* utils/json.h conflicts with json-c pulled in by QCA's ucode headers.  The
+ * record file is written only by this module, so use a small bounded reader
+ * for that fixed format and retain hostapd's escaping helper for writing. */
 void json_escape_string(char *txt, size_t maxlen, const char *data, size_t len);
 
 struct wifi_reject_record {
@@ -55,7 +57,229 @@ struct wifi_reject_record {
 
 static struct wifi_reject_record
 	wifi_reject_records[WIFI_REJECT_RECORD_MAX];
-static int wifi_reject_records_initialized;
+static void wifi_reject_write_json(void);
+
+/*
+ * There is one hostapd process per radio on this target.  The JSON file, not
+ * a process-local static array, is the source of truth: lock it, reload it,
+ * merge this actual ACL rejection, then atomically replace it.  This keeps
+ * records from every radio and means a LuCI clear cannot be revived from a
+ * different hostapd process' stale memory.
+ */
+static int wifi_reject_lock(void)
+{
+	struct flock lock;
+	int fd;
+
+	fd = open(WIFI_REJECT_LOCK_FILE, O_RDWR | O_CREAT, 0600);
+	if (fd < 0)
+		return -1;
+	os_memset(&lock, 0, sizeof(lock));
+	lock.l_type = F_WRLCK;
+	lock.l_whence = SEEK_SET;
+	if (fcntl(fd, F_SETLKW, &lock) < 0) {
+		close(fd);
+		return -1;
+	}
+	return fd;
+}
+
+static void wifi_reject_unlock(int fd)
+{
+	struct flock lock;
+
+	if (fd < 0)
+		return;
+	os_memset(&lock, 0, sizeof(lock));
+	lock.l_type = F_UNLCK;
+	lock.l_whence = SEEK_SET;
+	(void) fcntl(fd, F_SETLK, &lock);
+	close(fd);
+}
+
+static const char * wifi_reject_json_value(const char *begin, const char *end,
+					   const char *key)
+{
+	const char *p = begin;
+	size_t key_len = os_strlen(key);
+
+	while (p && p < end) {
+		p = memchr(p, '"', end - p);
+		if (!p || p + key_len + 1 >= end)
+			return NULL;
+		if (os_memcmp(p + 1, key, key_len) == 0 &&
+		    p[1 + key_len] == '"') {
+			p += key_len + 2;
+			while (p < end && (*p == ' ' || *p == '\t' || *p == '\n'))
+				p++;
+			if (p < end && *p == ':') {
+				p++;
+				while (p < end && (*p == ' ' || *p == '\t' || *p == '\n'))
+					p++;
+				return p;
+			}
+		}
+		p++;
+	}
+	return NULL;
+}
+
+static int wifi_reject_json_hex(char c)
+{
+	if (c >= '0' && c <= '9')
+		return c - '0';
+	if (c >= 'a' && c <= 'f')
+		return c - 'a' + 10;
+	if (c >= 'A' && c <= 'F')
+		return c - 'A' + 10;
+	return -1;
+}
+
+static int wifi_reject_json_read_string(const char *begin, const char *end,
+					const char *key, char *out, size_t out_len)
+{
+	const char *p = wifi_reject_json_value(begin, end, key);
+	size_t used = 0;
+
+	if (!p || p >= end || *p != '"' || !out || out_len < 1)
+		return -1;
+	p++;
+	while (p < end && *p != '"') {
+		char c = *p++;
+
+		if (c == '\\') {
+			if (p >= end)
+				return -1;
+			c = *p++;
+			switch (c) {
+			case 'b': c = '\b'; break;
+			case 'f': c = '\f'; break;
+			case 'n': c = '\n'; break;
+			case 'r': c = '\r'; break;
+			case 't': c = '\t'; break;
+			case 'u': {
+				int hi, lo;
+				if (p + 4 > end)
+					return -1;
+				hi = wifi_reject_json_hex(p[2]);
+				lo = wifi_reject_json_hex(p[3]);
+				if (p[0] != '0' || p[1] != '0' || hi < 0 || lo < 0)
+					return -1;
+				c = (char) ((hi << 4) | lo);
+				p += 4;
+				break;
+			}
+			case '"': case '\\': case '/': break;
+			default:
+				return -1;
+			}
+		}
+		if (used + 1 >= out_len)
+			return -1;
+		out[used++] = c;
+	}
+	if (p >= end)
+		return -1;
+	out[used] = '\0';
+	return 0;
+}
+
+static int wifi_reject_json_number(const char *begin, const char *end,
+				   const char *key, long long *out)
+{
+	const char *p = wifi_reject_json_value(begin, end, key);
+	char *tail;
+
+	if (!p || p >= end || !out)
+		return -1;
+	*out = strtoll(p, &tail, 10);
+	return tail != p && tail <= end ? 0 : -1;
+}
+
+static const char * wifi_reject_json_object_end(const char *begin,
+						 const char *end)
+{
+	const char *p;
+	int depth = 0, quoted = 0, escaped = 0;
+
+	for (p = begin; p < end; p++) {
+		if (quoted) {
+			if (escaped)
+				escaped = 0;
+			else if (*p == '\\')
+				escaped = 1;
+			else if (*p == '"')
+				quoted = 0;
+			continue;
+		}
+		if (*p == '"')
+			quoted = 1;
+		else if (*p == '{')
+			depth++;
+		else if (*p == '}' && --depth == 0)
+			return p;
+	}
+	return NULL;
+}
+
+static void wifi_reject_load_json(void)
+{
+	char *data, mac[18], ssid[SSID_MAX_LEN + 1], bssid[18];
+	const char *cursor, *end, *object_end;
+	size_t data_len;
+	int index = 0;
+
+	os_memset(wifi_reject_records, 0, sizeof(wifi_reject_records));
+	data = os_readfile(WIFI_REJECT_RECORD_FILE, &data_len);
+	if (!data || data_len > 65536) {
+		os_free(data);
+		return;
+	}
+	cursor = data;
+	end = data + data_len;
+	while (cursor < end && index < WIFI_REJECT_RECORD_MAX) {
+		struct wifi_reject_record *record;
+		long long value;
+
+		cursor = memchr(cursor, '{', end - cursor);
+		if (!cursor)
+			break;
+		object_end = wifi_reject_json_object_end(cursor, end);
+		if (!object_end)
+			break;
+		if (wifi_reject_json_read_string(cursor, object_end, "mac", mac,
+					    sizeof(mac)) ||
+		    wifi_reject_json_read_string(cursor, object_end, "ssid", ssid,
+					    sizeof(ssid)) ||
+		    hwaddr_aton(mac, wifi_reject_records[index].mac) < 0) {
+			cursor = object_end + 1;
+			continue;
+		}
+
+		record = &wifi_reject_records[index++];
+		record->used = 1;
+		record->ssid_len = os_strlen(ssid);
+		os_memcpy(record->ssid, ssid, record->ssid_len);
+		if (!wifi_reject_json_read_string(cursor, object_end, "bssid", bssid,
+					     sizeof(bssid)))
+			(void) hwaddr_aton(bssid, record->bssid);
+		(void) wifi_reject_json_read_string(cursor, object_end, "ifname",
+					      record->ifname, sizeof(record->ifname));
+		(void) wifi_reject_json_read_string(cursor, object_end, "phy",
+					      record->phy, sizeof(record->phy));
+		(void) wifi_reject_json_read_string(cursor, object_end, "reason",
+					      record->reason, sizeof(record->reason));
+		record->first_seen = !wifi_reject_json_number(cursor, object_end,
+						       "first_seen", &value) ? value : 0;
+		record->last_seen = !wifi_reject_json_number(cursor, object_end,
+						      "last_seen", &value) ? value : record->first_seen;
+		record->count = !wifi_reject_json_number(cursor, object_end, "count",
+						  &value) && value > 0 ?
+			(unsigned int) value : 1;
+		cursor = object_end + 1;
+	}
+	os_free(data);
+}
 
 static void wifi_reject_json_string(FILE *f, const void *data, size_t len)
 {
@@ -146,7 +370,7 @@ static void wifi_reject_record(struct hostapd_data *hapd, const u8 *addr,
 {
 	struct wifi_reject_record *record = NULL;
 	struct os_time now;
-	int i, free_index = -1, oldest_index = -1;
+	int fd, i, free_index = -1, oldest_index = -1;
 	long long oldest_seen = 0;
 	size_t ssid_len;
 
@@ -158,11 +382,10 @@ static void wifi_reject_record(struct hostapd_data *hapd, const u8 *addr,
 	if (ssid_len > SSID_MAX_LEN)
 		ssid_len = SSID_MAX_LEN;
 
-	/* /tmp is RAM-backed; discard stale data after a hostapd restart. */
-	if (!wifi_reject_records_initialized) {
-		wifi_reject_records_initialized = 1;
-		unlink(WIFI_REJECT_RECORD_FILE);
-	}
+	fd = wifi_reject_lock();
+	if (fd < 0)
+		return;
+	wifi_reject_load_json();
 
 	for (i = 0; i < WIFI_REJECT_RECORD_MAX; i++) {
 		struct wifi_reject_record *candidate = &wifi_reject_records[i];
@@ -191,13 +414,16 @@ static void wifi_reject_record(struct hostapd_data *hapd, const u8 *addr,
 		if (record->count != (unsigned int) -1)
 			record->count++;
 		wifi_reject_write_json();
+		wifi_reject_unlock(fd);
 		return;
 	}
 
 	if (free_index < 0)
 		free_index = oldest_index;
-	if (free_index < 0)
+	if (free_index < 0) {
+		wifi_reject_unlock(fd);
 		return;
+	}
 
 	record = &wifi_reject_records[free_index];
 	os_memset(record, 0, sizeof(*record));
@@ -214,6 +440,7 @@ static void wifi_reject_record(struct hostapd_data *hapd, const u8 *addr,
 	record->last_seen = now.sec;
 	record->count = 1;
 	wifi_reject_write_json();
+	wifi_reject_unlock(fd);
 }
 
 

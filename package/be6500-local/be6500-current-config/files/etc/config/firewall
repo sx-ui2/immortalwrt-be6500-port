@@ -4,6 +4,8 @@ config defaults
 	option output 'ACCEPT'
 	option forward 'REJECT'
 	option synflood_protect '1'
+	option flow_offloading '1'
+	option flow_offloading_hw '1'
 
 config zone
 	option name 'wan'
@@ -79,4 +81,3 @@ config rule 'dm_icmpv6_forward'
 	option limit '1000/sec'
 	option family 'ipv6'
 	option target 'ACCEPT'
-

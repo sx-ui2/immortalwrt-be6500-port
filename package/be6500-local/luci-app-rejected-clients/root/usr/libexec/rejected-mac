@@ -3,7 +3,7 @@
 CONFIG=device_manager
 
 section_for() { [ "$1" = guest ] && echo guest_settings || echo settings; }
-radios_for() { [ "$1" = guest ] && echo 'guest wifinet3' || echo 'default_radio0 default_radio1'; }
+radios_for() { [ "$1" = guest ] && echo 'guest wifinet3 guest_radio2' || echo 'default_radio0 default_radio1 default_radio2'; }
 
 valid_scope() { [ "$1" = main ] || [ "$1" = guest ]; }
 valid_mac() { printf '%s' "$1" | grep -Eq '^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$'; }
@@ -51,7 +51,7 @@ runtime_acl_sync() {
 	case "$mode" in allow) acl=accept_acl; option=allowlist;; deny) acl=deny_acl; option=denylist;; *) return 0;; esac
 	desired="/tmp/device-manager-acl-desired.$$"; current="/tmp/device-manager-acl-current.$$"
 	uci -q get "$CONFIG.$section.$option" | tr 'a-f' 'A-F' | tr ' ' '\n' | grep -E '^([0-9A-F]{2}:){5}[0-9A-F]{2}$' | sort -u >"$desired"
-	if [ "$scope" = guest ]; then ifaces='phy0-ap1 phy1-ap1'; else ifaces='phy0-ap0 phy1-ap0'; fi
+	if [ "$scope" = guest ]; then ifaces='phy0-ap1 phy1-ap1 phy2-ap1'; else ifaces='phy0-ap0 phy1-ap0 phy2-ap0'; fi
 	for iface in $ifaces; do
 		ubus -v list "hostapd.$iface" >/dev/null 2>&1 || continue
 		hostapd_cli -p /var/run/hostapd -i "$iface" "$acl" SHOW 2>/dev/null | awk '{print toupper($1)}' | grep -E '^([0-9A-F]{2}:){5}[0-9A-F]{2}$' | sort -u >"$current"
@@ -77,7 +77,7 @@ status() {
 }
 
 client_stream() {
-	for spec in 'phy0-ap0|main|2.4G' 'phy1-ap0|main|5G' 'phy0-ap1|guest|2.4G' 'phy1-ap1|guest|5G'; do
+	for spec in 'phy0-ap0|main|2.4G' 'phy1-ap0|main|5.2G' 'phy2-ap0|main|5.8G' 'phy0-ap1|guest|2.4G' 'phy1-ap1|guest|5.2G' 'phy2-ap1|guest|5.8G'; do
 		iface="${spec%%|*}"; rest="${spec#*|}"; scope="${rest%%|*}"; band="${rest#*|}"
 		iw dev "$iface" station dump 2>/dev/null | awk -v iface="$iface" -v scope="$scope" -v band="$band" '
 		function emit(){if(mac!="")print toupper(mac)"\t"iface"\t"scope"\t"band"\t"signal"\t"rx"\t"tx"\t"connected}
@@ -123,7 +123,6 @@ clients() {
 	done <"$tmp"
 	while read -r expires mac ip name clientid; do
 		mac="$(normalize_mac "$mac")"; grep -q "^$mac$(printf '\t')" "$tmp" && continue
-		ip neigh show "$ip" 2>/dev/null | grep -qi "lladdr $(printf '%s' "$mac"|tr 'A-F' 'a-f')" || continue
 		[ "$name" = '*' ] && name=''; device_section="dev_$(printf '%s' "$mac" | tr 'A-F:' 'a-f_')"; alias="$(uci -q get "$CONFIG.$device_section.name")"; prefix="$(printf '%s' "$mac"|tr -d ':'|cut -c1-6)"; vendor="$(awk -F '\t' -v p="$prefix" 'toupper($1)==p{$1="";sub(/^[[:space:]]+/,"");print;exit}' /usr/share/arp-scan/ieee-oui.txt 2>/dev/null)"
 		ipv6="$(awk -F '\t' -v m="$mac" '$1==m{print $2;exit}' "$v6tmp")"
 		fdb_port="$(brctl showmacs br-lan 2>/dev/null | awk -v m="$mac" 'toupper($2)==m&&$3=="no"{print $1;exit}')"; wired_if=''
@@ -133,7 +132,8 @@ clients() {
 			usage="$(awk -F '\t' -v m="$mac" '$1==m{print $2 "\t" $3;exit}' "$wiredtmp")"; up="${usage%%$(printf '\t')*}"; down="${usage#*$(printf '\t')}"; [ "$usage" = "$up" ]&&down=0
 			first="$(awk -F '\t' -v m="$mac" '$1==m{print $2;exit}' /tmp/device-manager-wired-state 2>/dev/null)"; now="$(date +%s)"; connected=0; [ -n "$first" ]&&[ "$now" -ge "$first" ] 2>/dev/null&&connected=$((now-first))
 			printf '%s\t%s\t%s\t有线\t-\t%s\t%s\t%s\tnone\t%s\t%s\t%s\twired\t%s\n' "$mac" "${alias:-$name}" "$ip" "${up:-0}" "${down:-0}" "$connected" "$wired_if" "$vendor" "$name" "$ipv6"
-		elif [ -n "$seen" ];then old_scope="${seen%%$(printf '\t')*}"; rest="${seen#*$(printf '\t')}"; old_band="${rest%%$(printf '\t')*}"; old_if="${rest#*$(printf '\t')}"; printf '%s\t%s\t%s\t%s\t-\t0\t0\t0\tnone\t%s\t%s\t%s\t%s\t%s\n' "$mac" "${alias:-$name}" "$ip" "$old_band" "$old_if" "$vendor" "$name" "$old_scope" "$ipv6";fi
+		elif [ -n "$seen" ];then old_scope="${seen%%$(printf '\t')*}"; rest="${seen#*$(printf '\t')}"; old_band="${rest%%$(printf '\t')*}"; old_if="${rest#*$(printf '\t')}"; printf '%s\t%s\t%s\t%s\t-\t0\t0\t0\tnone\t%s\t%s\t%s\t%s\t%s\n' "$mac" "${alias:-$name}" "$ip" "$old_band" "$old_if" "$vendor" "$name" "$old_scope" "$ipv6";
+		else printf '%s\t%s\t%s\t离线\t-\t0\t0\t0\tnone\t-\t%s\t%s\toffline\t%s\n' "$mac" "${alias:-$name}" "$ip" "$vendor" "$name" "$ipv6";fi
 	done </tmp/dhcp.leases
 	rm -f "$tmp" "$v6tmp" "$wiredtmp"
 }
@@ -143,7 +143,12 @@ set_mode() {
 	case "$mode" in off|allow|deny) ;; *) echo '无效模式' >&2; exit 2 ;; esac
 	init_scope "$scope"; section="$(section_for "$scope")"
 	uci set "$CONFIG.$section.mode=$mode"; uci commit "$CONFIG"; sync_wireless "$scope"
-	echo "$([ "$scope" = guest ] && echo 访客 || echo 主) Wi‑Fi 已切换为 $mode"; reload_wifi_later
+	if runtime_acl_sync "$scope"; then
+		echo "$([ "$scope" = guest ] && echo 访客 || echo 主) Wi‑Fi 已切换为 $mode（已即时生效，Wi‑Fi 未重启）"
+	else
+		echo '无线 ACL 即时更新失败；配置已保存，未重启 Wi‑Fi' >&2
+		exit 1
+	fi
 }
 
 change_list() {
@@ -157,13 +162,13 @@ change_list() {
 	remove) uci -q del_list "$CONFIG.$section.allowlist=$mac"; uci -q del_list "$CONFIG.$section.denylist=$mac"; message='已移出名单' ;;
 	esac
 	uci commit "$CONFIG"; sync_wireless "$scope"
-	if runtime_acl_sync "$scope"; then echo "$target_mac $message（已即时生效，Wi‑Fi 未重启）"; else echo "$target_mac $message"; reload_wifi_later; fi
+	if runtime_acl_sync "$scope"; then echo "$target_mac $message（已即时生效，Wi‑Fi 未重启）"; else echo '无线 ACL 即时更新失败；配置已保存，未重启 Wi‑Fi' >&2; exit 1; fi
 }
 
 disconnect_client() {
 	scope="$1"; mac="$(normalize_mac "$2")"; valid_scope "$scope" || exit 2; valid_mac "$mac" || exit 2
 	low="$(printf '%s' "$mac" | tr 'A-F' 'a-f')"
-	if [ "$scope" = guest ]; then ifaces='phy0-ap1 phy1-ap1'; else ifaces='phy0-ap0 phy1-ap0'; fi
+	if [ "$scope" = guest ]; then ifaces='phy0-ap1 phy1-ap1 phy2-ap1'; else ifaces='phy0-ap0 phy1-ap0 phy2-ap0'; fi
 	found=0; disconnected=0
 	for iface in $ifaces; do
 		iw dev "$iface" station get "$low" >/dev/null 2>&1 || continue

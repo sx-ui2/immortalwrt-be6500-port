@@ -1,7 +1,7 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=luci-app-rejected-clients
-PKG_RELEASE:=3
+PKG_RELEASE:=4
 PKG_MAINTAINER:=Codex
 
 include $(INCLUDE_DIR)/package.mk
@@ -17,7 +17,8 @@ define Package/luci-app-rejected-clients
 	+luci-i18n-package-manager-zh-cn +luci-i18n-ddns-zh-cn \
 	+luci-i18n-nlbwmon-zh-cn +luci-i18n-sqm-zh-cn +luci-i18n-upnp-zh-cn \
 	+luci-i18n-diskman-zh-cn +luci-i18n-usb-printer-zh-cn \
-	+udpxy +tcpdump +kmod-macvlan +arp-scan-database +zram-swap +losetup
+	+udpxy +tcpdump +kmod-macvlan +arp-scan-database +zram-swap +losetup \
+	+qca-ssdk-shell +kmod-qca-nss-ppe-vp +kmod-qca-nss-ppe-rule
   PKGARCH:=all
 endef
 
@@ -52,6 +53,7 @@ define Package/luci-app-rejected-clients/install
 	$(INSTALL_BIN) ./root/usr/libexec/be6500-radio0-auto-channel $(1)/usr/libexec/be6500-radio0-auto-channel
 	$(INSTALL_BIN) ./root/usr/libexec/be6500-patch-luci-wireless $(1)/usr/libexec/be6500-patch-luci-wireless
 	$(INSTALL_BIN) ./root/usr/libexec/be6500-patch-luci-firewall $(1)/usr/libexec/be6500-patch-luci-firewall
+	$(INSTALL_BIN) ./root/usr/libexec/be6500-patch-fw4-flow-offload $(1)/usr/libexec/be6500-patch-fw4-flow-offload
 	$(INSTALL_BIN) ./root/usr/libexec/be6500-fw4-multiwan $(1)/usr/libexec/be6500-fw4-multiwan
 	$(INSTALL_DIR) $(1)/etc/uci-defaults
 	$(INSTALL_BIN) ./root/etc/uci-defaults/95-be6500-luci-wireless $(1)/etc/uci-defaults/95-be6500-luci-wireless
@@ -59,14 +61,17 @@ define Package/luci-app-rejected-clients/install
 	$(INSTALL_BIN) ./root/etc/uci-defaults/99-be6500-encryption-normalize $(1)/etc/uci-defaults/99-be6500-encryption-normalize
 	$(INSTALL_BIN) ./root/etc/uci-defaults/99-be6500-wireless-dedupe $(1)/etc/uci-defaults/99-be6500-wireless-dedupe
 	$(INSTALL_BIN) ./root/etc/uci-defaults/99-be6500-switch-port-labels $(1)/etc/uci-defaults/99-be6500-switch-port-labels
+	$(INSTALL_BIN) ./root/etc/uci-defaults/99-be6500-runtime-services $(1)/etc/uci-defaults/99-be6500-runtime-services
 	$(INSTALL_DIR) $(1)/etc/rc.button
 	$(INSTALL_BIN) ./root/etc/rc.button/joy $(1)/etc/rc.button/joy
 	$(INSTALL_DIR) $(1)/etc/init.d
 	$(INSTALL_BIN) ./root/etc/init.d/be6500-led $(1)/etc/init.d/be6500-led
 	$(INSTALL_BIN) ./root/etc/init.d/be6500-fw4-multiwan $(1)/etc/init.d/be6500-fw4-multiwan
 	$(INSTALL_BIN) ./root/etc/init.d/be6500-guest-qos $(1)/etc/init.d/be6500-guest-qos
+	$(INSTALL_BIN) ./root/etc/init.d/be6500-fw4-flow-offload $(1)/etc/init.d/be6500-fw4-flow-offload
 	$(INSTALL_DIR) $(1)/etc/hotplug.d/iface
 	$(INSTALL_BIN) ./root/etc/hotplug.d/iface/95-be6500-fw4-multiwan $(1)/etc/hotplug.d/iface/95-be6500-fw4-multiwan
+	$(INSTALL_BIN) ./root/etc/hotplug.d/iface/96-be6500-guest-qos $(1)/etc/hotplug.d/iface/96-be6500-guest-qos
 	$(INSTALL_DIR) $(1)/usr/sbin
 	$(INSTALL_BIN) ./root/usr/sbin/be6500-switch-wifi-mode $(1)/usr/sbin/be6500-switch-wifi-mode
 	$(INSTALL_BIN) ./root/usr/sbin/be6500-qos-apply $(1)/usr/sbin/be6500-qos-apply

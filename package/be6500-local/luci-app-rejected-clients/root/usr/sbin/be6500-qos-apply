@@ -1,40 +1,96 @@
 #!/bin/sh
 
-table=be6500_guest_qos
+# Qualcomm PPE hardware shaper for the guest SSID.
+#
+# Do not add nft "limit rate" rules here: after fw4 adds a connection to the
+# hardware flowtable they only see the first packet.  qca-nss-ppe-vp exposes a
+# Wi-Fi BSS as a PPE virtual port; SSDK's port ingress/egress shapers continue
+# to apply to accelerated traffic.
+
 state=/tmp/be6500-guest-qos.ok
+ports_state=/tmp/be6500-guest-qos.ports
+map_debug=/sys/kernel/debug/qca-nss-ppe/ppe_drv_if_map/ppe_if_map
+map_node=/dev/qca-nss-ppe/ppe_if_map
 
 rm -f "$state"
-nft delete table inet "$table" >/dev/null 2>&1 || true
-
-enabled="$(uci -q get be6500_oem.guest_qos.enabled)"
-[ "$enabled" = 1 ] || { touch "$state"; exit 0; }
-
-upload="$(uci -q get be6500_oem.guest_qos.upload)"
-download="$(uci -q get be6500_oem.guest_qos.download)"
+nft delete table inet be6500_guest_qos >/dev/null 2>&1 || true
 
 valid_rate() {
 	awk -v value="$1" 'BEGIN { exit !(value ~ /^[0-9]+([.][0-9]+)?$/ && value >= 0) }'
 }
 
+disable_previous_ports() {
+	[ -r "$ports_state" ] || return 0
+	while read -r port; do
+		case "$port" in ''|*[!0-9]*) continue;; esac
+		/usr/sbin/ssdk_sh rate ptEgress set "$port" 0 disable >/dev/null 2>&1 || true
+		/usr/sbin/ssdk_sh rate ptIngress set "$port" 0 disable >/dev/null 2>&1 || true
+	done < "$ports_state"
+	rm -f "$ports_state"
+}
+
+ppe_map_dump() {
+	[ -r "$map_debug" ] || return 1
+	major="$(cat "$map_debug" 2>/dev/null)"
+	case "$major" in ''|*[!0-9]*) return 1;; esac
+	mkdir -p /dev/qca-nss-ppe 2>/dev/null || return 1
+	[ -c "$map_node" ] || mknod "$map_node" c "$major" 0 2>/dev/null || return 1
+	cat "$map_node" 2>/dev/null
+}
+
+ppe_port_for_iface() {
+	ppe_map_dump | awk -F= -v wanted="$1" '
+		/\.netdev_name=/ { active = ($2 == wanted); next }
+		active && /\.port_number=/ { print $2; exit }
+	'
+}
+
+enabled="$(uci -q get be6500_oem.guest_qos.enabled)"
+upload="$(uci -q get be6500_oem.guest_qos.upload)"
+download="$(uci -q get be6500_oem.guest_qos.download)"
+
+disable_previous_ports
+[ "$enabled" = 1 ] || { touch "$state"; exit 0; }
 valid_rate "$upload" && valid_rate "$download" || {
 	echo '访客限速配置无效' >&2
 	exit 1
 }
+[ -x /usr/sbin/ssdk_sh ] || {
+	echo 'Qualcomm SSDK shaper 未安装' >&2
+	exit 1
+}
 
-upload_kbytes="$(awk -v value="$upload" 'BEGIN { printf "%d", (value * 1000 + 7) / 8 }')"
-download_kbytes="$(awk -v value="$download" 'BEGIN { printf "%d", (value * 1000 + 7) / 8 }')"
+# Only active guest BSSes are shaped.  radio2 exists in tri-band mode;
+# de-duplicate PPE port IDs because the driver can expose aliases for one VAP.
+ports=''
+for iface in phy0-ap1 phy1-ap1 phy2-ap1; do
+	ip link show "$iface" >/dev/null 2>&1 || continue
+	port="$(ppe_port_for_iface "$iface")"
+	case "$port" in ''|*[!0-9]*) continue;; esac
+	case " $ports " in *" $port "*) ;; *) ports="$ports $port";; esac
+done
+set -- $ports
+count=$#
+if [ "$count" -eq 0 ]; then
+	# WLAN/PPE virtual ports come up after firewall on a cold boot.  The
+	# interface hotplug hook retries after the BSS appears.
+	echo '等待 Qualcomm PPE 无线虚拟端口就绪' >&2
+	exit 1
+fi
 
-# Flush existing fw4 flow-offload entries before installing the new policy.
-[ "$1" = reload ] && /etc/init.d/firewall reload >/dev/null 2>&1
-
-nft add table inet "$table" || exit 1
-nft "add chain inet $table forward { type filter hook forward priority -10; policy accept; }" || exit 1
-
-# br-guest input is client upload; br-guest output is client download.
-[ "$upload_kbytes" -eq 0 ] || nft add rule inet "$table" forward \
-	iifname "br-guest" limit rate over "$upload_kbytes" kbytes/second counter drop || exit 1
-[ "$download_kbytes" -eq 0 ] || nft add rule inet "$table" forward \
-	oifname "br-guest" limit rate over "$download_kbytes" kbytes/second counter drop || exit 1
+# The UI limit is aggregate.  A shaper is per BSS port, so divide it across
+# active radio ports rather than silently allowing N times the requested rate.
+upload_kbit="$(awk -v v="$upload" -v n="$count" 'BEGIN { printf "%d", (v * 1000 + n - 1) / n }')"
+download_kbit="$(awk -v v="$download" -v n="$count" 'BEGIN { printf "%d", (v * 1000 + n - 1) / n }')"
+for port in "$@"; do
+	if [ "$download_kbit" -gt 0 ]; then
+		/usr/sbin/ssdk_sh rate ptEgress set "$port" "$download_kbit" enable >/dev/null 2>&1 || exit 1
+	fi
+	if [ "$upload_kbit" -gt 0 ]; then
+		/usr/sbin/ssdk_sh rate ptIngress set "$port" "$upload_kbit" enable >/dev/null 2>&1 || exit 1
+	fi
+	echo "$port" >> "$ports_state"
+done
 
 touch "$state"
 exit 0

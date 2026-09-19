@@ -1,0 +1,22 @@
+#!/bin/sh
+
+# Nikki marks packets before the fw4 forward hook for TProxy/TUN handling.
+# The flowtable must only receive unmarked direct flows; otherwise a marked
+# connection can bypass the transparent-proxy path after its first packet.
+set -eu
+
+file=${1:-/usr/share/firewall4/templates/ruleset.uc}
+marker=be6500_nikki_unmarked_flow_offload
+needle='meta l4proto { tcp, udp } flow offload @ft;'
+replacement='meta mark 0 meta l4proto { tcp, udp } flow offload @ft; # be6500_nikki_unmarked_flow_offload'
+
+[ -f "$file" ] || exit 0
+grep -q "$marker" "$file" && exit 0
+
+temporary="$file.be6500-new"
+sed "s|${needle}|${replacement}|" "$file" > "$temporary"
+if cmp -s "$file" "$temporary"; then
+	rm -f "$temporary"
+	exit 1
+fi
+mv "$temporary" "$file"

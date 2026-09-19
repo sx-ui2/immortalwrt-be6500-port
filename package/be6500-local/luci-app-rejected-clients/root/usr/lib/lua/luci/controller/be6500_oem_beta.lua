@@ -837,6 +837,31 @@ function action_native_wifi()
             }, "|")
             if before ~= after then changed = true; mark_radio(device) end
         end
+        -- hostapd.sh passes this list verbatim to hostapd.  Keep unrelated
+        -- vendor options intact while making the MLO options an atomic group.
+        local function apply_mlo_options(section, enabled, link_id, mld_addr, device)
+            if not section then return end
+            local old = uci:get_list("wireless", section, "hostapd_bss_options") or {}
+            local wanted = {}
+            for _, option in ipairs(old) do
+                option = tostring(option)
+                if not option:match("^mld_ap=") and not option:match("^mld_addr=")
+                    and not option:match("^mld_link_id=") then
+                    wanted[#wanted + 1] = option
+                end
+            end
+            if enabled then
+                wanted[#wanted + 1] = "mld_ap=1"
+                wanted[#wanted + 1] = "mld_addr=" .. mld_addr
+                wanted[#wanted + 1] = "mld_link_id=" .. tostring(link_id)
+            end
+            if table.concat(old, "\0") ~= table.concat(wanted, "\0") then
+                if #wanted > 0 then uci:set_list("wireless", section, "hostapd_bss_options", wanted)
+                else uci:delete("wireless", section, "hostapd_bss_options") end
+                changed = true
+                mark_radio(device)
+            end
+        end
         local function apply(device, band)
             if not band or not uci:get("wireless", device) then return true end
             if not band.enabled then
@@ -948,6 +973,42 @@ function action_native_wifi()
         if role == "main" then
             set_value("main", "wifi5_compatible", compatible and "1" or "0")
             set_value("main", "wifi5_bands", table.concat(stored_bands, ","))
+
+            local mlo = body.mlo and true or false
+            local mlo_enabled_count = 0
+            for _, key in ipairs({ "2g", "5g", "52g" }) do
+                if bands[key] and bands[key].enabled then mlo_enabled_count = mlo_enabled_count + 1 end
+            end
+            local unified_encryption = requested_encryption((bands["2g"] or {}).encryption)
+            if mlo and not body.unified then
+                uci:revert("wireless")
+                return json_reply({ ok = false, message = "MLO 只能在多频合一开启时使用" })
+            end
+            if mlo and compatible then
+                uci:revert("wireless")
+                return json_reply({ ok = false, message = "MLO 与 Wi-Fi 5 兼容模式不能同时开启" })
+            end
+            if mlo and mlo_enabled_count < 2 then
+                uci:revert("wireless")
+                return json_reply({ ok = false, message = "MLO 至少需要启用两个 Wi-Fi 频段" })
+            end
+            if mlo and unified_encryption ~= "sae" then
+                uci:revert("wireless")
+                return json_reply({ ok = false, message = "MLO 需要 WPA3-SAE（不能使用 WPA2/WPA3 混合模式）" })
+            end
+            local mld_addr = tostring(uci:get("wireless", "main", "mld_addr") or ""):upper()
+            if not valid_mac(mld_addr) then
+                mld_addr = trim(luci.sys.exec("cat /sys/class/net/phy0-ap0/address 2>/dev/null")):upper()
+                if not valid_mac(mld_addr) then mld_addr = "02:BE:65:00:00:01" end
+                set_value("main", "mld_addr", mld_addr)
+            end
+            set_value("main", "mlo", mlo and "1" or "0")
+            local mlo_links = { [device0] = 0, [device1] = 1, [device2] = 2 }
+            for _, device in ipairs({ device0, device1, device2 }) do
+                local iface = device and iface_for_device(uci, device, "main") or nil
+                local enabled = mlo and iface and uci:get("wireless", iface, "disabled") ~= "1"
+                apply_mlo_options(iface, enabled, mlo_links[device], mld_addr, device)
+            end
         end
 
         if role == "guest" then
@@ -1011,6 +1072,7 @@ function action_native_wifi()
         mode_pending = actual_mode ~= configured_mode, runtime_bdf = runtime_bdf,
         profile = role,
         unified = uci:get("wireless", role, "unified") == "1",
+        mlo = role == "main" and uci:get("wireless", "main", "mlo") == "1",
         wifi5_compatible = uci:get("wireless", "main", "wifi5_compatible") == "1",
         wifi5_band = tonumber((uci:get("wireless", "main", "wifi5_band"))) or 0,
         wifi5_bands = wifi5_bands,
@@ -1381,6 +1443,30 @@ local function apply_mac_policy(uci, policy)
             end
         end
     end
+
+    -- QSDK accepts ACL changes on a running hostapd instance.  Updating both
+    -- ACL lists here avoids a radio restart (and therefore avoids dropping
+    -- every connected station) when a black/white-list is edited.
+    local function sync_hostapd_acl(iface, command_name, active)
+        local current = luci.sys.exec("hostapd_cli -p /var/run/hostapd -i " .. iface
+            .. " " .. command_name .. " SHOW 2>/dev/null") or ""
+        for mac in current:gmatch("(%x%x:%x%x:%x%x:%x%x:%x%x:%x%x)") do
+            luci.sys.call("hostapd_cli -p /var/run/hostapd -i " .. iface .. " "
+                .. command_name .. " DEL_MAC " .. mac:upper() .. " >/dev/null 2>&1")
+        end
+        if active then
+            for _, item in ipairs(list) do
+                luci.sys.call("hostapd_cli -p /var/run/hostapd -i " .. iface .. " "
+                    .. command_name .. " ADD_MAC " .. item.mac .. " >/dev/null 2>&1")
+            end
+        end
+    end
+    for _, iface in ipairs({ "phy0-ap0", "phy1-ap0", "phy2-ap0" }) do
+        if luci.sys.call("ubus -v list hostapd." .. iface .. " >/dev/null 2>&1") == 0 then
+            sync_hostapd_acl(iface, "accept_acl", enabled and policy == "allow")
+            sync_hostapd_acl(iface, "deny_acl", enabled and policy == "deny")
+        end
+    end
 end
 
 -- Keep device recognition consistent with the main router's device manager:
@@ -1493,6 +1579,24 @@ local function device_identity(name, mac)
 end
 
 local wifi_reject_file = "/tmp/wifi_reject.json"
+local wifi_reject_lock_file = "/tmp/wifi_reject.lock"
+
+-- hostapd uses an fcntl lock on this same file while it merges a real ACL
+-- rejection.  Use nixio's lockf wrapper here as well so an administrative
+-- clear cannot overwrite (or be overwritten by) another radio's JSON merge.
+local function with_wifi_reject_lock(callback)
+    local nixio = require "nixio"
+    local lock = nixio.open(wifi_reject_lock_file, "a+", 600)
+    if not lock then return false end
+    if not lock:lock("lock") then
+        lock:close()
+        return false
+    end
+    local ok, result = pcall(callback)
+    lock:lock("ulock")
+    lock:close()
+    return ok and result or false
+end
 
 local function wifi_reject_rows(uci)
     local file = io.open(wifi_reject_file, "r")
@@ -1553,26 +1657,31 @@ end
 
 local function clear_wifi_reject_rows(mac, ssid)
     mac = tostring(mac or ""):upper()
-    ssid = tostring(ssid or "")
-    if mac == "" then os.remove(wifi_reject_file); return true end
-    if not valid_mac(mac) then return false end
-    local file = io.open(wifi_reject_file, "r")
-    if not file then return true end
-    local records = require("luci.jsonc").parse(file:read("*a") or "")
-    file:close()
-    if type(records) ~= "table" then records = {} end
-    local kept = {}
-    for _, record in ipairs(records) do
-        local same_mac = type(record) == "table" and tostring(record.mac or ""):upper() == mac
-        local same_ssid = ssid == "" or tostring(record.ssid or "") == ssid
-        if not (same_mac and same_ssid) then kept[#kept + 1] = record end
-    end
-    local temporary = wifi_reject_file .. ".luci"
-    local output = io.open(temporary, "w")
-    if not output then return false end
-    output:write(require("luci.jsonc").stringify(kept), "\n")
-    output:close()
-    return os.rename(temporary, wifi_reject_file) and true or false
+    ssid = tostring(ssid or ""):gsub("[\r\n\t]", "")
+    if mac ~= "" and not valid_mac(mac) then return false end
+    -- /tmp/wifi_reject.json is the sole source of truth.  hostapd reloads it
+    -- under its own file lock for every real ACL rejection, so clearing this
+    -- view cannot be repopulated from another radio's stale process memory.
+    return with_wifi_reject_lock(function()
+        if mac == "" then os.remove(wifi_reject_file); return true end
+        local file = io.open(wifi_reject_file, "r")
+        if not file then return true end
+        local records = require("luci.jsonc").parse(file:read("*a") or "")
+        file:close()
+        if type(records) ~= "table" then records = {} end
+        local kept = {}
+        for _, record in ipairs(records) do
+            local same_mac = type(record) == "table" and tostring(record.mac or ""):upper() == mac
+            local same_ssid = ssid == "" or tostring(record.ssid or "") == ssid
+            if not (same_mac and same_ssid) then kept[#kept + 1] = record end
+        end
+        local temporary = wifi_reject_file .. ".luci"
+        local output = io.open(temporary, "w")
+        if not output then return false end
+        output:write(require("luci.jsonc").stringify(kept), "\n")
+        output:close()
+        return os.rename(temporary, wifi_reject_file) and true or false
+    end)
 end
 
 local function fingerprint_identity(signature)
@@ -1789,6 +1898,12 @@ local function build_device_list(uci)
             local lease = leases_by_mac[mac:upper()] or {}
             add(mac, ip, lease.name or "未知设备", true)
         end
+    end
+    -- Keep an expired or inactive DHCP lease visible as an offline device.
+    -- A lease says the router knows the client; it must not be presented as a
+    -- live neighbour unless the association/NUD checks above proved it.
+    for mac, lease in pairs(leases_by_mac) do
+        if not online_macs[mac] then add(mac, lease.ip or "", lease.name or "未知设备", false) end
     end
     uci:foreach("dhcp", "host", function(section)
         local mac = type(section.mac) == "table" and section.mac[1] or section.mac
@@ -2413,10 +2528,7 @@ local function extended_jdcapi(method, args, uci)
         local committed = uci:commit("be6500_oem")
         if not committed then return true, { status = 1, message = "访问控制配置保存失败" } end
         apply_mac_policy(uci, policy)
-        if tonumber(args.reload_wifi) == 1 then
-            luci.sys.call("(sleep 1; wifi reload >/dev/null 2>&1) &")
-        end
-        return true, status
+        return true, { status = 0, message = "名单已即时生效，Wi-Fi 未重启" }
     elseif method == "web_get_rejected_list" or method == "get_rejected_devices" then
         local rows = wifi_reject_rows(uci)
         return true, { status = 0, data = rows, rejected_list = rows }

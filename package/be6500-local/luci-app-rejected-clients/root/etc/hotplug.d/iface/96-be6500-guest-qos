@@ -1,0 +1,7 @@
+#!/bin/sh
+
+# PPE virtual ports are created after firewall. Retry the hardware shaper once
+# the guest network or its wireless bridge has become usable.
+case "$ACTION:$INTERFACE" in
+	ifup:guest|ifup:lan) /usr/sbin/be6500-qos-apply >/dev/null 2>&1 & ;;
+esac
