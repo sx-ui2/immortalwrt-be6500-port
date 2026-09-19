@@ -5,6 +5,56 @@ local function json_reply(value)
     luci.http.write_json(value)
 end
 
+local function read_file_snapshot(path)
+    local file = io.open(path, "rb")
+    if not file then return { exists = false } end
+    local data = file:read("*a")
+    file:close()
+    return { exists = true, data = data or "" }
+end
+
+local function restore_file_snapshot(path, snapshot)
+    if not snapshot or not snapshot.exists then
+        os.remove(path)
+        return
+    end
+    local file = io.open(path, "wb")
+    if file then
+        file:write(snapshot.data or "")
+        file:close()
+    end
+end
+
+local function native_wifi_config_snapshot()
+    local snapshot = {}
+    for _, config in ipairs({ "wireless", "network", "dhcp", "firewall" }) do
+        snapshot[config] = {
+            config = read_file_snapshot("/etc/config/" .. config),
+            delta = read_file_snapshot("/tmp/.uci/" .. config)
+        }
+    end
+    return snapshot
+end
+
+local function restore_native_wifi_config(snapshot)
+    for config, files in pairs(snapshot or {}) do
+        restore_file_snapshot("/etc/config/" .. config, files.config)
+        restore_file_snapshot("/tmp/.uci/" .. config, files.delta)
+    end
+end
+
+local function log_native_wifi_error(trace)
+    local file = io.open("/tmp/be6500-native-wifi-error.log", "a")
+    if file then
+        file:write(os.date("!%Y-%m-%dT%H:%M:%SZ"), " ", tostring(trace), "\n")
+        file:close()
+    end
+    local ok, nixio = pcall(require, "nixio")
+    if ok and nixio and nixio.syslog then
+        nixio.syslog("err", "be6500 native Wi-Fi API failed; see /tmp/be6500-native-wifi-error.log")
+    end
+end
+
 function index()
     -- Router settings pages are declared exclusively in menu.d.  Registering
     -- them again through the legacy Lua dispatcher marks every child as a
@@ -782,7 +832,7 @@ local function native_wifi_band(uci, device, role)
     }
 end
 
-function action_native_wifi()
+local function action_native_wifi_impl()
     local uci = require("luci.model.uci").cursor()
     if luci.http.getenv("REQUEST_METHOD") == "POST" then
         local json = require "luci.jsonc"
@@ -1007,8 +1057,15 @@ function action_native_wifi()
                 set_value("main", "mld_addr", mld_addr)
             end
             set_value("main", "mlo", mlo and "1" or "0")
-            local mlo_links = { [device0] = 0, [device1] = 1, [device2] = 2 }
-            for _, device in ipairs({ device0, device1, device2 }) do
+            local mlo_links = {}
+            if device0 then mlo_links[device0] = 0 end
+            if device1 then mlo_links[device1] = 1 end
+            if device2 then mlo_links[device2] = 2 end
+            local radio_devices = {}
+            if device0 then radio_devices[#radio_devices + 1] = device0 end
+            if device1 then radio_devices[#radio_devices + 1] = device1 end
+            if device2 then radio_devices[#radio_devices + 1] = device2 end
+            for _, device in ipairs(radio_devices) do
                 local iface = device and iface_for_device(uci, device, "main") or nil
                 local enabled = mlo and iface and uci:get("wireless", iface, "disabled") ~= "1"
                 apply_mlo_options(iface, enabled, mlo_links[device], mld_addr, device)
@@ -1036,7 +1093,6 @@ function action_native_wifi()
                 tostring(uci:get("network", "guest", "ip6assign") or "")
             }, "|")
             guest_infra_changed = before_network ~= after_network
-            uci:commit("network"); uci:commit("dhcp"); uci:commit("firewall")
         end
 
         -- Wi-Fi 5 兼容模式会改变相应射频的协议能力，因此只重启被影响的
@@ -1049,10 +1105,19 @@ function action_native_wifi()
         if device2 then set_value(device2, "hwmode", "11a", device2); set_value(device2, "htmode", wifi_protocol_htmode(uci, device2, compat_52g, bands["52g"] and bands["52g"].bandwidth), device2) end
 
         local radios = {}
-        for _, device in ipairs({ device0, device1, device2 }) do
+        local radio_devices = {}
+        if device0 then radio_devices[#radio_devices + 1] = device0 end
+        if device1 then radio_devices[#radio_devices + 1] = device1 end
+        if device2 then radio_devices[#radio_devices + 1] = device2 end
+        for _, device in ipairs(radio_devices) do
             if changed_radios[device] then radios[#radios + 1] = device end
         end
         if changed then uci:commit("wireless") end
+        if role == "guest" then
+            uci:commit("network")
+            uci:commit("dhcp")
+            uci:commit("firewall")
+        end
         if guest_infra_changed then
             luci.sys.call("/usr/libexec/be6500-wifi-apply network >/tmp/be6500-wifi-reload.log 2>&1 &")
         elseif #radios > 0 then
@@ -1086,6 +1151,23 @@ function action_native_wifi()
         } or nil,
         bands = { ["2g"] = native_wifi_band(uci, radio_device(uci, 0), role),
             ["5g"] = native_wifi_band(uci, radio_device(uci, 1), role), ["52g"] = native_wifi_band(uci, radio_device(uci, 2), role) }
+    })
+end
+
+function action_native_wifi()
+    local is_post = luci.http.getenv("REQUEST_METHOD") == "POST"
+    local snapshot = is_post and native_wifi_config_snapshot() or nil
+    local ok, result = xpcall(action_native_wifi_impl, function(error)
+        return debug.traceback(tostring(error), 2)
+    end)
+    if ok then return result end
+    if snapshot then restore_native_wifi_config(snapshot) end
+    log_native_wifi_error(result)
+    return json_reply({
+        ok = false,
+        message = is_post
+            and "Wi-Fi 配置处理失败，本次变更已撤销；请重试或查看系统日志"
+            or "Wi-Fi 配置读取失败，请刷新页面后重试"
     })
 end
 

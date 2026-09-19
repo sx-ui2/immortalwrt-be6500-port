@@ -35,7 +35,6 @@
       return Promise.reject(new Error('登录会话已过期，正在重新进入登录页面'));
     }
     return response.text().then(function (body) {
-      if (!response.ok) throw new Error('HTTP ' + response.status);
       var text = String(body || '').trim();
       // Some LuCI/uhttpd combinations prefix XHR output with an HTML comment
       // as an XSSI guard.  Only discard it when the remaining payload is JSON.
@@ -45,8 +44,22 @@
         if (tail.charAt(0) === '{' || tail.charAt(0) === '[') text = tail;
       }
       try {
-        return JSON.parse(text);
+        var data = JSON.parse(text);
+        if (!response.ok) {
+          var failure = new Error((data && data.message) || ('路由器请求失败（HTTP ' + response.status + '）'));
+          failure.status = response.status;
+          throw failure;
+        }
+        return data;
       } catch (error) {
+        if (error && error.status) throw error;
+        if (!response.ok) {
+          var httpFailure = new Error(response.status === 500
+            ? '路由器处理请求时发生异常，请刷新后重试；若持续出现请查看系统日志'
+            : '路由器请求失败（HTTP ' + response.status + '）');
+          httpFailure.status = response.status;
+          throw httpFailure;
+        }
         if (text.charAt(0) === '<')
           throw new Error('服务器返回了网页而不是配置数据，请刷新页面后重试');
         throw new Error('服务器返回的数据格式无效，请刷新页面后重试');
@@ -373,6 +386,7 @@
     }
     function load() {
       fetch(endpoint,{credentials:'same-origin',cache:'no-store'}).then(jsonResponse).then(function(data){
+        if (!data.ok) throw new Error(data.message || 'Wi-Fi 配置读取失败');
         set('wifi-mode',data.mode||0);
         var modeState=id('wifi-mode-state');
         if(modeState) modeState.textContent=data.mode_pending
