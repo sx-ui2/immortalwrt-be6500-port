@@ -9,6 +9,19 @@ valid_scope() { [ "$1" = main ] || [ "$1" = guest ]; }
 valid_mac() { printf '%s' "$1" | grep -Eq '^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$'; }
 normalize_mac() { printf '%s' "$1" | tr 'a-f' 'A-F'; }
 
+runtime_ifaces_for() {
+	scope="$1"
+	objects="$(ubus -S list 'hostapd.*' 2>/dev/null | sed 's/^hostapd\.//')"
+	if [ "$scope" = guest ]; then
+		matched="$(printf '%s\n' "$objects" | grep -E -- '-ap[1-9][0-9]*$')"
+		fallback='phy0-ap1 phy1-ap1 phy2-ap1'
+	else
+		matched="$(printf '%s\n' "$objects" | grep -E -- '-ap0$')"
+		fallback='phy0-ap0 phy1-ap0 phy2-ap0'
+	fi
+	[ -n "$matched" ] && printf '%s\n' "$matched" || printf '%s\n' "$fallback"
+}
+
 init_scope() {
 	scope="$1"; section="$(section_for "$scope")"
 	uci -q get "$CONFIG.$section" >/dev/null && return
@@ -51,7 +64,7 @@ runtime_acl_sync() {
 	case "$mode" in allow) acl=accept_acl; option=allowlist;; deny) acl=deny_acl; option=denylist;; *) return 0;; esac
 	desired="/tmp/device-manager-acl-desired.$$"; current="/tmp/device-manager-acl-current.$$"
 	uci -q get "$CONFIG.$section.$option" | tr 'a-f' 'A-F' | tr ' ' '\n' | grep -E '^([0-9A-F]{2}:){5}[0-9A-F]{2}$' | sort -u >"$desired"
-	if [ "$scope" = guest ]; then ifaces='phy0-ap1 phy1-ap1 phy2-ap1'; else ifaces='phy0-ap0 phy1-ap0 phy2-ap0'; fi
+	ifaces="$(runtime_ifaces_for "$scope")"
 	for iface in $ifaces; do
 		ubus -v list "hostapd.$iface" >/dev/null 2>&1 || continue
 		hostapd_cli -p /var/run/hostapd -i "$iface" "$acl" SHOW 2>/dev/null | awk '{print toupper($1)}' | grep -E '^([0-9A-F]{2}:){5}[0-9A-F]{2}$' | sort -u >"$current"
@@ -168,7 +181,7 @@ change_list() {
 disconnect_client() {
 	scope="$1"; mac="$(normalize_mac "$2")"; valid_scope "$scope" || exit 2; valid_mac "$mac" || exit 2
 	low="$(printf '%s' "$mac" | tr 'A-F' 'a-f')"
-	if [ "$scope" = guest ]; then ifaces='phy0-ap1 phy1-ap1 phy2-ap1'; else ifaces='phy0-ap0 phy1-ap0 phy2-ap0'; fi
+	ifaces="$(runtime_ifaces_for "$scope")"
 	found=0; disconnected=0
 	for iface in $ifaces; do
 		iw dev "$iface" station get "$low" >/dev/null 2>&1 || continue

@@ -1525,6 +1525,62 @@ local function replace_access_entries(uci, policy, entries)
     end
 end
 
+local function live_hostapd_ifaces(uci, role)
+    local objects, result, seen = {}, {}, {}
+    local output = luci.sys.exec("ubus -S list 'hostapd.*' 2>/dev/null") or ""
+    for object in output:gmatch("[^%s]+") do
+        local iface = object:match("^hostapd%.(.+)$")
+        if iface and iface:match("^[%w_.%-]+$") then objects[iface] = true end
+    end
+
+    local function add(iface)
+        iface = tostring(iface or "")
+        if objects[iface] and not seen[iface] then
+            seen[iface] = true
+            result[#result + 1] = iface
+        end
+    end
+
+    local wanted_sections = {}
+    for index = 0, 2 do
+        local device = radio_device(uci, index)
+        local section = device and oem_iface(uci, device, role) or {}
+        if section[".name"] then wanted_sections[section[".name"]] = true end
+    end
+
+    -- netifd reports the real runtime ifname.  QSDK uses names such as
+    -- phy00.0-ap0, so deriving phy0-ap0 from the radio index is incorrect.
+    local loaded, ubus = pcall(require, "ubus")
+    local connection = loaded and ubus and ubus.connect() or nil
+    if connection then
+        local ok, status = pcall(connection.call, connection, "network.wireless", "status", {})
+        if ok and type(status) == "table" then
+            for _, radio in pairs(status) do
+                for _, runtime in pairs(type(radio) == "table" and radio.interfaces or {}) do
+                    local config = type(runtime.config) == "table" and runtime.config or {}
+                    local section = tostring(runtime.section or config.section or "")
+                    if wanted_sections[section] then add(runtime.ifname or config.ifname) end
+                end
+            end
+        end
+        connection:close()
+    end
+
+    -- Compatibility fallback for QSDK/mac80211 builds whose wireless status
+    -- omits the UCI section name.  The primary AP BSS always ends in -ap0;
+    -- guest BSSes use the following AP indices.
+    if #result == 0 then
+        for iface in pairs(objects) do
+            if (role == "guest" and iface:match("%-ap[1-9][0-9]*$"))
+                or (role ~= "guest" and iface:match("%-ap0$")) then
+                add(iface)
+            end
+        end
+    end
+    table.sort(result)
+    return result, next(objects) ~= nil
+end
+
 local function apply_mac_policy(uci, policy)
     local list = access_entries(uci, policy)
     local enabled = uci:get("be6500_oem", "access", "enabled") ~= "0"
@@ -1540,7 +1596,7 @@ local function apply_mac_policy(uci, policy)
             set_uci_list(uci, "wireless", section, "maclist", macs)
         end
     end
-    uci:commit("wireless")
+    if not uci:commit("wireless") then return false, "无线访问控制配置提交失败" end
     local command = tonumber(policy == "allow" and 1 or 2)
     for _, iface in ipairs({ "ath0", "ath1", "ath2" }) do
         if luci.sys.call("ip link show " .. iface .. " >/dev/null 2>&1") == 0 then
@@ -1559,26 +1615,52 @@ local function apply_mac_policy(uci, policy)
     -- QSDK accepts ACL changes on a running hostapd instance.  Updating both
     -- ACL lists here avoids a radio restart (and therefore avoids dropping
     -- every connected station) when a black/white-list is edited.
+    local function hostapd_command(iface, arguments)
+        local handle = io.popen("hostapd_cli -p /var/run/hostapd -i " .. iface
+            .. " " .. arguments .. " 2>&1")
+        if not handle then return false, "" end
+        local command_output = handle:read("*a") or ""
+        local ok = handle:close()
+        if not ok or command_output:find("FAIL", 1, true)
+            or command_output:find("UNKNOWN COMMAND", 1, true) then
+            return false, command_output
+        end
+        return true, command_output
+    end
     local function sync_hostapd_acl(iface, command_name, active)
-        local current = luci.sys.exec("hostapd_cli -p /var/run/hostapd -i " .. iface
-            .. " " .. command_name .. " SHOW 2>/dev/null") or ""
+        local ok, current = hostapd_command(iface, command_name .. " SHOW")
+        if not ok then return false end
         for mac in current:gmatch("(%x%x:%x%x:%x%x:%x%x:%x%x:%x%x)") do
-            luci.sys.call("hostapd_cli -p /var/run/hostapd -i " .. iface .. " "
-                .. command_name .. " DEL_MAC " .. mac:upper() .. " >/dev/null 2>&1")
+            if not hostapd_command(iface, command_name .. " DEL_MAC " .. mac:upper()) then return false end
         end
         if active then
             for _, item in ipairs(list) do
-                luci.sys.call("hostapd_cli -p /var/run/hostapd -i " .. iface .. " "
-                    .. command_name .. " ADD_MAC " .. item.mac .. " >/dev/null 2>&1")
+                if not hostapd_command(iface, command_name .. " ADD_MAC " .. item.mac) then return false end
             end
         end
+        return true
     end
-    for _, iface in ipairs({ "phy0-ap0", "phy1-ap0", "phy2-ap0" }) do
-        if luci.sys.call("ubus -v list hostapd." .. iface .. " >/dev/null 2>&1") == 0 then
-            sync_hostapd_acl(iface, "accept_acl", enabled and policy == "allow")
-            sync_hostapd_acl(iface, "deny_acl", enabled and policy == "deny")
+    local ifaces, hostapd_running = live_hostapd_ifaces(uci, "main")
+    if hostapd_running and #ifaces == 0 then
+        return false, "未能识别主 Wi-Fi 的运行接口，名单已保存但尚未即时生效"
+    end
+    for _, iface in ipairs(ifaces) do
+        local accept_active = enabled and policy == "allow"
+        local deny_active = enabled and policy == "deny"
+        if not sync_hostapd_acl(iface, "accept_acl", accept_active)
+            or not sync_hostapd_acl(iface, "deny_acl", deny_active) then
+            return false, "运行中的 Wi-Fi ACL 更新失败，名单已保存但尚未即时生效"
+        end
+        -- 0 = accept unless denied; 1 = deny unless accepted.  This QSDK
+        -- hostapd supports changing macaddr_acl at runtime and immediately
+        -- re-evaluates connected stations, so mode changes need no reload.
+        local mode = accept_active and "1" or "0"
+        if not hostapd_command(iface, "set macaddr_acl " .. mode) then
+            return false, "运行中的 Wi-Fi 访问模式更新失败，名单已保存但尚未即时生效"
         end
     end
+    return true, #ifaces > 0 and "名单已即时生效，Wi-Fi 未重启"
+        or "名单已保存；主 Wi-Fi 当前未运行，将在启动后生效"
 end
 
 -- Keep device recognition consistent with the main router's device manager:
@@ -1787,6 +1869,48 @@ local function clear_wifi_reject_rows(mac, ssid)
             local same_ssid = ssid == "" or tostring(record.ssid or "") == ssid
             if not (same_mac and same_ssid) then kept[#kept + 1] = record end
         end
+        local temporary = wifi_reject_file .. ".luci"
+        local output = io.open(temporary, "w")
+        if not output then return false end
+        output:write(require("luci.jsonc").stringify(kept), "\n")
+        output:close()
+        return os.rename(temporary, wifi_reject_file) and true or false
+    end)
+end
+
+local function reconcile_wifi_reject_rows(uci)
+    local enabled = uci:get("be6500_oem", "access", "enabled") ~= "0"
+    local policy = uci:get("be6500_oem", "access", "policy") == "allow" and "allow" or "deny"
+    local listed, guest_ssids = {}, {}
+    uci:foreach("be6500_oem", "access", function(section)
+        local mac = tostring(section.mac or ""):upper()
+        if section.policy == policy and valid_mac(mac) then listed[mac] = true end
+    end)
+    uci:foreach("wireless", "wifi-iface", function(section)
+        local networks = " " .. tostring(section.network or "") .. " "
+        if networks:find(" guest ", 1, true) and section.ssid then
+            guest_ssids[tostring(section.ssid)] = true
+        end
+    end)
+
+    return with_wifi_reject_lock(function()
+        local file = io.open(wifi_reject_file, "r")
+        if not file then return true end
+        local records = require("luci.jsonc").parse(file:read("*a") or "")
+        file:close()
+        if type(records) ~= "table" then records = {} end
+        local kept = {}
+        for _, record in ipairs(records) do
+            if type(record) == "table" then
+                local mac = tostring(record.mac or ""):upper()
+                local guest = guest_ssids[tostring(record.ssid or "")] == true
+                local still_rejected = guest or (enabled and valid_mac(mac)
+                    and ((policy == "allow" and not listed[mac])
+                        or (policy == "deny" and listed[mac])))
+                if still_rejected then kept[#kept + 1] = record end
+            end
+        end
+        if #kept == 0 then os.remove(wifi_reject_file); return true end
         local temporary = wifi_reject_file .. ".luci"
         local output = io.open(temporary, "w")
         if not output then return false end
@@ -2639,8 +2763,12 @@ local function extended_jdcapi(method, args, uci)
         end
         local committed = uci:commit("be6500_oem")
         if not committed then return true, { status = 1, message = "访问控制配置保存失败" } end
-        apply_mac_policy(uci, policy)
-        return true, { status = 0, message = "名单已即时生效，Wi-Fi 未重启" }
+        local applied, apply_message = apply_mac_policy(uci, policy)
+        if not applied then return true, { status = 1, message = apply_message } end
+        if not reconcile_wifi_reject_rows(uci) then
+            return true, { status = 1, message = "名单已生效，但拒绝记录同步清理失败" }
+        end
+        return true, { status = 0, message = apply_message }
     elseif method == "web_get_rejected_list" or method == "get_rejected_devices" then
         local rows = wifi_reject_rows(uci)
         return true, { status = 0, data = rows, rejected_list = rows }

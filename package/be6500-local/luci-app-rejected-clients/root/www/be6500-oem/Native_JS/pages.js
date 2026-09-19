@@ -897,7 +897,7 @@
       '<button type="button" id="access-allow" data-policy="allow"><i></i><span>白名单模式（只允许列表中设备访问）</span></button></div>' +
       '<select id="access-policy" class="native-hidden"><option value="deny">deny</option><option value="allow">allow</option></select></div>' +
       row('启用', toggle('access-enabled', '')) +
-      '<div class="native-info">添加、移除、启停及名单模式切换会暂存，点击“保存并应用”后统一生效并重启 Wi-Fi。</div>' +
+      '<div class="native-info">添加、移除、启停及名单模式切换会暂存；保存后会即时同步到运行中的 Wi-Fi，不会重启 Wi-Fi。</div>' +
       '<section class="native-access-list"><h3 id="access-list-title">黑名单设备列表</h3><div class="native-table native-access-table"><ul class="native-table-head"><li class="access-name">设备名称</li><li class="access-address">MAC</li><li class="access-type">设备类型</li><li class="access-vendor">品牌 / 厂商</li><li class="access-action">操作</li></ul><div id="access-list"><div class="native-empty">正在读取名单…</div></div></div>' +
       '<div class="native-access-actions"><button type="button" id="access-manual-open">手动添加</button><button type="button" id="access-device-open">选择设备添加</button></div></section>' +
       buttons(['access-mode-save', '保存并应用']) +
@@ -996,9 +996,9 @@
           !window.confirm('当前管理设备（' + clientMac + '）' + (policy === 'allow' ? '不在白名单中' : '已在黑名单中') + '。保存后本机会被 Wi-Fi 拒绝并断开连接，确定继续吗？')) return;
       var button = this;
       busy(button, rpc('set_macfilter', {
-        enable: enabled ? 1 : 0, macpolicy: policy, replace: 1, reload_wifi: 1,
+        enable: enabled ? 1 : 0, macpolicy: policy, replace: 1,
         blacklist: draft.deny, whitelist: draft.allow, list: []
-      }), '已保存，Wi-Fi 正在重启').then(function () { dirty = false; return load(); });
+      }), '已保存并即时生效，Wi-Fi 未重启').then(function () { dirty = false; return load(); });
     });
     bindClick('#access-add', function () {
       if (!/^([0-9A-F]{2}:){5}[0-9A-F]{2}$/i.test(value('access-mac'))) return notify('MAC 地址格式不正确', false);
