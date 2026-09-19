@@ -1,7 +1,7 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=luci-app-rejected-clients
-PKG_RELEASE:=8
+PKG_RELEASE:=9
 PKG_MAINTAINER:=Codex
 
 include $(INCLUDE_DIR)/package.mk

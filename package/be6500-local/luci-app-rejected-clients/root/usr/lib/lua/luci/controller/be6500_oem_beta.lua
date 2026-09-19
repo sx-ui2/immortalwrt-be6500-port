@@ -177,6 +177,10 @@ local function valid_ipv6(value, allow_prefix)
     return ip.IPv6(value) ~= nil
 end
 
+local function valid_mac(value)
+    return tostring(value or ""):upper():match("^[0-9A-F][0-9A-F]:[0-9A-F][0-9A-F]:[0-9A-F][0-9A-F]:[0-9A-F][0-9A-F]:[0-9A-F][0-9A-F]:[0-9A-F][0-9A-F]$") ~= nil
+end
+
 local function ipv4_number(value)
     if not valid_ipv4(value) then return nil end
     local result = 0
@@ -1320,10 +1324,6 @@ local function prefix_to_netmask(prefix)
         parts[index] = bits == 0 and 0 or 256 - 2 ^ (8 - bits)
     end
     return table.concat(parts, ".")
-end
-
-local function valid_mac(value)
-    return tostring(value or ""):upper():match("^[0-9A-F][0-9A-F]:[0-9A-F][0-9A-F]:[0-9A-F][0-9A-F]:[0-9A-F][0-9A-F]:[0-9A-F][0-9A-F]:[0-9A-F][0-9A-F]$") ~= nil
 end
 
 local function safe_name(value, fallback)
