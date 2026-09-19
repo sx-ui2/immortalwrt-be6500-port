@@ -43,6 +43,15 @@ local function restore_native_wifi_config(snapshot)
     end
 end
 
+local function revert_native_wifi_changes()
+    local ok, uci_module = pcall(require, "luci.model.uci")
+    if not ok or not uci_module then return end
+    local uci = uci_module.cursor()
+    for _, config in ipairs({ "wireless", "network", "dhcp", "firewall" }) do
+        pcall(function() uci:revert(config) end)
+    end
+end
+
 local function log_native_wifi_error(trace)
     local file = io.open("/tmp/be6500-native-wifi-error.log", "a")
     if file then
@@ -891,7 +900,21 @@ local function action_native_wifi_impl()
         -- vendor options intact while making the MLO options an atomic group.
         local function apply_mlo_options(section, enabled, link_id, mld_addr, device)
             if not section then return end
-            local old = uci:get_list("wireless", section, "hostapd_bss_options") or {}
+            -- luci.model.uci:get_list() wraps an absent option as { false } on
+            -- this LuCI compatibility runtime.  table.concat({ false }) then
+            -- raises an exception and made every Wi-Fi save fail whenever the
+            -- MLO hostapd option had not been created yet.  Read and normalize
+            -- the raw value instead so a missing option is a genuinely empty
+            -- list and scalar values remain compatible with older configs.
+            local raw = uci:get("wireless", section, "hostapd_bss_options")
+            local old = {}
+            if type(raw) == "table" then
+                for _, option in ipairs(raw) do
+                    if type(option) == "string" then old[#old + 1] = option end
+                end
+            elseif type(raw) == "string" and raw ~= "" then
+                old[1] = raw
+            end
             local wanted = {}
             for _, option in ipairs(old) do
                 option = tostring(option)
@@ -980,7 +1003,6 @@ local function action_native_wifi_impl()
         local mlo_requested = role == "main" and body.mlo and true or false
         local any_enabled = (bands["2g"] and bands["2g"].enabled) or
             (bands["5g"] and bands["5g"].enabled) or (bands["52g"] and bands["52g"].enabled)
-        if role == "guest" and any_enabled then ensure_guest_network(uci, guest_options) end
         if was_unified and not body.unified and bands["2g"] then
             local base = clean(bands["2g"].ssid, 32)
             local function factory_ssid(band, suffix)
@@ -1161,6 +1183,10 @@ function action_native_wifi()
         return debug.traceback(tostring(error), 2)
     end)
     if ok then return result end
+    -- Discard the ubus UCI transaction before restoring the on-disk safety
+    -- copy.  Otherwise the failed request can leave staged changes which a
+    -- later, unrelated LuCI commit would accidentally apply.
+    revert_native_wifi_changes()
     if snapshot then restore_native_wifi_config(snapshot) end
     log_native_wifi_error(result)
     return json_reply({
