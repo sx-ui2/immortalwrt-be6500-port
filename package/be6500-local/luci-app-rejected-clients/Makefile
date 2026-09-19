@@ -1,7 +1,7 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=luci-app-rejected-clients
-PKG_RELEASE:=4
+PKG_RELEASE:=5
 PKG_MAINTAINER:=Codex
 
 include $(INCLUDE_DIR)/package.mk
@@ -31,8 +31,10 @@ define Build/Compile
 endef
 
 define Package/luci-app-rejected-clients/install
-	$(INSTALL_DIR) $(1)/www/be6500-oem
-	$(CP) ./root/www/be6500-oem/* $(1)/www/be6500-oem/
+	$(INSTALL_DIR) $(1)/www/be6500-oem/Native_JS
+	$(INSTALL_DATA) ./root/www/be6500-oem/Native_JS/pages.js $(1)/www/be6500-oem/Native_JS/pages.js
+	$(INSTALL_DIR) $(1)/www/be6500-oem/Native_CSS
+	$(INSTALL_DATA) ./root/www/be6500-oem/Native_CSS/system-theme.css $(1)/www/be6500-oem/Native_CSS/system-theme.css
 	$(INSTALL_DIR) $(1)/usr/lib/lua/luci/controller
 	$(INSTALL_DATA) ./root/usr/lib/lua/luci/controller/be6500_oem_beta.lua $(1)/usr/lib/lua/luci/controller/be6500_oem_beta.lua
 	$(INSTALL_DIR) $(1)/usr/lib/lua/luci/view/be6500_oem_beta

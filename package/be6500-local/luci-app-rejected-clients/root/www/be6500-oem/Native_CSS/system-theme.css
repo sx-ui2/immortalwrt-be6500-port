@@ -42,30 +42,6 @@ body > .block,
   padding: 1px 24px 24px;
 }
 
-/* The factory bundle hides this section until every auxiliary startup RPC
- * succeeds.  Mode selection is independent, so keep it available when an
- * unrelated mesh/gaming query is unavailable on ImmortalWrt. */
-.mode_switch {
-    display: block !important;
-}
-
-/* The factory Wi-Fi screen uses bitmap switches instead of the native
-   checkbox component. Preserve its original white track and geometry while
-   mapping only the active blue artwork to the system success green. */
-body > .block img[src$="/turn-on.png"],
-body > .block img[src$="turn-on.png"] {
-  filter: hue-rotate(272deg) saturate(58%) brightness(144%) !important;
-  transition: none !important;
-}
-
-body > .block img[src$="/turn-off.png"],
-body > .block img[src$="turn-off.png"],
-body > .block img[src$="/turn-on-disable.png"],
-body > .block img[src$="turn-on-disable.png"] {
-  filter: none !important;
-  transition: none !important;
-}
-
 .native-card,
 .seniorManagement_Box,
 .box,
@@ -529,7 +505,6 @@ body > .block,
 .native-page .native-row > div:first-child span,
 .native-page .native-row > label,
 .native-page .native-control,
-.native-page .native-toggle b,
 .native-page .native-help,
 .native-page .native-toolbar,
 .native-page .native-table,
@@ -759,81 +734,6 @@ body > .block,
 .native-page .native-nat-options button.active i {
   background: var(--be-section) !important;
   border: 5px solid var(--be-active) !important;
-}
-
-.native-page .native-toggle span {
-  display: inline-block !important;
-  position: relative !important;
-  flex: 0 0 46px !important;
-  width: 46px !important;
-  height: 24px !important;
-  border: 0 !important;
-  border-radius: 999px !important;
-  background: var(--be-border) !important;
-  box-shadow: none !important;
-  transition: background-color .18s ease !important;
-}
-
-.native-page .native-toggle span::after {
-  content: "" !important;
-  position: absolute !important;
-  top: 2px !important;
-  left: 2px !important;
-  width: 20px !important;
-  height: 20px !important;
-  border-radius: 50% !important;
-  background: var(--be-section) !important;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, .22) !important;
-  transition: transform .18s ease, background-color .18s ease !important;
-}
-
-.native-page .native-toggle input:checked + span {
-  background: var(--be-border) !important;
-}
-
-.native-page .native-toggle input:checked + span::after {
-  left: 2px !important;
-  background: #45c485 !important;
-  transform: translateX(22px) !important;
-}
-
-.native-page .native-toggle input:focus-visible + span {
-  outline: 2px solid var(--be-active) !important;
-  outline-offset: 2px !important;
-}
-
-.native-page .native-inline-choice .native-toggle span {
-  flex-basis: 16px !important;
-  width: 16px !important;
-  height: 16px !important;
-  border: 1px solid var(--be-border) !important;
-  border-radius: 3px !important;
-  background: var(--be-input) !important;
-}
-
-.native-page .native-inline-choice .native-toggle span::after {
-  top: 1px !important;
-  left: 4px !important;
-  width: 5px !important;
-  height: 9px !important;
-  border: 0 !important;
-  border-right: 2px solid var(--be-button-text) !important;
-  border-bottom: 2px solid var(--be-button-text) !important;
-  border-radius: 0 !important;
-  background: transparent !important;
-  box-shadow: none !important;
-  opacity: 0 !important;
-  transform: rotate(45deg) !important;
-}
-
-.native-page .native-inline-choice .native-toggle input:checked + span {
-  border-color: var(--be-active) !important;
-  background: var(--be-active) !important;
-}
-
-.native-page .native-inline-choice .native-toggle input:checked + span::after {
-  opacity: 1 !important;
-  transform: rotate(45deg) !important;
 }
 
 /* Keep two-column settings cards self-contained. The inherited Bootstrap
