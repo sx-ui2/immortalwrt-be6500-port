@@ -2,8 +2,9 @@
 
 # Select the Qualcomm PPE/ECM forwarding path without depending on a proxy
 # package or on a particular WAN topology. PPPoE may run directly on an
-# Ethernet port or through one (or more) VLAN devices; the PPE qdisc always
-# belongs on the final physical port, while ECM keeps the logical interfaces.
+# Ethernet port or through one (or more) VLAN devices. ECM/PPE accelerates the
+# forwarding path without requiring a root PPE qdisc; hardware shaping is
+# configured separately by be6500-qos-apply only when a limit is enabled.
 
 state=/tmp/be6500-accel-state
 lock=/var/lock/be6500-accel.lock
@@ -29,7 +30,6 @@ write_state() {
 		[ -n "$wan_physical" ] && echo "wan_physical=$wan_physical"
 		[ -n "$wan_layers" ] && echo "wan_layers=$wan_layers"
 		[ -n "$wan_vlan" ] && echo "wan_vlan=$wan_vlan"
-		[ -n "$wan_qdisc" ] && echo "wan_qdisc=$wan_qdisc"
 	} > "$state"
 }
 
@@ -62,6 +62,25 @@ stop_ecm() {
 	[ -w /sys/kernel/debug/ecm/ecm_db/defunct_all ] && echo 1 > /sys/kernel/debug/ecm/ecm_db/defunct_all
 	sleep 1
 	rmmod ecm 2>/dev/null || return 1
+}
+
+# Older builds attached ppepfifo to the physical WAN unconditionally. On a
+# disconnected port its stats worker loops once per second with an empty list,
+# floods the kernel log and can leave packet drops behind. Remove only a qdisc
+# previously owned by this service; user-created QoS on other ports is left
+# untouched.
+cleanup_stale_ppe_qdisc() {
+	local old_physical dev
+	old_physical="$(sed -n 's/^wan_physical=//p' "$state" 2>/dev/null | tail -n 1)"
+	for dev in "$old_physical" "$wan_physical"; do
+		[ -n "$dev" ] || continue
+		case "$dev" in *[!A-Za-z0-9_.:-]*) continue;; esac
+		[ -d "/sys/class/net/$dev" ] || continue
+		if tc qdisc show dev "$dev" 2>/dev/null | grep -q '^qdisc ppe'; then
+			tc qdisc del dev "$dev" root >/dev/null 2>&1 || true
+			log "removed stale PPE root qdisc from $dev"
+		fi
+	done
 }
 
 read_wan_status() {
@@ -154,9 +173,7 @@ reconnect_pppoe() {
 fallback_flowtable() {
 	local reason="$1"
 	stop_ecm || true
-	if [ -n "$wan_physical" ] && tc qdisc show dev "$wan_physical" 2>/dev/null | grep -q '^qdisc ppe'; then
-		tc qdisc del dev "$wan_physical" root >/dev/null 2>&1 || true
-	fi
+	cleanup_stale_ppe_qdisc
 	set_fw4_offload 1
 	reload_fw4_if_changed
 	write_state flowtable "$reason"
@@ -169,11 +186,12 @@ fallback_flowtable() {
 sysctl -q -w net.core.default_qdisc=noqueue >/dev/null 2>&1 || true
 
 for module in qca_nss_ppe_vlan qca_nss_ppe_bridge_mgr \
-	qca_nss_ppe_pppoe_mgr qca_nss_ppe_qdisc; do
+	qca_nss_ppe_pppoe_mgr; do
 	modprobe "$module" >/dev/null 2>&1 || fallback_flowtable "module-$module"
 done
 
 if ! wait_for_wan; then
+	cleanup_stale_ppe_qdisc
 	write_state waiting 'wan-down'
 	log 'WAN is not up yet; interface hotplug will retry PPE acceleration'
 	exit 0
@@ -195,12 +213,7 @@ if [ "$wan_proto" = pppoe ]; then
 	ppe_map_has "$wan_l3" || fallback_flowtable 'pppoe-not-mapped'
 fi
 
-if ! tc qdisc show dev "$wan_physical" 2>/dev/null | grep -q '^qdisc ppe'; then
-	tc qdisc replace dev "$wan_physical" root handle 1: \
-		ppepfifo limit 2048 set_default >/dev/null 2>&1 || \
-		fallback_flowtable 'ppe-qdisc-attach-failed'
-fi
-wan_qdisc="$(tc qdisc show dev "$wan_physical" 2>/dev/null | awk 'NR == 1 { print $2 }')"
+cleanup_stale_ppe_qdisc
 
 # nft flowtables and ECM must not compete for the same direct connection.
 # Proxy/firewall policy still runs first; only connections left on the normal
