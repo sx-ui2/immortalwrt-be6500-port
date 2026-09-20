@@ -392,6 +392,12 @@ define KernelPackage/ath12k
   DEPENDS+= @PCI_SUPPORT +kmod-ath +@DRIVER_11AC_SUPPORT +@DRIVER_11AX_SUPPORT \
   +kmod-crypto-michael-mic +kmod-qrtr-mhi +kmod-hwmon-core \
   +@DRIVER_11BE_SUPPORT
+ifeq ($(CONFIG_TARGET_qualcommax_ipq53xx),y)
+  # PPE-DS symbols are linked into the IPQ53xx ath12k modules.  Keep these as
+  # direct runtime dependencies as well as build dependencies so opkg and the
+  # module loader cannot install/load ath12k without its Qualcomm bridge.
+  DEPENDS+= +kmod-qca-nss-ppe-ds +kmod-qca-nss-wifi-plugins
+endif
   FILES:=$(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/ath12k.ko \
 	 $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/wifi7/ath12k_wifi7.ko
 ifeq ($(CONFIG_PACKAGE_QCN_EXTN),y)

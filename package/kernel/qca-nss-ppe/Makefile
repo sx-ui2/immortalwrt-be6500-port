@@ -1,7 +1,7 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=qca-nss-ppe
-PKG_RELEASE:=1
+PKG_RELEASE:=2
 
 PKG_SOURCE_URL:=https://git.codelinaro.org/clo/qsdk/oss/lklm/nss-ppe.git
 PKG_SOURCE_PROTO:=git
@@ -32,9 +32,9 @@ endef
 
 # The vendor tree exposes virtual ports, Direct Switch and the PPE rule engine
 # as separate modules.  Keep that packaging boundary here.  The BE6500 image
-# selects VP and rule/QoS; DS must remain unselected until a matching WLAN
-# plugin exporting qca_nss_wifi_plugins_get_ops is available.  The rule module
-# exposes the hardware policer/QoS blocks used by the BE6500 shaper.
+# selects VP, DS and the pinned QSDK NSS/Wi-Fi bridge; together they give
+# ath12k interfaces real PPE port IDs instead of falling back to the CPU path.
+# The rule module exposes the hardware policer/QoS blocks used by the shaper.
 define KernelPackage/qca-nss-ppe-vp
   SECTION:=kernel
   CATEGORY:=Kernel modules
@@ -77,6 +77,20 @@ define KernelPackage/qca-nss-ppe-rule/Description
   PPE flow rules and hardware policer/QoS support.
 endef
 
+define KernelPackage/qca-nss-ppe-qdisc
+  SECTION:=kernel
+  CATEGORY:=Kernel modules
+  SUBMENU:=Network Devices
+  TITLE:=Qualcomm NSS PPE hardware schedulers and shapers
+  DEPENDS:=@TARGET_qualcommax +kmod-qca-nss-ppe +kmod-sched-core
+  FILES:=$(PKG_BUILD_DIR)/drv/ppe_qdisc/qca-nss-ppe-qdisc.ko
+  AUTOLOAD:=$(call AutoLoad,54,qca-nss-ppe-qdisc,1)
+endef
+
+define KernelPackage/qca-nss-ppe-qdisc/Description
+  Hardware-backed PPE FIFO, HTB, TBL, PRIO, WRR, WFQ and RED qdiscs.
+endef
+
 QCA_SSDK_SYMVERS:=$(STAGING_DIR)/usr/share/qca-ssdk/qca-ssdk.symvers
 QCA_NSS_DP_SYMVERS:=$(KERNEL_BUILD_DIR)/symvers/qca-nss-dp.symvers
 
@@ -92,6 +106,9 @@ ifneq ($(CONFIG_PACKAGE_kmod-qca-nss-ppe-rule),)
   # from its module entrypoint, so these companion objects must be selected
   # together with ACL/policer/QoS on IPQ53xx.
   PPE_BUILD_FLAGS+=ppe-rule=y PPE_ACL_ENABLED=y PPE_POLICER_ENABLED=y PPE_QOS_ENABLED=y PPE_RFS_ENABLED=y PPE_COS_MAP_ENABLED=y PPE_MIRROR_ENABLED=y PPE_PRIORITY_ENABLED=y PPE_RULE_IPQ53XX=y
+endif
+ifneq ($(CONFIG_PACKAGE_kmod-qca-nss-ppe-qdisc),)
+  PPE_BUILD_FLAGS+=ppe-qdisc=y
 endif
 
 EXTRA_CFLAGS+= \
@@ -121,7 +138,7 @@ define Build/InstallDev
 	$(INSTALL_DIR) $(1)/usr/include/qca-nss-ppe
 	$(CP) $(PKG_BUILD_DIR)/drv/exports/*.h $(1)/usr/include/qca-nss-ppe/
 	$(CP) $(PKG_BUILD_DIR)/drv/ppe_ds/exports/*.h $(1)/usr/include/qca-nss-ppe/
-	$(CP) $(PKG_BUILD_DIR)/exports/nss_plugins.h $(1)/usr/include/qca-nss-ppe/
+	$(CP) $(PKG_BUILD_DIR)/exports/*.h $(1)/usr/include/qca-nss-ppe/
 	$(INSTALL_DIR) $(1)/usr/share/qca-nss-ppe
 	$(CP) $(PKG_BUILD_DIR)/../symvers/qca-nss-ppe.symvers $(1)/usr/share/qca-nss-ppe/qca-nss-ppe.symvers
 endef
@@ -130,3 +147,4 @@ $(eval $(call KernelPackage,qca-nss-ppe))
 $(eval $(call KernelPackage,qca-nss-ppe-vp))
 $(eval $(call KernelPackage,qca-nss-ppe-ds))
 $(eval $(call KernelPackage,qca-nss-ppe-rule))
+$(eval $(call KernelPackage,qca-nss-ppe-qdisc))

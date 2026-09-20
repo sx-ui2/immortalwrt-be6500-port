@@ -17,6 +17,13 @@ define Device/jdcloud_be6500
 			kmod-dsa-qca8k \
 			kmod-qca-ssdk \
 			kmod-qca-nss-dp \
+			kmod-qca-nss-ppe-ds \
+			kmod-qca-nss-ppe-bridge-mgr \
+			kmod-qca-nss-ppe-vlan-mgr \
+			kmod-qca-nss-ppe-pppoe-mgr \
+			kmod-qca-nss-ppe-qdisc \
+			kmod-qca-nss-ppe-ath-clients \
+			kmod-qca-nss-wifi-plugins \
 			kmod-qca-nss-ecm \
 			be6500-oem-wifi-firmware \
 		luci-app-rejected-clients \

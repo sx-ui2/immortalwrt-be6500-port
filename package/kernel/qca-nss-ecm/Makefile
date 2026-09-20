@@ -1,7 +1,7 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=qca-nss-ecm
-PKG_RELEASE:=1
+PKG_RELEASE:=2
 
 # Keep ECM on the same QSDK 14.0 r9 release line as qca-nss-ppe.  This tree
 # contains the IPQ5332 PPE front end and the Linux 6.6 compatibility work.
@@ -23,7 +23,7 @@ define KernelPackage/qca-nss-ecm
   CATEGORY:=Kernel modules
   SUBMENU:=Network Support
   TITLE:=Qualcomm PPE Enhanced Connection Manager
-  DEPENDS:=@TARGET_qualcommax +kmod-qca-nss-ppe +kmod-qca-nss-ppe-vp +kmod-nf-conntrack
+  DEPENDS:=@TARGET_qualcommax +kmod-qca-nss-ppe +kmod-qca-nss-ppe-vp +kmod-nf-conntrack +kmod-ppp +kmod-pppoe
   FILES:=$(PKG_BUILD_DIR)/ecm.ko
 endef
 
@@ -55,8 +55,8 @@ ECM_MAKE_OPTS:= \
 	ECM_CLASSIFIER_DSCP_ENABLE=y \
 	ECM_CLASSIFIER_PCC_ENABLE=y \
 	ECM_MULTICAST_ENABLE=n \
-	ECM_INTERFACE_PPPOE_ENABLE=n \
-	ECM_INTERFACE_PPP_ENABLE=n \
+	ECM_INTERFACE_PPPOE_ENABLE=y \
+	ECM_INTERFACE_PPP_ENABLE=y \
 	ECM_INTERFACE_DSA_ENABLE=n \
 	ECM_INTERFACE_SKIP_ACCEL_ENABLE=y
 

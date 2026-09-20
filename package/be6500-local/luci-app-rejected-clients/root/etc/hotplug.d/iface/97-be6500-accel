@@ -1,0 +1,10 @@
+#!/bin/sh
+
+# The init service may run before a DHCP lease or PPPoE session exists. Apply
+# the same topology-independent PPE setup after WAN becomes usable.
+case "$ACTION:$INTERFACE" in
+	ifup:wan)
+		[ -e /tmp/be6500-accel-reconnecting ] || \
+			/usr/sbin/be6500-accel-apply >/dev/null 2>&1 &
+		;;
+esac

@@ -6,6 +6,52 @@
 request=/tmp/be6500-wifi-apply.request
 lock=/tmp/be6500-wifi-apply.lock
 
+wait_radio_up() {
+	local device="$1"
+	local waited=0
+	local up
+
+	# A disabled radio does not have an AP to wait for.  Enabled QCN9224
+	# links may legitimately spend about a minute in DFS CAC, so leave enough
+	# room for CAC plus hostapd/netifd setup.
+	[ "$(uci -q get "wireless.$device.disabled")" = "1" ] && return 0
+	while [ "$waited" -lt 100 ]; do
+		up="$(ubus -S call network.wireless status 2>/dev/null | \
+			jsonfilter -e "@.$device.up" 2>/dev/null)"
+		[ "$up" = "true" ] && return 0
+		sleep 1
+		waited=$((waited + 1))
+	done
+
+	logger -t be6500-wifi-apply "$device did not become ready during ordered MLO startup"
+	return 1
+}
+
+reload_wifi() {
+	# hostapd identifies links belonging to one MLD by their shared interface
+	# name.  They must therefore be started in radio order: if netifd happens
+	# to start radio1/2 before the first link, hostapd treats that link as a new
+	# MLD and the later driver-share operation fails.  Bring the base link up
+	# first, then let each additional radio attach to it.
+	if [ "$(uci -q get wireless.main.mlo)" = "1" ]; then
+		local primary
+		local device
+		primary="$(uci -q get wireless.main.mlo_primary)"
+		case "$primary" in radio0|radio1|radio2) ;; *) primary=radio0 ;; esac
+		wifi down >/dev/null 2>&1
+		sleep 1
+		wifi up "$primary" >/dev/null 2>&1
+		wait_radio_up "$primary" || true
+		for device in radio0 radio1 radio2; do
+			[ "$device" = "$primary" ] && continue
+			wifi up "$device" >/dev/null 2>&1
+			wait_radio_up "$device" || true
+		done
+	else
+		wifi reload >/dev/null 2>&1
+	fi
+}
+
 case "$1" in
 	network) printf '%s\n' network >> "$request" ;;
 	wifi|*) printf '%s\n' wifi >> "$request" ;;
@@ -25,7 +71,7 @@ while [ -s "$request" ]; do
 		/etc/init.d/dnsmasq restart >/dev/null 2>&1
 		/etc/init.d/firewall reload >/dev/null 2>&1
 	else
-		wifi reload >/dev/null 2>&1
+		reload_wifi
 	fi
 done
 

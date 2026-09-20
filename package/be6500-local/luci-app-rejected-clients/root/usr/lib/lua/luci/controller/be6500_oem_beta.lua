@@ -1087,15 +1087,34 @@ local function action_native_wifi_impl()
             if device0 then mlo_links[device0] = 0 end
             if device1 then mlo_links[device1] = 1 end
             if device2 then mlo_links[device2] = 2 end
+            -- hostapd groups AP links into one MLD by interface name, not by
+            -- mld_addr.  Giving every radio its normal per-pdev name creates
+            -- three independent one-link MLDs; the first link starts and the
+            -- remaining links fail while trying to share the nl80211 driver.
+            -- Use one stable netdev name for all links while MLO is enabled.
+            -- hostapd.uc keeps each radio distinct through radio_idx and adds
+            -- the corresponding radio bit to this shared MLD netdev.
+            local mlo_ifname = "be6500-mld0"
             local radio_devices = {}
             if device0 then radio_devices[#radio_devices + 1] = device0 end
             if device1 then radio_devices[#radio_devices + 1] = device1 end
             if device2 then radio_devices[#radio_devices + 1] = device2 end
+            local mlo_primary
             for _, device in ipairs(radio_devices) do
                 local iface = device and iface_for_device(uci, device, "main") or nil
                 local enabled = mlo and iface and uci:get("wireless", iface, "disabled") ~= "1"
+                if iface then
+                    if enabled then set_value(iface, "ifname", mlo_ifname, device)
+                    else delete_value(iface, "ifname", device) end
+                end
                 apply_mlo_options(iface, enabled, mlo_links[device], mld_addr, device)
+                if enabled and not mlo_primary then mlo_primary = device end
             end
+            -- netifd launches radio workers concurrently at boot.  Remember
+            -- which enabled link owns the first hostapd MLD so the remaining
+            -- radios can wait for it rather than racing to create a second MLD.
+            if mlo_primary then set_value("main", "mlo_primary", mlo_primary)
+            else delete_value("main", "mlo_primary") end
         end
 
         if role == "guest" then
@@ -1532,6 +1551,17 @@ local function live_hostapd_ifaces(uci, role)
         local iface = object:match("^hostapd%.(.+)$")
         if iface and iface:match("^[%w_.%-]+$") then objects[iface] = true end
     end
+    -- QSDK exposes only the primary MLD interface over ubus, while every MLO
+    -- partner link has its own hostapd control socket.  ACL commands must be
+    -- sent to those sockets too or a client associated on link1/link2 keeps
+    -- using the stale policy until the whole Wi-Fi stack is restarted.
+    output = luci.sys.exec("ls -1 /var/run/hostapd 2>/dev/null") or ""
+    for iface in output:gmatch("[^%s]+") do
+        if iface:match("^[%w_.%-]+$") and iface ~= "global"
+            and not iface:match("^hostapd_if_eloop_") then
+            objects[iface] = true
+        end
+    end
 
     local function add(iface)
         iface = tostring(iface or "")
@@ -1577,6 +1607,19 @@ local function live_hostapd_ifaces(uci, role)
             end
         end
     end
+    if role ~= "guest" then
+        local primary = {}
+        for _, iface in ipairs(result) do primary[#primary + 1] = iface end
+        for _, iface in ipairs(primary) do
+            local prefix = iface .. "_link"
+            for candidate in pairs(objects) do
+                local suffix = candidate:sub(#prefix + 1)
+                if candidate:sub(1, #prefix) == prefix and suffix:match("^%d+$") then
+                    add(candidate)
+                end
+            end
+        end
+    end
     table.sort(result)
     return result, next(objects) ~= nil
 end
@@ -1584,6 +1627,8 @@ end
 local function apply_mac_policy(uci, policy)
     local list = access_entries(uci, policy)
     local enabled = uci:get("be6500_oem", "access", "enabled") ~= "0"
+    local listed = {}
+    for _, item in ipairs(list) do listed[tostring(item.mac or ""):upper()] = true end
     for index = 0, 2 do
         local device = radio_device(uci, index)
         local iface = device and oem_iface(uci, device, "main") or {}
@@ -1657,6 +1702,26 @@ local function apply_mac_policy(uci, policy)
         local mode = accept_active and "1" or "0"
         if not hostapd_command(iface, "set macaddr_acl " .. mode) then
             return false, "运行中的 Wi-Fi 访问模式更新失败，名单已保存但尚未即时生效"
+        end
+
+        -- A runtime ACL change affects future authentication attempts, but
+        -- hostapd does not consistently evict stations which were already
+        -- associated. Query each control socket (including MLO partner links)
+        -- and remove only clients rejected by the new policy.
+        local station_ok, stations = hostapd_command(iface, "all_sta")
+        if station_ok then
+            for line in stations:gmatch("[^\r\n]+") do
+                local address = line:match("^(%x%x:%x%x:%x%x:%x%x:%x%x:%x%x)$")
+                if address then
+                    local mac = address:upper()
+                    local rejected = enabled
+                        and ((policy == "allow" and not listed[mac])
+                            or (policy == "deny" and listed[mac]))
+                    if rejected then
+                        hostapd_command(iface, "deauthenticate " .. mac .. " reason=1")
+                    end
+                end
+            end
         end
     end
     return true, #ifaces > 0 and "名单已即时生效，Wi-Fi 未重启"

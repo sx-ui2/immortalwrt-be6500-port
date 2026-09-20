@@ -237,7 +237,11 @@ define KernelPackage/mac80211
 ifeq (y, $(filter y, $(CONFIG_TARGET_echo) $(CONFIG_TARGET_sdx85)))
   DEPENDS+= +kmod-cfg80211 +kmod-crypto-cmac +kmod-crypto-ccm +kmod-crypto-gcm +hostapd-common
 else
-  DEPENDS+= +kmod-cfg80211 +kmod-crypto-cmac +kmod-crypto-ccm +kmod-crypto-gcm +hostapd-common
+  DEPENDS+= +kmod-cfg80211 +kmod-crypto-cmac +kmod-crypto-ccm +kmod-crypto-gcm +hostapd-common \
+	+kmod-qca-nss-ppe \
+	+kmod-qca-nss-ppe-vp \
+	+kmod-qca-nss-ppe-ds \
+	+kmod-qca-nss-wifi-plugins
 endif
   KCONFIG:=\
 	CONFIG_AVERAGE=y \
@@ -463,6 +467,7 @@ else
   MAKE_OPTS:= \
 	$(subst -C $(LINUX_DIR),-C "$(PKG_BUILD_DIR)",$(KERNEL_MAKEOPTS)) \
 	EXTRA_CFLAGS=$(EXTRA_MAKE_CFLAGS) \
+	KBUILD_EXTRA_SYMBOLS="$(STAGING_DIR)/usr/share/qca-nss-ppe/qca-nss-ppe.symvers $(STAGING_DIR)/usr/share/qca-nss-wifi-plugins/qca-nss-wifi-plugins.symvers" \
 	KLIB_BUILD="$(LINUX_DIR)" \
 	MODPROBE=true \
 	KLIB=$(TARGET_MODULES_DIR) \

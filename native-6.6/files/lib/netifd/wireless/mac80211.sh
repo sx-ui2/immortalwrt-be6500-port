@@ -1137,6 +1137,32 @@ drv_mac80211_setup() {
 		# briefly create and remove several interfaces; raise the inherited
 		# descriptor limit so a failed ACS transaction does not return ENFILE.
 		ulimit -n 65536 2>/dev/null || true
+		# MLO links must join the hostapd instance created by the first enabled
+		# link.  netifd starts device scripts concurrently at boot, so let the
+		# recorded primary finish before any partner enters the shared setup
+		# transaction.  The LuCI controller stores the first enabled link; use
+		# radio0 as a compatibility fallback for configs made by older builds.
+		if [ "$(uci -q get wireless.main.mlo)" = "1" ]; then
+			local be6500_mlo_primary
+			local be6500_mlo_wait=0
+			local be6500_mlo_up
+			be6500_mlo_primary="$(uci -q get wireless.main.mlo_primary)"
+			case "$be6500_mlo_primary" in radio0|radio1|radio2) ;; *) be6500_mlo_primary=radio0 ;; esac
+			if [ "$1" != "$be6500_mlo_primary" ]; then
+				while [ "$be6500_mlo_wait" -lt 120 ]; do
+					be6500_mlo_up="$(ubus -S call network.wireless status 2>/dev/null | \
+						jsonfilter -e "@.$be6500_mlo_primary.up" 2>/dev/null)"
+					[ "$be6500_mlo_up" = "true" ] && break
+					sleep 1
+					be6500_mlo_wait=$((be6500_mlo_wait + 1))
+				done
+				[ "$be6500_mlo_up" = "true" ] || {
+					echo "Timed out waiting for primary MLO link $be6500_mlo_primary"
+					wireless_setup_failed MLO_PRIMARY_TIMEOUT
+					return 1
+				}
+			fi
+		fi
 		local be6500_radio_lock=/tmp/be6500-radio-setup.lock
 		local be6500_radio_wait=0
 		while ! mkdir "$be6500_radio_lock" 2>/dev/null; do

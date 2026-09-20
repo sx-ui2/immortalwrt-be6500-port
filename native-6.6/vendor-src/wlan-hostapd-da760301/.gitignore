@@ -12,7 +12,8 @@
 /logs
 /feeds
 /feeds.conf
-/files
+/files/*
+!/files/hostapd.sh
 /package/feeds
 /package/openwrt-packages
 key-build*

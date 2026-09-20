@@ -1,7 +1,7 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=be6500-oem-wifi-firmware
-PKG_RELEASE:=9
+PKG_RELEASE:=10
 PKG_MAINTAINER:=Codex
 
 include $(INCLUDE_DIR)/package.mk
@@ -71,6 +71,12 @@ define Package/be6500-oem-wifi-firmware/install
 		$(1)/lib/firmware/ath12k/QCN92XX/hw1.0/regdb.bin
 	ln -sf /lib/firmware/qcn9224/qdss_trace_config.bin \
 		$(1)/lib/firmware/ath12k/QCN92XX/hw1.0/qdss_trace_config.bin
+	# QCN9224 advertises RxGain LUT download support.  The OEM bundle names
+	# its only matching LUT rxgainlutSKY_6G.bin, while wlan-open requests the
+	# generic API1 name rxgainlut.bin.  Expose the original blob under that
+	# lookup name instead of disabling RxGain or logging a failed QMI load.
+	ln -sf /lib/firmware/qcn9224/rxgainlutSKY_6G.bin \
+		$(1)/lib/firmware/ath12k/QCN92XX/hw1.0/rxgainlut.bin
 	ln -sf /lib/firmware/qcn9224/bdwlan.b1008 \
 		$(1)/lib/firmware/ath12k/QCN92XX/hw1.0/board.bin
 	# The BE6500 driver patch selects this API1 BDF together with amss.bin

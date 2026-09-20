@@ -1,8 +1,8 @@
 #!/bin/sh /etc/rc.common
 
-# Module lifecycle is controlled by be6500-accel so Nikki can switch to the
-# mark-aware fw4 direct-flow fallback without racing an already accelerated
-# transparent-proxy connection.
+# Module lifecycle is controlled by be6500-accel. It resolves the physical
+# WAN below optional VLAN/PPPoE layers and prevents nft flowtables from racing
+# ECM, independently of whichever proxy package is installed.
 START=26
 STOP=89
 

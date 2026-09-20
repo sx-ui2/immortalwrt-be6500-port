@@ -28,6 +28,12 @@
     var suffix = String(mac || '').replace(/[^0-9a-f]/gi, '').slice(-4).toUpperCase();
     return suffix ? '设备-' + suffix : '未命名设备';
   }
+  function normalizeMac(mac) {
+    var compact = String(mac || '').trim().toUpperCase().replace(/[^0-9A-F]/g, '');
+    if (compact.length === 12)
+      return compact.replace(/(..)(?=.)/g, '$1:');
+    return String(mac || '').trim().toUpperCase().replace(/-/g, ':');
+  }
   function jsonResponse(response) {
     if (response.status === 403 && response.headers.get('x-luci-login-required')) {
       var host = window.parent && window.parent !== window ? window.parent : window;
@@ -907,7 +913,6 @@
     ;
     var draft = { deny: [], allow: [] };
     var dirty = false;
-    function normalizeMac(mac) { return String(mac || '').toUpperCase(); }
     function activeList() { return draft[value('access-policy') === 'allow' ? 'allow' : 'deny']; }
     function deviceFor(mac) {
       mac = normalizeMac(mac);

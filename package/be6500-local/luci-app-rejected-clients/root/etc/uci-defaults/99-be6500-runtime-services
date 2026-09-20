@@ -2,18 +2,10 @@
 
 # Install-time scripts in this local package are deliberately enabled here so
 # they run on a clean image before firewall and network services come up.
-if [ -x /etc/init.d/be6500-fw4-flow-offload ]; then
-	/etc/init.d/be6500-fw4-flow-offload enable
-	# uci-defaults runs before firewall on the first clean boot.  Patch the
-	# template immediately as well as enabling S01 for subsequent boots.
-	/usr/libexec/be6500-patch-fw4-flow-offload
-fi
 [ -x /etc/init.d/be6500-fw4-multiwan ] && /etc/init.d/be6500-fw4-multiwan enable
 [ -x /etc/init.d/be6500-guest-qos ] && /etc/init.d/be6500-guest-qos enable
-[ -x /etc/init.d/qca-nss-ecm ] && /etc/init.d/qca-nss-ecm enable
+# The board controller owns ECM so the VLAN/PPPoE managers and physical-port
+# PPE scheduler are ready before the acceleration front end is loaded.
+[ -x /etc/init.d/qca-nss-ecm ] && /etc/init.d/qca-nss-ecm disable
 [ -x /etc/init.d/be6500-accel ] && /etc/init.d/be6500-accel enable
-# Apply the selected acceleration path on the first clean boot as well.  This
-# script runs before firewall; be6500-accel therefore only commits the desired
-# UCI mode here, while the enabled service loads ECM once the kernel is ready.
-[ -x /usr/sbin/be6500-accel-apply ] && /usr/sbin/be6500-accel-apply >/dev/null 2>&1 || true
 exit 0

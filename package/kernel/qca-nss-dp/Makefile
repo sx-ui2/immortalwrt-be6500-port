@@ -1,7 +1,7 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=qca-nss-dp
-PKG_RELEASE:=2
+PKG_RELEASE:=3
 
 PKG_SOURCE_URL:=https://git.codelinaro.org/clo/qsdk/oss/lklm/nss-dp.git
 PKG_SOURCE_PROTO:=git
@@ -53,6 +53,7 @@ define Build/Compile
 		-C "$(LINUX_DIR)" \
 		M="$(PKG_BUILD_DIR)" \
 		EXTRA_CFLAGS="$(EXTRA_CFLAGS)" SoC="$(CONFIG_TARGET_SUBTARGET)" \
+		dp-ppe-ds=y \
 		KBUILD_EXTRA_SYMBOLS="$(QCA_NSS_DP_SYMVERS)" \
 		modules
 endef
