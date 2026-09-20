@@ -1,0 +1,77 @@
+#!/bin/sh
+
+# Select the best safe acceleration path for the current runtime:
+#   * ordinary routing: QSDK ECM -> Qualcomm PPE (vendor acceleration path)
+#   * Nikki transparent proxy: fw4 flowtable for unmarked/direct flows only
+# Proxied flows cannot be hardware-routed because they must enter Mihomo.
+
+state=/tmp/be6500-accel-state
+lock=/var/lock/be6500-accel.lock
+
+mkdir -p /var/lock
+exec 9>"$lock"
+flock -x 9
+
+nikki_active() {
+	[ "$(uci -q get nikki.config.enabled)" = 1 ] &&
+	[ "$(uci -q get nikki.config.core_only)" != 1 ] &&
+	[ "$(uci -q get nikki.proxy.enabled)" = 1 ]
+}
+
+set_fw4_offload() {
+	local wanted="$1" changed=0
+	[ "$(uci -q get firewall.@defaults[0].flow_offloading)" = "$wanted" ] || {
+		uci -q set firewall.@defaults[0].flow_offloading="$wanted"
+		changed=1
+	}
+	[ "$(uci -q get firewall.@defaults[0].flow_offloading_hw)" = "$wanted" ] || {
+		uci -q set firewall.@defaults[0].flow_offloading_hw="$wanted"
+		changed=1
+	}
+	[ "$changed" = 1 ] || return 1
+	uci -q commit firewall
+	return 0
+}
+
+reload_fw4_if_running() {
+	ubus -t 2 list firewall >/dev/null 2>&1 || return 0
+	ubus call firewall reload >/dev/null 2>&1 || /etc/init.d/firewall reload >/dev/null 2>&1 || true
+}
+
+stop_ecm() {
+	[ -d /sys/module/ecm ] || return 0
+	[ -w /sys/kernel/debug/ecm/front_end_ipv4_stop ] && echo 1 > /sys/kernel/debug/ecm/front_end_ipv4_stop
+	[ -w /sys/kernel/debug/ecm/front_end_ipv6_stop ] && echo 1 > /sys/kernel/debug/ecm/front_end_ipv6_stop
+	[ -w /sys/kernel/debug/ecm/ecm_db/defunct_all ] && echo 1 > /sys/kernel/debug/ecm/ecm_db/defunct_all
+	sleep 1
+	rmmod ecm 2>/dev/null || return 1
+}
+
+start_ecm() {
+	[ -d /sys/module/ecm ] && return 0
+	modprobe qca-nss-ppe >/dev/null 2>&1 || true
+	modprobe qca-nss-ppe-vp >/dev/null 2>&1 || true
+	modprobe ecm front_end_selection=3 register_ip_post_routing=1 register_br_post_routing=1 >/dev/null 2>&1
+}
+
+/usr/libexec/be6500-patch-fw4-flow-offload >/dev/null 2>&1 || true
+
+if nikki_active; then
+	stop_ecm || true
+	if set_fw4_offload 1; then reload_fw4_if_running; fi
+	echo flowtable-direct-only > "$state"
+	exit 0
+fi
+
+if [ -e /lib/modules/$(uname -r)/ecm.ko ] && start_ecm; then
+	if set_fw4_offload 0; then reload_fw4_if_running; fi
+	[ -w /proc/sys/net/netfilter/nf_conntrack_events ] && echo 1 > /proc/sys/net/netfilter/nf_conntrack_events
+	echo ppe-ecm > "$state"
+	exit 0
+fi
+
+# A failed or missing ECM must not silently leave the router on the slow path.
+stop_ecm || true
+if set_fw4_offload 1; then reload_fw4_if_running; fi
+echo flowtable-fallback > "$state"
+exit 0

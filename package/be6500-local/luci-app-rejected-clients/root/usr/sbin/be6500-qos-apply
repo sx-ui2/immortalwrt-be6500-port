@@ -60,10 +60,20 @@ valid_rate "$upload" && valid_rate "$download" || {
 	exit 1
 }
 
-# Only active guest BSSes are shaped.  radio2 exists in tri-band mode;
-# de-duplicate PPE port IDs because the driver can expose aliases for one VAP.
+# Only active guest BSSes are shaped.  QSDK names these interfaces differently
+# from upstream mac80211 (for example phy00.1-ap1), so derive the real netdevs
+# from UCI/netifd instead of assuming phy0-ap1.  De-duplicate PPE port IDs
+# because the driver can expose aliases for one VAP.
 ports=''
-for iface in phy0-ap1 phy1-ap1 phy2-ap1; do
+guest_ifaces="$(ubus call network.wireless status 2>/dev/null | jsonfilter -e '@.*.interfaces[@.config.network="guest"].ifname' 2>/dev/null | tr ' ' '\n')"
+[ -n "$guest_ifaces" ] || guest_ifaces="$(
+	for section in $(uci -q show wireless | sed -n 's/^wireless\.\([^.=]*\)=wifi-iface$/\1/p'); do
+		[ "$(uci -q get wireless.$section.network)" = guest ] || continue
+		uci -q get wireless.$section.ifname
+	done
+)"
+[ -n "$guest_ifaces" ] || guest_ifaces='phy0-ap1 phy1-ap1 phy2-ap1 phy00.1-ap1 phy01.1-ap1 phy02.1-ap1'
+for iface in $guest_ifaces; do
 	ip link show "$iface" >/dev/null 2>&1 || continue
 	port="$(ppe_port_for_iface "$iface")"
 	case "$port" in ''|*[!0-9]*) continue;; esac

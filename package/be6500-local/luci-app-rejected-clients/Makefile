@@ -1,7 +1,7 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=luci-app-rejected-clients
-PKG_RELEASE:=10
+PKG_RELEASE:=11
 PKG_MAINTAINER:=Codex
 
 include $(INCLUDE_DIR)/package.mk
@@ -71,12 +71,14 @@ define Package/luci-app-rejected-clients/install
 	$(INSTALL_BIN) ./root/etc/init.d/be6500-fw4-multiwan $(1)/etc/init.d/be6500-fw4-multiwan
 	$(INSTALL_BIN) ./root/etc/init.d/be6500-guest-qos $(1)/etc/init.d/be6500-guest-qos
 	$(INSTALL_BIN) ./root/etc/init.d/be6500-fw4-flow-offload $(1)/etc/init.d/be6500-fw4-flow-offload
+	$(INSTALL_BIN) ./root/etc/init.d/be6500-accel $(1)/etc/init.d/be6500-accel
 	$(INSTALL_DIR) $(1)/etc/hotplug.d/iface
 	$(INSTALL_BIN) ./root/etc/hotplug.d/iface/95-be6500-fw4-multiwan $(1)/etc/hotplug.d/iface/95-be6500-fw4-multiwan
 	$(INSTALL_BIN) ./root/etc/hotplug.d/iface/96-be6500-guest-qos $(1)/etc/hotplug.d/iface/96-be6500-guest-qos
 	$(INSTALL_DIR) $(1)/usr/sbin
 	$(INSTALL_BIN) ./root/usr/sbin/be6500-switch-wifi-mode $(1)/usr/sbin/be6500-switch-wifi-mode
 	$(INSTALL_BIN) ./root/usr/sbin/be6500-qos-apply $(1)/usr/sbin/be6500-qos-apply
+	$(INSTALL_BIN) ./root/usr/sbin/be6500-accel-apply $(1)/usr/sbin/be6500-accel-apply
 	$(INSTALL_DIR) $(1)/sbin
 	$(INSTALL_BIN) ./root/sbin/tempinfo $(1)/sbin/tempinfo
 	$(INSTALL_DIR) $(1)/usr/share/rpcd/acl.d

@@ -1,0 +1,17 @@
+--- a/ecm_classifier_dscp.c
++++ b/ecm_classifier_dscp.c
+@@ -367,9 +367,12 @@ static void ecm_classifier_dscp_process(
+ 	/*
+ 	 * Was a DSCP rule enabled for the flow using the iptables 'DSCP'
+ 	 * target?
++	 *
++	 * Mainline/OpenWrt's conntrack extension does not carry QSDK's
++	 * nf_conntrack_dscpremark_ext_get_dscp_rule_validity() helper.  The
++	 * direction flags contain the same information needed here.
+ 	 */
+-	if (nf_conntrack_dscpremark_ext_get_dscp_rule_validity(ct)
+-				== NF_CT_DSCPREMARK_EXT_RULE_VALID) {
++	if ((dscpcte->flow_set_flags | dscpcte->return_set_flags) & NF_CT_DSCPREMARK_EXT_DSCP) {
+ 		DEBUG_TRACE("%px: DSCP remark extension is valid\n", cdscpi);
+ 		dscp_marked = true;
+ 	}

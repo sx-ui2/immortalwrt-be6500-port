@@ -313,6 +313,7 @@ service_started() {
 	config_get_bool proxy_enabled "proxy" "enabled" 0
 	if [ "$proxy_enabled" = 0 ]; then
 		log "Proxy" "Disabled."
+		[ -x /usr/sbin/be6500-accel-apply ] && /usr/sbin/be6500-accel-apply >/dev/null 2>&1 &
 		return
 	fi
 	# get config
@@ -439,10 +440,12 @@ service_started() {
 			log "App" "Exit."
 		fi
 	fi
+	[ -x /usr/sbin/be6500-accel-apply ] && /usr/sbin/be6500-accel-apply >/dev/null 2>&1 &
 }
 
 service_stopped() {
 	cleanup
+	[ -x /usr/sbin/be6500-accel-apply ] && /usr/sbin/be6500-accel-apply >/dev/null 2>&1 &
 }
 
 reload_service() {

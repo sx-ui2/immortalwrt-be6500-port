@@ -17,7 +17,8 @@ define Device/jdcloud_be6500
 			kmod-dsa-qca8k \
 			kmod-qca-ssdk \
 			kmod-qca-nss-dp \
-		be6500-oem-wifi-firmware \
+			kmod-qca-nss-ecm \
+			be6500-oem-wifi-firmware \
 		luci-app-rejected-clients \
 		be6500-current-config \
 		openssh-sftp-server \

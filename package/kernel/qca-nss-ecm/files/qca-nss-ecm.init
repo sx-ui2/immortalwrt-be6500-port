@@ -1,0 +1,20 @@
+#!/bin/sh /etc/rc.common
+
+# Module lifecycle is controlled by be6500-accel so Nikki can switch to the
+# mark-aware fw4 direct-flow fallback without racing an already accelerated
+# transparent-proxy connection.
+START=26
+STOP=89
+
+start() {
+	return 0
+}
+
+stop() {
+	[ -d /sys/module/ecm ] || return 0
+	[ -w /sys/kernel/debug/ecm/front_end_ipv4_stop ] && echo 1 > /sys/kernel/debug/ecm/front_end_ipv4_stop
+	[ -w /sys/kernel/debug/ecm/front_end_ipv6_stop ] && echo 1 > /sys/kernel/debug/ecm/front_end_ipv6_stop
+	[ -w /sys/kernel/debug/ecm/ecm_db/defunct_all ] && echo 1 > /sys/kernel/debug/ecm/ecm_db/defunct_all
+	sleep 1
+	rmmod ecm 2>/dev/null || true
+}

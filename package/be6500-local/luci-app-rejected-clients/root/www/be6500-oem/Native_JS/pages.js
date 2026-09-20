@@ -1022,10 +1022,16 @@
         state.rejected = asArray(items[0].data || items[0].rejected_list);
         state.rejectedAccess = items[1] || { enable: 0, macpolicy: 'deny' };
         var policy = state.rejectedAccess.macpolicy === 'allow' ? 'allow' : 'deny';
+        var activeList = asArray(policy === 'allow' ? state.rejectedAccess.whitelist : state.rejectedAccess.blacklist);
+        var activeMacs = {};
+        activeList.forEach(function (entry) { activeMacs[normalizeMac(entry.mac || entry.macaddr)] = true; });
         id('rejected-list').innerHTML = state.rejected.length ? state.rejected.map(function (item, index) {
           var address = '<code>' + esc(item.mac || item.uid || '') + '</code>' + (item.ip ? '<small>' + esc(item.ip) + '</small>' : '');
-          var action = policy === 'allow' ? '加入白名单' : '移出黑名单';
-          return '<ul class="native-table-row" data-rejected-index="' + index + '"><li style="width:16%"><b>' + esc(deviceDisplayName(item.name, item.mac || item.uid)) + '</b></li><li style="width:18%">' + address + '</li><li style="width:12%">' + esc(item.device_type || '其他设备') + '</li><li style="width:15%">' + esc(item.vendor || item.brand || '暂未识别') + '</li><li style="width:11%"><b>' + esc(item.network || '主 Wi-Fi') + '</b><small>' + esc(item.band || '') + '</small></li><li style="width:16%">' + esc(item.rejected_at || '-') + '</li><li style="width:12%"><button class="edit rejected-policy">' + action + '</button><button class="edit rejected-clear">清除</button></li></ul>';
+          var itemMac = normalizeMac(item.mac || item.uid);
+          var alreadyResolved = policy === 'allow' ? activeMacs[itemMac] : !activeMacs[itemMac];
+          var action = alreadyResolved ? (policy === 'allow' ? '已在白名单' : '已移出黑名单') : (policy === 'allow' ? '加入白名单' : '移出黑名单');
+          var actionButton = '<button class="edit rejected-policy"' + (alreadyResolved ? ' disabled' : '') + '>' + action + '</button>';
+          return '<ul class="native-table-row" data-rejected-index="' + index + '"><li style="width:16%"><b>' + esc(deviceDisplayName(item.name, item.mac || item.uid)) + '</b></li><li style="width:18%">' + address + '</li><li style="width:12%">' + esc(item.device_type || '其他设备') + '</li><li style="width:15%">' + esc(item.vendor || item.brand || '暂未识别') + '</li><li style="width:11%"><b>' + esc(item.network || '主 Wi-Fi') + '</b><small>' + esc(item.band || '') + '</small></li><li style="width:16%">' + esc(item.rejected_at || '-') + '</li><li style="width:12%">' + actionButton + '<button class="edit rejected-clear">清除</button></li></ul>';
         }).join('') : '<div class="native-empty">暂无被访问控制拒绝的设备</div>';
         document.querySelectorAll('.rejected-policy').forEach(function (button) {
           bindClick(button, function () {

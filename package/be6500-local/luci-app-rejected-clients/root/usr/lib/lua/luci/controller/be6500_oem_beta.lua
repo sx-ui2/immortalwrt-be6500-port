@@ -2770,6 +2770,13 @@ local function extended_jdcapi(method, args, uci)
         end
         return true, { status = 0, message = apply_message }
     elseif method == "web_get_rejected_list" or method == "get_rejected_devices" then
+        -- The log file is intentionally persistent, but its rows must reflect
+        -- the policy that is active now.  Reconcile on every read as well as
+        -- after a save so an already-allowed client cannot remain displayed
+        -- merely because its whitelist entry was written by another UI/API.
+        if not reconcile_wifi_reject_rows(uci) then
+            return true, { status = 1, message = "拒绝记录同步清理失败" }
+        end
         local rows = wifi_reject_rows(uci)
         return true, { status = 0, data = rows, rejected_list = rows }
     elseif method == "clear_rejected_devices" then

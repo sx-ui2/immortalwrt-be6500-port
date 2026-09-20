@@ -10,4 +10,10 @@ if [ -x /etc/init.d/be6500-fw4-flow-offload ]; then
 fi
 [ -x /etc/init.d/be6500-fw4-multiwan ] && /etc/init.d/be6500-fw4-multiwan enable
 [ -x /etc/init.d/be6500-guest-qos ] && /etc/init.d/be6500-guest-qos enable
+[ -x /etc/init.d/qca-nss-ecm ] && /etc/init.d/qca-nss-ecm enable
+[ -x /etc/init.d/be6500-accel ] && /etc/init.d/be6500-accel enable
+# Apply the selected acceleration path on the first clean boot as well.  This
+# script runs before firewall; be6500-accel therefore only commits the desired
+# UCI mode here, while the enabled service loads ECM once the kernel is ready.
+[ -x /usr/sbin/be6500-accel-apply ] && /usr/sbin/be6500-accel-apply >/dev/null 2>&1 || true
 exit 0
