@@ -1,7 +1,7 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=qca-nss-ecm
-PKG_RELEASE:=2
+PKG_RELEASE:=3
 
 # Keep ECM on the same QSDK 14.0 r9 release line as qca-nss-ppe.  This tree
 # contains the IPQ5332 PPE front end and the Linux 6.6 compatibility work.
@@ -24,12 +24,15 @@ define KernelPackage/qca-nss-ecm
   SUBMENU:=Network Support
   TITLE:=Qualcomm PPE Enhanced Connection Manager
   DEPENDS:=@TARGET_qualcommax +kmod-qca-nss-ppe +kmod-qca-nss-ppe-vp +kmod-nf-conntrack +kmod-ppp +kmod-pppoe
-  FILES:=$(PKG_BUILD_DIR)/ecm.ko
+  FILES:= \
+	$(PKG_BUILD_DIR)/ecm.ko \
+	$(PKG_BUILD_DIR)/examples/ecm_ae_select.ko
 endef
 
 define KernelPackage/qca-nss-ecm/Description
   QSDK Enhanced Connection Manager using the Qualcomm PPE acceleration front
-  end.  This is the IPQ53xx equivalent of the vendor firmware fast-path logic.
+  end.  The external AE selector lets individual limited clients stay on the
+  software path while unrelated connections remain on the PPE fast path.
 endef
 
 define KernelPackage/qca-nss-ecm/conffiles

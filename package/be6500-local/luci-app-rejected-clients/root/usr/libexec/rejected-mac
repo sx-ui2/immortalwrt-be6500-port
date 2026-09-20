@@ -555,30 +555,20 @@ network_save() {
 apply_limits() {
 	nft delete table inet device_limits >/dev/null 2>&1 || true
 	nft add table inet device_limits; nft 'add chain inet device_limits forward { type filter hook forward priority - 2; policy accept; }'
-	flow_exclude=/etc/nftables.d/device-manager-flow-exclude.nft
-	limited_v4='0.0.0.0'
-	limited_v6='::'
 	for s in $(uci show "$CONFIG" 2>/dev/null | sed -n "s/^$CONFIG\.\([^.=]*\)=limit$/\1/p"); do
 		mac="$(uci -q get $CONFIG.$s.mac)"; down="$(uci -q get $CONFIG.$s.down)"; up="$(uci -q get $CONFIG.$s.up)"
 		ip="$(awk -v m="$mac" 'toupper($2)==toupper(m){print $3;exit}' /tmp/dhcp.leases)"
 		ip6s="$(ip -6 neigh show 2>/dev/null | awk -v m="$mac" 'toupper($0) ~ toupper(m) && $1 !~ /^fe80:/ && $1 !~ /^ff/ {print $1}' | sort -u)"
 		if [ -n "$ip" ]; then
-			case ",$limited_v4," in *",$ip,"*) ;; *) limited_v4="$limited_v4, $ip";; esac
 			[ "${down:-0}" -gt 0 ] && nft add rule inet device_limits forward ip daddr "$ip" limit rate over "$(((down+7)/8))" kbytes/second counter drop
 			[ "${up:-0}" -gt 0 ] && nft add rule inet device_limits forward ip saddr "$ip" limit rate over "$(((up+7)/8))" kbytes/second counter drop
 		fi
 		for ip6 in $ip6s; do
-			case ",$limited_v6," in *",$ip6,"*) ;; *) limited_v6="$limited_v6, $ip6";; esac
 			[ "${down:-0}" -gt 0 ] && nft add rule inet device_limits forward ip6 daddr "$ip6" limit rate over "$(((down+7)/8))" kbytes/second counter drop
 			[ "${up:-0}" -gt 0 ] && nft add rule inet device_limits forward ip6 saddr "$ip6" limit rate over "$(((up+7)/8))" kbytes/second counter drop
 		done
 	done
-	{
-		printf 'define dm_limited_v4 = { %s }\n' "$limited_v4"
-		printf 'define dm_limited_v6 = { %s }\n' "$limited_v6"
-	} > "$flow_exclude"
 	run_limit_hooks
-	/etc/init.d/firewall reload >/dev/null 2>&1 || true
 }
 
 run_limit_hooks() {

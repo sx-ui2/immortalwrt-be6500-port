@@ -4,8 +4,16 @@
 # they run on a clean image before firewall and network services come up.
 [ -x /etc/init.d/be6500-fw4-multiwan ] && /etc/init.d/be6500-fw4-multiwan enable
 [ -x /etc/init.d/be6500-guest-qos ] && /etc/init.d/be6500-guest-qos enable
-# The board controller owns ECM so the VLAN/PPPoE managers and physical-port
-# PPE scheduler are ready before the acceleration front end is loaded.
-[ -x /etc/init.d/qca-nss-ecm ] && /etc/init.d/qca-nss-ecm disable
-[ -x /etc/init.d/be6500-accel ] && /etc/init.d/be6500-accel enable
+# ECM is the only owner of the Qualcomm connection fast path. Remove service
+# links left by development images that used a separate WAN hotplug controller.
+[ -x /etc/init.d/be6500-accel ] && /etc/init.d/be6500-accel disable
+rm -f /etc/init.d/be6500-accel \
+	/etc/hotplug.d/iface/97-be6500-accel \
+	/usr/sbin/be6500-accel-apply
+[ -x /etc/init.d/qca-nss-ecm ] && /etc/init.d/qca-nss-ecm enable
+
+uci -q delete be6500_oem.accel
+uci -q set firewall.@defaults[0].flow_offloading=0
+uci -q set firewall.@defaults[0].flow_offloading_hw=0
+uci -q commit firewall
 exit 0

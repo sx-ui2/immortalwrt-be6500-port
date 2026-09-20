@@ -1,0 +1,55 @@
+--- a/examples/ecm_ae_select.c
++++ b/examples/ecm_ae_select.c
+@@ -83,20 +83,34 @@ static struct ecm_ae_select_test_rule *ec
+ 	struct ecm_ae_select_test_rule *rule = NULL;
+ 
+ 	list_for_each_entry(rule, &ecm_ae_select_test_rules, list) {
++		bool proto_match = !rule->proto || rule->proto == proto;
++		bool src_port_match = !rule->src_port || rule->src_port == src_port;
++		bool dest_port_match = !rule->dest_port || rule->dest_port == dest_port;
+ 
+ 		if (ip_version == IPV6) {
+-			if (rule->proto == proto && rule->src_port == src_port
+-				&& rule->dest_port == dest_port && ip_version == rule->ip_version
++			bool src_addr_match;
++			bool dest_addr_match;
++
++			src_addr_match = ipv6_addr_any(&rule->src_addr.v6_addr) ||
++				ipv6_addr_equal(&rule->src_addr.v6_addr, src_addr6);
++			dest_addr_match = ipv6_addr_any(&rule->dest_addr.v6_addr) ||
++				ipv6_addr_equal(&rule->dest_addr.v6_addr, dest_addr6);
++
++			if (proto_match && src_port_match && dest_port_match
++				&& ip_version == rule->ip_version
+ 				&& src_addr == NULL && dest_addr == NULL
+-				&& ipv6_addr_equal(&rule->src_addr.v6_addr, src_addr6)
+-				&& ipv6_addr_equal(&rule->dest_addr.v6_addr, dest_addr6))
++				&& src_addr_match && dest_addr_match)
+ 				return rule;
+ 		} else 	{
+-			if (rule->proto == proto && rule->src_port == src_port
+-				&& rule->dest_port == dest_port && ip_version == rule->ip_version
++			bool src_addr_match = !rule->src_addr.v4_addr ||
++				rule->src_addr.v4_addr == *src_addr;
++			bool dest_addr_match = !rule->dest_addr.v4_addr ||
++				rule->dest_addr.v4_addr == *dest_addr;
++
++			if (proto_match && src_port_match && dest_port_match
++				&& ip_version == rule->ip_version
+ 				&& src_addr6 == NULL && dest_addr6 == NULL
+-				&& rule->src_addr.v4_addr == *src_addr
+-				&& rule->dest_addr.v4_addr == *dest_addr)
++				&& src_addr_match && dest_addr_match)
+ 				return rule;
+ 		}
+ 	}
+@@ -311,4 +325,9 @@ static bool ecm_ae_select_test_rule_buffe
+ 	 * <0=del,1=add>/<proto>/<src_addr>/<src_port>/<dest_addr>/<dest_port>/<2= ECM_AE_CLASSIFIER_RESULT_SFE, 3= ECM_AE_CLASSIFIER_RESULT_PPE_VP, 4= ECM_AE_CLASSIFIER_RESULT_PPE_DS, 5= ECM_AE_CLASSIFIER_RESULT_NONE 7= ECM_AE_CLASSIFIER_RESULT_DONT_CARE>
+ 	 *
++	 * A zero protocol, port or address is a wildcard.  For example, these two
++	 * rules keep every flow to and from one limited client off the PPE fast path:
++	 * "1/0/192.168.1.100/0/0.0.0.0/0/5"
++	 * "1/0/0.0.0.0/0/192.168.1.100/0/5"
++	 *
+ 	 * Buffer example:
+ 	 * "1/17/192.168.1.254/1235/192.168.1.251/1234/2"

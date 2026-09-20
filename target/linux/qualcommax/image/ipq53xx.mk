@@ -21,7 +21,6 @@ define Device/jdcloud_be6500
 			kmod-qca-nss-ppe-bridge-mgr \
 			kmod-qca-nss-ppe-vlan-mgr \
 			kmod-qca-nss-ppe-pppoe-mgr \
-			kmod-qca-nss-ppe-qdisc \
 			kmod-qca-nss-ppe-ath-clients \
 			kmod-qca-nss-wifi-plugins \
 			kmod-qca-nss-ecm \
