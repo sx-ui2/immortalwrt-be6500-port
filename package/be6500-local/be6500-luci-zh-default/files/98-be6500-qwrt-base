@@ -95,6 +95,9 @@ uci -q set wireless.radio0.channel='1'
 uci -q set wireless.radio1.channel='auto'
 uci -q set wireless.radio2.channel='auto'
 for section in default_radio0 default_radio1 default_radio2; do
+	# Main LAN APs must never inherit hostapd client isolation. Guest APs are
+	# isolated separately when they are created.
+	uci -q set wireless.$section.isolate='0'
 	current_ssid="$(uci -q get wireless.$section.ssid)"
 	case "$current_ssid" in
 		OpenWrt|ImmortalWrt|'')

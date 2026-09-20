@@ -435,6 +435,7 @@ local function ensure_wifi_iface(uci, device, role)
         mode = "ap",
         ssid = role == "guest" and "JDCloud-Guest" or "JDCloud-BE6500",
         encryption = "psk2",
+        isolate = role == "guest" and "1" or "0",
         be6500_role = role
     }
     return uci:section("wireless", "wifi-iface", section_name, values)
