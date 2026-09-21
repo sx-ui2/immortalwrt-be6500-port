@@ -9,8 +9,18 @@
 [ -x /etc/init.d/be6500-accel ] && /etc/init.d/be6500-accel disable
 rm -f /etc/init.d/be6500-accel \
 	/etc/hotplug.d/iface/97-be6500-accel \
-	/usr/sbin/be6500-accel-apply
+	/usr/sbin/be6500-accel-apply \
+	/etc/device-manager/limit-hooks.d/10-ecm-device-limit
 [ -x /etc/init.d/qca-nss-ecm ] && /etc/init.d/qca-nss-ecm enable
+
+# Remove the two obsolete limiters used by development images. HTB/SFE is now
+# the sole owner of client and guest shaping, matching JDCOS behavior.
+nft delete table inet device_limits >/dev/null 2>&1 || true
+nft delete table inet be6500_guest_qos >/dev/null 2>&1 || true
+if [ "$(uci -q get sqm.eth1.interface)" = br-guest ]; then
+	uci -q set sqm.eth1.enabled=0
+	uci -q commit sqm
+fi
 
 uci -q delete be6500_oem.accel
 uci -q set firewall.@defaults[0].flow_offloading=0

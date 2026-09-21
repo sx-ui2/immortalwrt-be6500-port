@@ -1,106 +1,203 @@
 #!/bin/sh
 
-# Qualcomm PPE hardware shaper for the guest SSID.
+# JDCOS-compatible client and guest shaping.
 #
-# Do not add nft "limit rate" rules here: after fw4 adds a connection to the
-# hardware flowtable they only see the first packet.  qca-nss-ppe-vp exposes a
-# Wi-Fi BSS as a PPE virtual port; SSDK's port ingress/egress shapers continue
-# to apply to accelerated traffic.
+# The factory firmware does not mix PPE forwarding with per-client policing.
+# If at least one client/guest limit is configured it switches ECM to SFE and
+# applies HTB classes to the WAN uplink and the LAN/guest downlink. With no
+# configured limits the qdiscs are removed and ECM returns to AUTO (PPE).
 
-state=/tmp/be6500-guest-qos.ok
-ports_state=/tmp/be6500-guest-qos.ports
-map_debug=/sys/kernel/debug/qca-nss-ppe/ppe_drv_if_map/ppe_if_map
-map_node=/dev/qca-nss-ppe/ppe_if_map
+CONFIG=device_manager
+STATE=/tmp/be6500-qos.devices
+OK=/tmp/be6500-guest-qos.ok
+RULES=/tmp/be6500-qos.rules.$$
+LOCK=/var/run/be6500-qos.lock
+MAX_RATE=10000mbit
 
-rm -f "$state"
-nft delete table inet be6500_guest_qos >/dev/null 2>&1 || true
+mkdir "$LOCK" 2>/dev/null || exit 0
+trap 'rm -f "$RULES"; rmdir "$LOCK" 2>/dev/null' EXIT INT TERM
+rm -f "$OK"
 
-valid_rate() {
-	awk -v value="$1" 'BEGIN { exit !(value ~ /^[0-9]+([.][0-9]+)?$/ && value >= 0) }'
+is_uint() {
+	case "$1" in ''|*[!0-9]*) return 1;; *) return 0;; esac
 }
 
-disable_previous_ports() {
-	[ -r "$ports_state" ] || return 0
-	while read -r port; do
-		case "$port" in ''|*[!0-9]*) continue;; esac
-		/usr/sbin/ssdk_sh rate ptEgress set "$port" 0 disable >/dev/null 2>&1 || true
-		/usr/sbin/ssdk_sh rate ptIngress set "$port" 0 disable >/dev/null 2>&1 || true
-	done < "$ports_state"
-	rm -f "$ports_state"
+mbit_to_kbit() {
+	awk -v value="$1" 'BEGIN {
+		if (value !~ /^[0-9]+([.][0-9]+)?$/ || value < 0) exit 1
+		printf "%.0f", value * 1000
+	}'
 }
 
-ppe_map_dump() {
-	[ -r "$map_debug" ] || return 1
-	major="$(cat "$map_debug" 2>/dev/null)"
-	case "$major" in ''|*[!0-9]*) return 1;; esac
-	mkdir -p /dev/qca-nss-ppe 2>/dev/null || return 1
-	[ -c "$map_node" ] || mknod "$map_node" c "$major" 0 2>/dev/null || return 1
-	cat "$map_node" 2>/dev/null
+wan_device() {
+	local dev
+	dev="$(ubus call network.interface.wan status 2>/dev/null | jsonfilter -e '@.l3_device' 2>/dev/null)"
+	[ -n "$dev" ] || dev="$(ubus call network.interface.wan status 2>/dev/null | jsonfilter -e '@.device' 2>/dev/null)"
+	[ -n "$dev" ] || dev="$(uci -q get network.wan.device)"
+	printf '%s\n' "$dev"
 }
 
-ppe_port_for_iface() {
-	ppe_map_dump | awk -F= -v wanted="$1" '
-		/\.netdev_name=/ { active = ($2 == wanted); next }
-		active && /\.port_number=/ { print $2; exit }
-	'
+bridge_for_v4() {
+	local dev
+	dev="$(ip -4 route get "$1" 2>/dev/null | sed -n 's/.* dev \([^ ]*\).*/\1/p' | head -n1)"
+	case "$dev" in br-guest) echo br-guest;; *) echo br-lan;; esac
 }
 
-enabled="$(uci -q get be6500_oem.guest_qos.enabled)"
-upload="$(uci -q get be6500_oem.guest_qos.upload)"
-download="$(uci -q get be6500_oem.guest_qos.download)"
-
-disable_previous_ports
-[ "$enabled" = 1 ] || { touch "$state"; exit 0; }
-valid_rate "$upload" && valid_rate "$download" || {
-	echo '访客限速配置无效' >&2
-	exit 1
-}
-[ -x /usr/sbin/ssdk_sh ] || {
-	echo 'Qualcomm SSDK shaper 未安装' >&2
-	exit 1
+cleanup_qdiscs() {
+	[ -r "$STATE" ] || return 0
+	while IFS= read -r dev; do
+		[ -n "$dev" ] || continue
+		tc qdisc del dev "$dev" root handle 1: >/dev/null 2>&1 || true
+	done < "$STATE"
+	rm -f "$STATE"
 }
 
-# Only active guest BSSes are shaped.  QSDK names these interfaces differently
-# from upstream mac80211 (for example phy00.1-ap1), so derive the real netdevs
-# from UCI/netifd instead of assuming phy0-ap1.  De-duplicate PPE port IDs
-# because the driver can expose aliases for one VAP.
-ports=''
-guest_ifaces="$(ubus call network.wireless status 2>/dev/null | jsonfilter -e '@.*.interfaces[@.config.network="guest"].ifname' 2>/dev/null | tr ' ' '\n')"
-[ -n "$guest_ifaces" ] || guest_ifaces="$(
-	for section in $(uci -q show wireless | sed -n 's/^wireless\.\([^.=]*\)=wifi-iface$/\1/p'); do
-		[ "$(uci -q get wireless.$section.network)" = guest ] || continue
-		uci -q get wireless.$section.ifname
+set_engine() {
+	local wanted="$1" current
+	current="$(uci -q get ecm.global.acceleration_engine)"
+	[ "${current:-auto}" = "$wanted" ] && return 0
+	uci -q set ecm.global.acceleration_engine="$wanted" || return 1
+	uci -q commit ecm || return 1
+	/etc/init.d/qca-nss-ecm reload >/dev/null 2>&1 || {
+		logger -t be6500-qos "ECM failed to switch from ${current:-auto} to $wanted"
+		return 1
+	}
+	logger -t be6500-qos "ECM acceleration engine switched to $wanted"
+}
+
+defunct_ip() {
+	local ip="$1" path version any
+	case "$ip" in *:*) version=6; any='::';; *) version=4; any='0.0.0.0';; esac
+	for path in /proc/sys/net/ecm/defunct_by_5tuple_mask /sys/kernel/debug/ecm/defunct_by_5tuple_mask; do
+		[ -w "$path" ] || continue
+		printf 'ip_ver=%s sip=%s sport=0 dip=%s dport=0 protocol=0\n' "$version" "$ip" "$any" > "$path" 2>/dev/null || true
+		printf 'ip_ver=%s sip=%s sport=0 dip=%s dport=0 protocol=0\n' "$version" "$any" "$ip" > "$path" 2>/dev/null || true
 	done
-)"
-[ -n "$guest_ifaces" ] || guest_ifaces='phy0-ap1 phy1-ap1 phy2-ap1 phy00.1-ap1 phy01.1-ap1 phy02.1-ap1'
-for iface in $guest_ifaces; do
-	ip link show "$iface" >/dev/null 2>&1 || continue
-	port="$(ppe_port_for_iface "$iface")"
-	case "$port" in ''|*[!0-9]*) continue;; esac
-	case " $ports " in *" $port "*) ;; *) ports="$ports $port";; esac
+}
+
+add_rule() {
+	# IP, downlink device, download kbit/s, upload kbit/s
+	local ip="$1" dev="$2" down="$3" up="$4"
+	[ -n "$ip" ] && [ -n "$dev" ] || return 0
+	grep -Fqx "$ip$(printf '\t')$dev$(printf '\t')$down$(printf '\t')$up" "$RULES" 2>/dev/null || \
+		printf '%s\t%s\t%s\t%s\n' "$ip" "$dev" "$down" "$up" >> "$RULES"
+}
+
+explicit_macs=''
+configured=0
+: > "$RULES"
+
+for section in $(uci show "$CONFIG" 2>/dev/null | sed -n "s/^$CONFIG\.\([^.=]*\)=limit$/\1/p"); do
+	mac="$(uci -q get "$CONFIG.$section.mac" | tr 'a-f' 'A-F')"
+	down="$(uci -q get "$CONFIG.$section.down")"
+	up="$(uci -q get "$CONFIG.$section.up")"
+	is_uint "$down" || down=0
+	is_uint "$up" || up=0
+	[ "$down" -gt 0 ] || [ "$up" -gt 0 ] || continue
+	configured=1
+	explicit_macs="$explicit_macs $mac"
+
+	ipv4="$(awk -v m="$mac" 'toupper($2)==m { print $3; exit }' /tmp/dhcp.leases 2>/dev/null)"
+	[ -z "$ipv4" ] || add_rule "$ipv4" "$(bridge_for_v4 "$ipv4")" "$down" "$up"
+
+	ip -6 neigh show 2>/dev/null | awk -v m="$mac" \
+		'toupper($0) ~ m && $1 !~ /^(fe80:|ff)/ { print $1 "\t" $3 }' | sort -u | \
+	while IFS="$(printf '\t')" read -r ipv6 dev; do
+		case "$dev" in br-guest) ;; *) dev=br-lan;; esac
+		add_rule "$ipv6" "$dev" "$down" "$up"
+	done
 done
-set -- $ports
-count=$#
-if [ "$count" -eq 0 ]; then
-	# WLAN/PPE virtual ports come up after firewall on a cold boot.  The
-	# interface hotplug hook retries after the BSS appears.
-	echo '等待 Qualcomm PPE 无线虚拟端口就绪' >&2
-	exit 1
+
+guest_enabled="$(uci -q get be6500_oem.guest_qos.enabled)"
+guest_up="$(mbit_to_kbit "$(uci -q get be6500_oem.guest_qos.upload)" 2>/dev/null)" || guest_up=0
+guest_down="$(mbit_to_kbit "$(uci -q get be6500_oem.guest_qos.download)" 2>/dev/null)" || guest_down=0
+if [ "$guest_enabled" = 1 ] && { [ "$guest_down" -gt 0 ] || [ "$guest_up" -gt 0 ]; }; then
+	configured=1
+	while read -r _ mac ip _; do
+		[ -n "$ip" ] || continue
+		[ "$(bridge_for_v4 "$ip")" = br-guest ] || continue
+		mac="$(printf '%s' "$mac" | tr 'a-f' 'A-F')"
+		case " $explicit_macs " in *" $mac "*) continue;; esac
+		add_rule "$ip" br-guest "$guest_down" "$guest_up"
+	done < /tmp/dhcp.leases
+
+	# DHCPv6 leases are not always present. Use the neighbour table for active
+	# guest clients and keep the factory rule that an explicit client limit wins.
+	ip -6 neigh show dev br-guest 2>/dev/null | awk '$1 !~ /^(fe80:|ff)/ && $5 != "" { print $1 "\t" toupper($5) }' | \
+	while IFS="$(printf '\t')" read -r ipv6 mac; do
+		case " $explicit_macs " in *" $mac "*) continue;; esac
+		add_rule "$ipv6" br-guest "$guest_down" "$guest_up"
+	done
 fi
 
-# The UI limit is aggregate.  A shaper is per BSS port, so divide it across
-# active radio ports rather than silently allowing N times the requested rate.
-upload_kbit="$(awk -v v="$upload" -v n="$count" 'BEGIN { printf "%d", (v * 1000 + n - 1) / n }')"
-download_kbit="$(awk -v v="$download" -v n="$count" 'BEGIN { printf "%d", (v * 1000 + n - 1) / n }')"
-for port in "$@"; do
-	if [ "$download_kbit" -gt 0 ]; then
-		/usr/sbin/ssdk_sh rate ptEgress set "$port" "$download_kbit" enable >/dev/null 2>&1 || exit 1
-	fi
-	if [ "$upload_kbit" -gt 0 ]; then
-		/usr/sbin/ssdk_sh rate ptIngress set "$port" "$upload_kbit" enable >/dev/null 2>&1 || exit 1
-	fi
-	echo "$port" >> "$ports_state"
-done
+# Remove only qdiscs previously installed by this service. This also clears
+# stale shaping from an old WAN device after PPPoE reconnects.
+cleanup_qdiscs
 
-touch "$state"
+if [ "$configured" = 0 ]; then
+	set_engine auto || exit 1
+	touch "$OK"
+	exit 0
+fi
+
+set_engine sfe || exit 1
+
+wan="$(wan_device)"
+[ -n "$wan" ] || {
+	echo 'WAN 接口尚未就绪，限速规则将在联网后自动重试' >&2
+	exit 1
+}
+
+setup_root() {
+	local dev="$1"
+	ip link show "$dev" >/dev/null 2>&1 || return 1
+	tc qdisc replace dev "$dev" root handle 1: htb default 1 >/dev/null 2>&1 || return 1
+	grep -Fqx "$dev" "$STATE" 2>/dev/null || printf '%s\n' "$dev" >> "$STATE"
+	tc class replace dev "$dev" parent 1: classid 1:1 htb rate "$MAX_RATE" ceil "$MAX_RATE" \
+		burst 1m cburst 1m quantum 60000 >/dev/null 2>&1 || return 1
+}
+
+next_class=10
+ensure_device() {
+	local dev="$1"
+	grep -Fqx "$dev" "$STATE" 2>/dev/null && return 0
+	setup_root "$dev"
+}
+
+install_class() {
+	local dev="$1" ip="$2" direction="$3" rate="$4" proto match class
+	[ "$rate" -gt 0 ] || return 0
+	ensure_device "$dev" || return 1
+	class="$next_class"
+	next_class=$((next_class + 1))
+	tc class add dev "$dev" parent 1:1 classid "1:$class" htb \
+		rate "${rate}kbit" ceil "${rate}kbit" burst 64k cburst 64k quantum 1514 >/dev/null 2>&1 || return 1
+	case "$ip" in
+		*:*) proto=ipv6; match="match ip6 $direction $ip/128";;
+		*) proto=ip; match="match ip $direction $ip/32";;
+	esac
+	# Word splitting of $match is intentional: tc's u32 parser requires each
+	# selector as a separate argument.
+	# shellcheck disable=SC2086
+	tc filter add dev "$dev" parent 1: protocol "$proto" pref "$class" u32 \
+		$match flowid "1:$class" >/dev/null 2>&1 || return 1
+}
+
+while IFS="$(printf '\t')" read -r ip down_dev down up; do
+	[ -n "$ip" ] || continue
+	install_class "$down_dev" "$ip" dst "$down" || {
+		echo "无法为 $ip 安装下载限速" >&2
+		cleanup_qdiscs
+		exit 1
+	}
+	install_class "$wan" "$ip" src "$up" || {
+		echo "无法为 $ip 安装上传限速" >&2
+		cleanup_qdiscs
+		exit 1
+	}
+	defunct_ip "$ip"
+done < "$RULES"
+
+touch "$OK"
+logger -t be6500-qos "factory-style SFE/HTB QoS applied on ${wan}"
 exit 0

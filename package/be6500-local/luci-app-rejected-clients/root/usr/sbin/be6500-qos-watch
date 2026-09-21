@@ -1,0 +1,21 @@
+#!/bin/sh
+
+snapshot() {
+	{
+		uci -q show device_manager
+		uci -q show be6500_oem.guest_qos
+		cat /tmp/dhcp.leases 2>/dev/null
+		ip -6 neigh show 2>/dev/null | awk '$3 == "br-lan" || $3 == "br-guest" { print $1, $3, toupper($5) }' | sort -u
+		ubus call network.interface.wan status 2>/dev/null | jsonfilter -e '@.l3_device' 2>/dev/null
+	} | md5sum | awk '{print $1}'
+}
+
+last=''
+while :; do
+	current="$(snapshot)"
+	if [ "$current" != "$last" ]; then
+		/usr/sbin/be6500-qos-apply >/dev/null 2>&1 || true
+		last="$current"
+	fi
+	sleep 10
+done

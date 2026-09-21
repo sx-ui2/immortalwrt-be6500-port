@@ -4,7 +4,12 @@ START=96
 USE_PROCD=1
 
 start_service() {
-	/usr/sbin/be6500-qos-apply >/dev/null 2>&1
+	procd_open_instance
+	procd_set_param command /usr/sbin/be6500-qos-watch
+	procd_set_param respawn 3600 5 5
+	procd_set_param stdout 0
+	procd_set_param stderr 0
+	procd_close_instance
 }
 
 reload_service() {
@@ -12,5 +17,5 @@ reload_service() {
 }
 
 service_triggers() {
-	procd_add_reload_trigger be6500_oem network firewall
+	procd_add_reload_trigger be6500_oem device_manager network firewall ecm
 }

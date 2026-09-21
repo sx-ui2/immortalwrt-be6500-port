@@ -3,9 +3,20 @@
 START=26
 STOP=89
 
+get_front_end_mode() {
+	local engine
+	engine="$(uci -q get ecm.global.acceleration_engine)"
+	case "${engine:-auto}" in
+		auto) echo 0 ;;
+		sfe) echo 2 ;;
+		ppe) echo 3 ;;
+		ppe-sfe) echo 5 ;;
+		*) logger -t qca-nss-ecm "invalid acceleration engine: $engine"; return 1 ;;
+	esac
+}
+
 disable_flowtable() {
 	local changed=0
-
 	[ "$(uci -q get firewall.@defaults[0].flow_offloading)" = 0 ] || {
 		uci -q set firewall.@defaults[0].flow_offloading=0
 		changed=1
@@ -17,56 +28,83 @@ disable_flowtable() {
 	[ "$changed" = 0 ] || uci -q commit firewall
 }
 
-set_accel_delay() {
-	local path
+set_accel_tunables() {
+	local engine path delay=0
+	engine="$(uci -q get ecm.global.acceleration_engine)"
+	[ "$engine" = sfe ] && delay=1
+
+	# This is also present in the JDCOS 4.5.2 factory sysctl file.
+	[ ! -w /proc/sys/net/netfilter/nf_conntrack_tcp_no_window_check ] || \
+		echo 1 > /proc/sys/net/netfilter/nf_conntrack_tcp_no_window_check
 
 	for path in \
 		/proc/sys/net/ecm/ecm_classifier_default/accel_delay_pkts \
 		/sys/kernel/debug/ecm/ecm_classifier_default/accel_delay_pkts; do
-		[ -w "$path" ] && echo 0 > "$path"
+		[ -w "$path" ] && echo "$delay" > "$path"
 	done
 }
 
-start() {
+load_sfe() {
+	[ -d /sys/module/qca_nss_sfe ] && return 0
+	modprobe qca-nss-sfe >/dev/null 2>&1 || {
+		logger -t qca-nss-ecm 'unable to load qca-nss-sfe'
+		return 1
+	}
+}
+
+load_dependencies() {
 	local module
-
-	# ECM and nft flowtables are alternative connection fast paths. Keep fw4's
-	# flowtable disabled and let the Qualcomm PPE front end own acceleration.
-	disable_flowtable
-
-	# The manager modules are normally autoloaded before this service. Loading
-	# them again is harmless and also covers a manual package installation.
 	for module in qca_nss_ppe_vlan qca_nss_ppe_bridge_mgr \
 		qca_nss_ppe_pppoe_mgr; do
 		modprobe "$module" >/dev/null 2>&1 || return 1
 	done
+	load_sfe
+}
 
+start() {
+	local mode engine
+
+	# ECM and nft flowtables must not own the same connection concurrently.
+	disable_flowtable
+	load_dependencies || return 1
+
+	mode="$(get_front_end_mode)" || return 1
+	engine="$(uci -q get ecm.global.acceleration_engine)"
 	if [ ! -d /sys/module/ecm ]; then
-		# This image deliberately builds only ECM's PPE front end. AUTO (0) is
-		# valid in the vendor PPE+SFE build, but resolves to no front end here.
-		insmod "/lib/modules/$(uname -r)/ecm.ko" front_end_selection=3 \
+		insmod "/lib/modules/$(uname -r)/ecm.ko" \
+			front_end_selection="$mode" \
 			register_ip_post_routing=1 register_br_post_routing=1 || return 1
 	fi
 
-	# Normal clients return DONT_CARE here and stay on PPE.  The device-limit
-	# hook installs NONE rules only for individually limited addresses.
-	if [ ! -d /sys/module/ecm_ae_select ]; then
-		insmod "/lib/modules/$(uname -r)/ecm_ae_select.ko" || return 1
+	# The factory image only loads the L2 helper in explicit SFE mode.
+	if [ "${engine:-auto}" = sfe ] && [ ! -d /sys/module/ecm_sfe_l2 ]; then
+		modprobe ecm_sfe_l2 >/dev/null 2>&1 || true
 	fi
-	[ ! -x /etc/device-manager/limit-hooks.d/10-ecm-device-limit ] || \
-		/etc/device-manager/limit-hooks.d/10-ecm-device-limit
 
-	set_accel_delay
+	set_accel_tunables
+	logger -t qca-nss-ecm "started with ${engine:-auto} front end (mode $mode)"
 }
 
 stop() {
+	local path
 	[ -d /sys/module/ecm ] || return 0
-	rmmod ecm_ae_select 2>/dev/null || true
-	[ -w /proc/sys/net/ecm/front_end_ipv4_stop ] && echo 1 > /proc/sys/net/ecm/front_end_ipv4_stop
-	[ -w /proc/sys/net/ecm/front_end_ipv6_stop ] && echo 1 > /proc/sys/net/ecm/front_end_ipv6_stop
-	[ -w /proc/sys/net/ecm/ecm_db/defunct_all ] && echo 1 > /proc/sys/net/ecm/ecm_db/defunct_all
+
+	for path in \
+		/proc/sys/net/ecm/front_end_ipv4_stop \
+		/sys/kernel/debug/ecm/front_end_ipv4_stop \
+		/proc/sys/net/ecm/front_end_ipv6_stop \
+		/sys/kernel/debug/ecm/front_end_ipv6_stop; do
+		[ -w "$path" ] && echo 1 > "$path"
+	done
+	for path in \
+		/proc/sys/net/ecm/ecm_db/defunct_all \
+		/sys/kernel/debug/ecm/ecm_db/defunct_all; do
+		[ -w "$path" ] && echo 1 > "$path"
+	done
 	sleep 1
+	rmmod ecm_sfe_l2 2>/dev/null || true
 	rmmod ecm 2>/dev/null || true
+	rmmod qca_nss_sfe 2>/dev/null || true
 }
 
 reload() {

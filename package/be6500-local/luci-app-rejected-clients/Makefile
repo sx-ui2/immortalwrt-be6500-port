@@ -1,7 +1,7 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=luci-app-rejected-clients
-PKG_RELEASE:=20
+PKG_RELEASE:=21
 PKG_MAINTAINER:=Codex
 
 include $(INCLUDE_DIR)/package.mk
@@ -78,11 +78,10 @@ define Package/luci-app-rejected-clients/install
 	$(INSTALL_DIR) $(1)/etc/hotplug.d/iface
 	$(INSTALL_BIN) ./root/etc/hotplug.d/iface/95-be6500-fw4-multiwan $(1)/etc/hotplug.d/iface/95-be6500-fw4-multiwan
 	$(INSTALL_BIN) ./root/etc/hotplug.d/iface/96-be6500-guest-qos $(1)/etc/hotplug.d/iface/96-be6500-guest-qos
-	$(INSTALL_DIR) $(1)/etc/device-manager/limit-hooks.d
-	$(INSTALL_BIN) ./root/etc/device-manager/limit-hooks.d/10-ecm-device-limit $(1)/etc/device-manager/limit-hooks.d/10-ecm-device-limit
 	$(INSTALL_DIR) $(1)/usr/sbin
 	$(INSTALL_BIN) ./root/usr/sbin/be6500-switch-wifi-mode $(1)/usr/sbin/be6500-switch-wifi-mode
 	$(INSTALL_BIN) ./root/usr/sbin/be6500-qos-apply $(1)/usr/sbin/be6500-qos-apply
+	$(INSTALL_BIN) ./root/usr/sbin/be6500-qos-watch $(1)/usr/sbin/be6500-qos-watch
 	$(INSTALL_DIR) $(1)/sbin
 	$(INSTALL_BIN) ./root/sbin/tempinfo $(1)/sbin/tempinfo
 	$(INSTALL_DIR) $(1)/usr/share/rpcd/acl.d

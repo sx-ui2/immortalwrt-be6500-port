@@ -244,12 +244,12 @@ set_guest_limit() {
 	on="$1"; down="$2"; up="$3"
 	case "$on" in 0|1);; *) echo '限速开关无效' >&2; exit 2;; esac
 	case "$down:$up" in *[!0-9:]*|'':*|*:) echo '限速参数无效' >&2; exit 2;; esac
-	uci -q get sqm.eth1 >/dev/null || uci set sqm.eth1=queue
-	uci set sqm.eth1.interface=br-guest; uci set sqm.eth1.enabled="$on"
-	# SQM ingress is device upload and egress is device download.
-	uci set sqm.eth1.download="$up"; uci set sqm.eth1.upload="$down"
-	uci set sqm.eth1.qdisc=cake; uci set sqm.eth1.script=piece_of_cake.qos; uci set sqm.eth1.linklayer=none
-	uci commit sqm; /etc/init.d/sqm restart >/dev/null 2>&1
+	uci -q get be6500_oem.guest_qos >/dev/null || uci set be6500_oem.guest_qos=settings
+	uci set be6500_oem.guest_qos.enabled="$on"
+	uci set be6500_oem.guest_qos.download="$(awk -v v="$down" 'BEGIN { printf "%.3f", v / 1000 }')"
+	uci set be6500_oem.guest_qos.upload="$(awk -v v="$up" 'BEGIN { printf "%.3f", v / 1000 }')"
+	uci commit be6500_oem
+	/usr/sbin/be6500-qos-apply reload >/dev/null 2>&1 || { echo '访客网络限速应用失败' >&2; exit 1; }
 	echo '访客网络限速已即时保存'
 }
 
@@ -293,8 +293,10 @@ csv_to_list() {
 config_info() {
 	init_scope main; init_scope guest
 	for scope in main guest; do section="$(section_for "$scope")"; printf 'access\t%s\t%s\t%s\t%s\n' "$scope" "$(uci -q get $CONFIG.$section.mode)" "$(uci -q get $CONFIG.$section.allowlist | tr ' ' ',')" "$(uci -q get $CONFIG.$section.denylist | tr ' ' ',')"; done
-	# SQM ingress on br-guest is traffic sent by clients (device upload), while egress is traffic received by clients (device download).
-	printf 'sqm\t%s\t%s\t%s\n' "$(uci -q get sqm.eth1.enabled)" "$(uci -q get sqm.eth1.upload)" "$(uci -q get sqm.eth1.download)"
+	printf 'sqm\t%s\t%s\t%s\n' \
+		"$(uci -q get be6500_oem.guest_qos.enabled)" \
+		"$(awk -v v="$(uci -q get be6500_oem.guest_qos.download)" 'BEGIN { printf "%.0f", v * 1000 }')" \
+		"$(awk -v v="$(uci -q get be6500_oem.guest_qos.upload)" 'BEGIN { printf "%.0f", v * 1000 }')"
 	uci show "$CONFIG" 2>/dev/null | sed -n "s/^$CONFIG\.\([^.=]*\)=limit$/\1/p" | while read -r s; do printf 'limit\t%s\t%s\t%s\n' "$(uci -q get $CONFIG.$s.mac)" "$(uci -q get $CONFIG.$s.down)" "$(uci -q get $CONFIG.$s.up)"; done
 	uci show dhcp 2>/dev/null | sed -n "s/^dhcp\.\(dm_[^.=]*\)=host$/\1/p" | while read -r s; do printf 'binding\t%s\t%s\n' "$(uci -q get dhcp.$s.mac | tr 'a-f' 'A-F')" "$(uci -q get dhcp.$s.ip)"; done
 	awk '{m=toupper($2);h=$4;if(h=="*")h="";printf "known\t%s\t\t%s\t%s\n",m,$3,h}' /tmp/dhcp.leases 2>/dev/null
@@ -553,31 +555,7 @@ network_save() {
 }
 
 apply_limits() {
-	nft delete table inet device_limits >/dev/null 2>&1 || true
-	nft add table inet device_limits; nft 'add chain inet device_limits forward { type filter hook forward priority - 2; policy accept; }'
-	for s in $(uci show "$CONFIG" 2>/dev/null | sed -n "s/^$CONFIG\.\([^.=]*\)=limit$/\1/p"); do
-		mac="$(uci -q get $CONFIG.$s.mac)"; down="$(uci -q get $CONFIG.$s.down)"; up="$(uci -q get $CONFIG.$s.up)"
-		ip="$(awk -v m="$mac" 'toupper($2)==toupper(m){print $3;exit}' /tmp/dhcp.leases)"
-		ip6s="$(ip -6 neigh show 2>/dev/null | awk -v m="$mac" 'toupper($0) ~ toupper(m) && $1 !~ /^fe80:/ && $1 !~ /^ff/ {print $1}' | sort -u)"
-		if [ -n "$ip" ]; then
-			[ "${down:-0}" -gt 0 ] && nft add rule inet device_limits forward ip daddr "$ip" limit rate over "$(((down+7)/8))" kbytes/second counter drop
-			[ "${up:-0}" -gt 0 ] && nft add rule inet device_limits forward ip saddr "$ip" limit rate over "$(((up+7)/8))" kbytes/second counter drop
-		fi
-		for ip6 in $ip6s; do
-			[ "${down:-0}" -gt 0 ] && nft add rule inet device_limits forward ip6 daddr "$ip6" limit rate over "$(((down+7)/8))" kbytes/second counter drop
-			[ "${up:-0}" -gt 0 ] && nft add rule inet device_limits forward ip6 saddr "$ip6" limit rate over "$(((up+7)/8))" kbytes/second counter drop
-		done
-	done
-	run_limit_hooks
-}
-
-run_limit_hooks() {
-	hook_dir=/etc/device-manager/limit-hooks.d
-	[ -d "$hook_dir" ] || return 0
-	for hook in "$hook_dir"/*; do
-		[ -x "$hook" ] || continue
-		"$hook" >/dev/null 2>&1 || logger -t device-manager "limit hook failed: $hook"
-	done
+	/usr/sbin/be6500-qos-apply reload
 }
 
 apply_all() {
@@ -608,9 +586,10 @@ apply_all() {
 	if [ "$main_wifi_dirty" = 1 ]; then set_wifi_iface default_radio0 "$main2" "$m2ssid" "$m2enc" "$m2pass" "$m2hidden"; set_wifi_iface default_radio1 "$main5" "$m5ssid" "$m5enc" "$m5pass" "$m5hidden"; fi
 	if [ "$guest_wifi_dirty" = 1 ]; then [ "$guest_on" = 1 ] || { guest2=0;guest5=0; }; set_wifi_iface guest "$guest2" "$g2ssid" "$g2enc" "$g2pass" "$g2hidden"; set_wifi_iface wifinet3 "$guest5" "$g5ssid" "$g5enc" "$g5pass" "$g5hidden"; fi
 	uci -q get $CONFIG.wifi >/dev/null || uci set $CONFIG.wifi=wifi; [ "$main_wifi_dirty" = 1 ] && uci set $CONFIG.wifi.dual="$main_dual"; [ "$guest_wifi_dirty" = 1 ] && uci set $CONFIG.wifi.guest_dual="$guest_dual"
-	sqm_down_kbit="$(awk -v v="$sqm_down" 'BEGIN{if(v~/^[0-9]+([.][0-9]+)?$/)printf "%.0f",v*1000;else printf "0"}')"
-	sqm_up_kbit="$(awk -v v="$sqm_up" 'BEGIN{if(v~/^[0-9]+([.][0-9]+)?$/)printf "%.0f",v*1000;else printf "0"}')"
-	uci -q get sqm.eth1 >/dev/null || uci set sqm.eth1=queue; uci set sqm.eth1.interface=br-guest; uci set sqm.eth1.enabled="$sqm_on"; uci set sqm.eth1.download="$sqm_up_kbit"; uci set sqm.eth1.upload="$sqm_down_kbit"; uci set sqm.eth1.qdisc=cake; uci set sqm.eth1.script=piece_of_cake.qos; uci set sqm.eth1.linklayer=none
+	uci -q get be6500_oem.guest_qos >/dev/null || uci set be6500_oem.guest_qos=settings
+	uci set be6500_oem.guest_qos.enabled="$sqm_on"
+	uci set be6500_oem.guest_qos.download="$sqm_down"
+	uci set be6500_oem.guest_qos.upload="$sqm_up"
 	for s in $(uci show $CONFIG | sed -n "s/^$CONFIG\.\([^.=]*\)=limit$/\1/p"); do uci delete $CONFIG.$s; done
 	oldifs="$IFS"; IFS=';'; for item in $limits; do [ -z "$item" ]&&continue; mac="${item%%@*}"; rest="${item#*@}"; down="${rest%%@*}"; up="${rest#*@}"; mac="$(normalize_mac "$mac")"; valid_mac "$mac"||continue; s="limit_$(printf '%s' "$mac"|tr 'A-F:' 'a-f_')"; uci set $CONFIG.$s=limit;uci set $CONFIG.$s.mac="$mac";uci set $CONFIG.$s.down="${down:-0}";uci set $CONFIG.$s.up="${up:-0}";done;IFS="$oldifs"
 	oldifs="$IFS"; IFS=';'; for item in $aliases; do [ -z "$item" ]&&continue; mac="$(normalize_mac "${item%%@*}")"; name="${item#*@}"; valid_mac "$mac"||continue; name="$(printf '%s' "$name"|tr '\t\r\n;@' '      '|cut -c1-40)"; [ -n "$name" ]||continue; s="dev_$(printf '%s' "$mac"|tr 'A-F:' 'a-f_')";uci set $CONFIG.$s=device;uci set $CONFIG.$s.mac="$mac";uci set $CONFIG.$s.name="$name";done;IFS="$oldifs"
@@ -618,12 +597,12 @@ apply_all() {
 	oldifs="$IFS";IFS=';';for item in $bindings;do [ -z "$item" ]&&continue;mac="$(normalize_mac "${item%%@*}")";ip="${item#*@}";valid_mac "$mac"||continue;printf '%s' "$ip"|grep -Eq '^([0-9]{1,3}\.){3}[0-9]{1,3}$'||continue;s="dm_$(printf '%s' "$mac"|tr 'A-F:' 'a-f_')";uci set dhcp.$s=host;uci set dhcp.$s.mac="$mac";uci set dhcp.$s.ip="$ip";done;IFS="$oldifs"
 	# Interface switches are authoritative; never allow an unrelated edit to disable a radio device.
 	if [ "$main_wifi_dirty" = 1 ];then [ "$main2" = 1 ]&&uci -q delete wireless.radio0.disabled;[ "$main5" = 1 ]&&uci -q delete wireless.radio1.disabled;fi
-	uci commit $CONFIG;uci commit wireless;uci commit sqm;uci commit dhcp;sync_wireless main;sync_wireless guest;ensure_guest_firewall
+	uci commit $CONFIG;uci commit wireless;uci commit be6500_oem;uci commit dhcp;sync_wireless main;sync_wireless guest;ensure_guest_firewall
 	if [ "$access_dirty" = 1 ];then
 		[ "$main_mode_changed" = 0 ]&&runtime_acl_sync main
 		[ "$guest_mode_changed" = 0 ]&&runtime_acl_sync guest
 	fi
-	/etc/init.d/sqm restart >/dev/null 2>&1;apply_limits
+	apply_limits
 	(/etc/init.d/dnsmasq restart;/etc/init.d/firewall reload
 	 if [ "$main_wifi_dirty" = 1 ] || [ "$guest_wifi_dirty" = 1 ] || [ "$main_mode_changed" = 1 ] || [ "$guest_mode_changed" = 1 ];then
 		# Changing hidden/SSID/encryption can make hostapd's incremental BSS reload drop the primary AP.
