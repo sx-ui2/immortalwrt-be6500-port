@@ -1,5 +1,9 @@
 # BE6500 factory-style QoS/SFE firmware v21
 
+**Pre-release warning:** A client-side connectivity problem reported when Nikki
+is stopped is still under investigation. Do not treat this image as validated
+for production use or flash it solely to fix that problem.
+
 This build follows the JDCOS 4.5.2 acceleration and shaping policy:
 
 - Without configured limits, ECM uses `auto` and selects PPE acceleration.
