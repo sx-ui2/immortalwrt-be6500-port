@@ -1123,7 +1123,8 @@
   function qosPage() {
     page('访客 Wi-Fi 限速',
       row('启用', toggle('qos-enabled', '')) + '<div id="qos-fields"><div class="native-grid">' + row('上传速度（Mbps）', input('qos-upload', 'number', '0.5', 'min="0" step="0.1"')) + row('下载速度（Mbps）', input('qos-download', 'number', '0.5', 'min="0" step="0.1"')) + '</div></div>' + buttons(['qos-save', '保存']) +
-      section('奖励模式', row('模式', select('qos-mode', [['0', '性能优先'], ['1', '智能均衡'], ['2', '上网优先']])) + buttons(['qos-mode-save', '保存'])));
+      section('奖励模式', row('模式', select('qos-mode', [['0', '性能优先'], ['1', '智能均衡'], ['2', '上网优先']])) +
+        '<p class="native-help">按原厂 smartqos 逻辑：性能优先仅保障 DNS 和网络控制流量；智能均衡启用网页与游戏优先队列；上网优先启用网页与小包优先队列。切换模式会即时刷新 ECM/PPE 流量分类，不会重启 Wi-Fi。</p>' + buttons(['qos-mode-save', '保存'])));
     id('qos-enabled').addEventListener('change', function () { show('#qos-fields', checked('qos-enabled')); });
     bindClick('#qos-save', function () { busy(this, rpc('web_set_guest_limit_speed', { enable: checked('qos-enabled') ? 1 : 0, upload: number('qos-upload'), download: number('qos-download') }), '访客限速已即时保存').then(function () { reloadView(); }); });
     bindClick('#qos-mode-save', function () { busy(this, rpc('web_set_credit_mode', { mode: value('qos-mode') }), '流量模式已保存').then(function () { reloadView(); }); });
@@ -1417,12 +1418,12 @@
       set('led-policy', result.policy || 'auto');
       var rules = result.rules && result.rules.length ? result.rules : [
         { state: 'overheat', color: 'red', mode: 'fast' },
-        { state: 'booting', color: 'red+green', mode: 'fast' },
-        { state: 'upgrading', color: 'green', mode: 'fast' },
-        { state: 'wifi_off', color: 'green+blue', mode: 'steady' },
+        { state: 'upgrading', color: 'red+green', mode: 'fast' },
+        { state: 'booting', color: 'green', mode: 'fast' },
+        { state: 'wifi_off', color: 'red+blue', mode: 'slow' },
         { state: 'plugin', color: 'red+green', mode: 'steady' },
-        { state: 'usb', color: 'red+blue', mode: 'steady' },
-        { state: 'offline', color: 'red', mode: 'steady' },
+        { state: 'usb', color: 'green+blue', mode: 'steady' },
+        { state: 'offline', color: 'green', mode: 'steady' },
         { state: 'online', color: 'blue', mode: 'fast' }
       ];
       rules.forEach(addRule);

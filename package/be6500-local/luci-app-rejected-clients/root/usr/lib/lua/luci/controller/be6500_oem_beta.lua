@@ -148,7 +148,7 @@ config settings 'guest_qos'
 	option download '0'
 
 config settings 'qos'
-	option mode '0'
+	option mode '1'
 ]])
         file:close()
     end
@@ -2999,12 +2999,20 @@ local function extended_jdcapi(method, args, uci)
             return true, { status = 1, message = trim(output) ~= "" and trim(output) or "访客限速规则应用失败" }
         end
         return true, status
-    elseif method == "web_get_credit_mode" then return true, { status = 0, mode = uci:get("be6500_oem", "qos", "mode") or "0" }
+    elseif method == "web_get_credit_mode" then return true, { status = 0, mode = uci:get("be6500_oem", "qos", "mode") or "1" }
     elseif method == "web_set_credit_mode" then
+        local mode = tonumber(args.mode)
+        if mode ~= 0 and mode ~= 1 and mode ~= 2 then
+            return true, { status = 1, message = "流量模式无效" }
+        end
         if not uci:get("be6500_oem", "qos") then uci:section("be6500_oem", "settings", "qos", {}) end
-        uci:set("be6500_oem", "qos", "mode", tostring(args.mode or 0))
+        uci:set("be6500_oem", "qos", "mode", tostring(mode))
         if not uci:commit("be6500_oem") then return true, { status = 1, message = "流量模式保存失败" } end
-        return true, status
+        local output = luci.sys.exec("/usr/sbin/be6500-qos-apply reload 2>&1")
+        if luci.sys.call("test -f /tmp/be6500-guest-qos.ok") ~= 0 then
+            return true, { status = 1, message = trim(output) ~= "" and trim(output) or "流量模式应用失败" }
+        end
+        return true, { status = 0, mode = tostring(mode) }
     elseif method == "get_port_forward" then
         local info = {}; uci:foreach("firewall", "redirect", function(section)
             if section.be6500_oem == "1" and section.be6500_kind ~= "dmz" then info[#info + 1] = { name = section.name or section[".name"], proto = section.proto or "tcp udp", src_dport = section.src_dport or "", dest_ip = section.dest_ip or "", dest_port = section.dest_port or "" } end
@@ -3703,7 +3711,7 @@ function action_jdcapi()
     elseif method == "web_get_wireless_mesh_enable" then
         payload = { enable = 0, enabled = 0, status = 0 }
     elseif method == "web_get_credit_mode" then
-        payload = { status = 0, mode = uci:get("be6500_oem", "qos", "mode") or "0" }
+        payload = { status = 0, mode = uci:get("be6500_oem", "qos", "mode") or "1" }
     elseif method == "get_mesh_topo_map" then payload = { data = {} }
     elseif method == "get_lan_ip" then
         payload = { ipaddr = uci:get("network", "lan", "ipaddr") or "192.168.1.1",

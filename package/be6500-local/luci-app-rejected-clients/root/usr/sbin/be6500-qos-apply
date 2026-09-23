@@ -11,11 +11,13 @@ CONFIG=device_manager
 STATE=/tmp/be6500-qos.devices
 OK=/tmp/be6500-guest-qos.ok
 RULES=/tmp/be6500-qos.rules.$$
+MODE_RULES=/tmp/be6500-qos.mode.rules.$$
+MODE_STATE=/tmp/be6500-qos.mode
 LOCK=/var/run/be6500-qos.lock
 MAX_RATE=10000mbit
 
 mkdir "$LOCK" 2>/dev/null || exit 0
-trap 'rm -f "$RULES"; rmdir "$LOCK" 2>/dev/null' EXIT INT TERM
+trap 'rm -f "$RULES" "$MODE_RULES"; rmdir "$LOCK" 2>/dev/null' EXIT INT TERM
 rm -f "$OK"
 
 is_uint() {
@@ -75,6 +77,96 @@ defunct_ip() {
 	done
 }
 
+defunct_all() {
+	local path
+	for path in /proc/sys/net/ecm/ecm_db/defunct_all /sys/kernel/debug/ecm/ecm_db/defunct_all; do
+		[ -w "$path" ] || continue
+		echo 1 > "$path" 2>/dev/null || true
+	done
+}
+
+apply_traffic_mode() {
+	local mode previous
+	mode="$(uci -q get be6500_oem.qos.mode)"
+	case "$mode" in 0|1|2) ;; *) mode=1;; esac
+	previous="$(cat "$MODE_STATE" 2>/dev/null)"
+
+	# Reproduce the three factory smartqos modes without installing the old
+	# global HTB qdisc, which would force all traffic out of PPE.  The factory
+	# classes are retained as skb priorities (1:300/400/200) and mirrored to
+	# DSCP so ECM/PPE can preserve them after acceleration:
+	#   0 - DNS/ICMP only (factory MODE_DOWN)
+	#   1 - class 801 high + class 255 low (factory MODE_DEFAULT)
+	#   2 - class 255 low (factory MODE_WEB)
+	# The factory LOCAL_RQ rule only marks local TCP/2002 connections as 801.
+	# No generic web/game port list is invented here.
+	nft list table inet be6500_traffic_mode >/dev/null 2>&1 || \
+		nft add table inet be6500_traffic_mode >/dev/null 2>&1 || return 1
+	cat > "$MODE_RULES" <<'EOF'
+flush table inet be6500_traffic_mode
+table inet be6500_traffic_mode {
+	chain forward {
+		type filter hook forward priority mangle; policy accept;
+EOF
+	case "$mode" in
+		1)
+			cat >> "$MODE_RULES" <<'EOF'
+		meta nfproto ipv4 ct mark 801 ip dscp set cs6 meta priority set 1:300
+		meta nfproto ipv6 ct mark 801 ip6 dscp set cs6 meta priority set 1:300
+		meta nfproto ipv4 meta mark 255 ip dscp set cs1 meta priority set 1:200
+		meta nfproto ipv6 meta mark 255 ip6 dscp set cs1 meta priority set 1:200
+EOF
+			;;
+		2)
+			cat >> "$MODE_RULES" <<'EOF'
+		meta nfproto ipv4 meta mark 255 ip dscp set cs1 meta priority set 1:200
+		meta nfproto ipv6 meta mark 255 ip6 dscp set cs1 meta priority set 1:200
+EOF
+			;;
+	esac
+	cat >> "$MODE_RULES" <<'EOF'
+		meta nfproto ipv4 udp dport 53 ip dscp set cs5 meta priority set 1:400
+		meta nfproto ipv6 udp dport 53 ip6 dscp set cs5 meta priority set 1:400
+		meta nfproto ipv4 ip protocol icmp ip dscp set cs5 meta priority set 1:400
+		meta nfproto ipv6 ip6 nexthdr ipv6-icmp ip6 dscp set cs5 meta priority set 1:400
+	}
+	chain output {
+		type route hook output priority mangle; policy accept;
+EOF
+	case "$mode" in
+		1)
+			cat >> "$MODE_RULES" <<'EOF'
+		tcp dport 2002 ct mark set 801
+		meta nfproto ipv4 ct mark 801 ip dscp set cs6 meta priority set 1:300
+		meta nfproto ipv6 ct mark 801 ip6 dscp set cs6 meta priority set 1:300
+		meta nfproto ipv4 meta mark 255 ip dscp set cs1 meta priority set 1:200
+		meta nfproto ipv6 meta mark 255 ip6 dscp set cs1 meta priority set 1:200
+EOF
+			;;
+		2)
+			cat >> "$MODE_RULES" <<'EOF'
+		meta nfproto ipv4 meta mark 255 ip dscp set cs1 meta priority set 1:200
+		meta nfproto ipv6 meta mark 255 ip6 dscp set cs1 meta priority set 1:200
+EOF
+			;;
+	esac
+	cat >> "$MODE_RULES" <<'EOF'
+		meta nfproto ipv4 udp dport 53 ip dscp set cs5 meta priority set 1:400
+		meta nfproto ipv6 udp dport 53 ip6 dscp set cs5 meta priority set 1:400
+		meta nfproto ipv4 ip protocol icmp ip dscp set cs5 meta priority set 1:400
+		meta nfproto ipv6 ip6 nexthdr ipv6-icmp ip6 dscp set cs5 meta priority set 1:400
+	}
+}
+EOF
+	nft -c -f "$MODE_RULES" >/dev/null 2>&1 || return 1
+	nft -f "$MODE_RULES" >/dev/null 2>&1 || return 1
+	printf '%s\n' "$mode" > "$MODE_STATE"
+	if [ "$mode" != "$previous" ]; then
+		defunct_all
+		logger -t be6500-qos "traffic priority mode switched to $mode without restarting Wi-Fi"
+	fi
+}
+
 add_rule() {
 	# IP, downlink device, download kbit/s, upload kbit/s
 	local ip="$1" dev="$2" down="$3" up="$4"
@@ -86,6 +178,11 @@ add_rule() {
 explicit_macs=''
 configured=0
 : > "$RULES"
+
+apply_traffic_mode || {
+	echo '流量优先级规则应用失败' >&2
+	exit 1
+}
 
 for section in $(uci show "$CONFIG" 2>/dev/null | sed -n "s/^$CONFIG\.\([^.=]*\)=limit$/\1/p"); do
 	mac="$(uci -q get "$CONFIG.$section.mac" | tr 'a-f' 'A-F')"

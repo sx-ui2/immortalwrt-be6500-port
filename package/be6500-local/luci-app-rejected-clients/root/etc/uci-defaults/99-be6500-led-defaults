@@ -2,7 +2,7 @@
 
 # Apply the requested LED profile once to configurations preserved across a
 # sysupgrade. Fresh installations already contain this revision in the image.
-[ "$(uci -q get be6500_oem.led.defaults_revision)" = '20260923-1' ] && exit 0
+[ "$(uci -q get be6500_oem.led.defaults_revision)" = '20260924-1' ] && exit 0
 
 uci -q get be6500_oem.led >/dev/null 2>&1 || uci -q set be6500_oem.led=settings || exit 1
 uci -q set be6500_oem.led.enabled='1' || exit 1
@@ -23,15 +23,15 @@ while read -r state color effect; do
 	uci -q set "be6500_oem.$section.enabled=1" || exit 1
 done <<'RULES'
 overheat red fast
-booting red+green fast
-upgrading green fast
-wifi_off green+blue steady
+upgrading red+green fast
+booting green fast
+wifi_off red+blue slow
 plugin red+green steady
-usb red+blue steady
-offline red steady
+usb green+blue steady
+offline green steady
 online blue fast
 RULES
 
-uci -q set be6500_oem.led.defaults_revision='20260923-1' || exit 1
+uci -q set be6500_oem.led.defaults_revision='20260924-1' || exit 1
 uci -q commit be6500_oem || exit 1
 exit 0

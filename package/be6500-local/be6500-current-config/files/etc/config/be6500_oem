@@ -9,14 +9,14 @@ config settings 'guest_qos'
 	option download '0'
 
 config settings 'qos'
-	option mode '0'
+	option mode '1'
 
 config settings 'led'
 	option enabled '1'
 	option color 'blue'
 	option policy 'custom'
 	option effect 'steady'
-	option defaults_revision '20260923-1'
+	option defaults_revision '20260924-1'
 
 config settings 'iptv'
 	option auth_enable '0'
@@ -29,21 +29,21 @@ config led_rule
 	option enabled '1'
 
 config led_rule
-	option state 'booting'
+	option state 'upgrading'
 	option color 'red+green'
 	option effect 'fast'
 	option enabled '1'
 
 config led_rule
-	option state 'upgrading'
+	option state 'booting'
 	option color 'green'
 	option effect 'fast'
 	option enabled '1'
 
 config led_rule
 	option state 'wifi_off'
-	option color 'green+blue'
-	option effect 'steady'
+	option color 'red+blue'
+	option effect 'slow'
 	option enabled '1'
 
 config led_rule
@@ -54,13 +54,13 @@ config led_rule
 
 config led_rule
 	option state 'usb'
-	option color 'red+blue'
+	option color 'green+blue'
 	option effect 'steady'
 	option enabled '1'
 
 config led_rule
 	option state 'offline'
-	option color 'red'
+	option color 'green'
 	option effect 'steady'
 	option enabled '1'
 
