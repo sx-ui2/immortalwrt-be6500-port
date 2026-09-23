@@ -51,7 +51,11 @@ package.loaded.ubus = {
     end
 }
 local original_exec = luci.sys.exec
+local runtime_bdf = "0x1008"
 luci.sys.exec = function(command)
+    if command:find("/proc/cmdline", 1, true) then
+        return runtime_bdf .. "\n"
+    end
     if command:find("ubus list", 1, true) then
         return "hostapd.phy00.0-ap0\nhostapd.phy00.1-ap0\nhostapd.phy00.2-ap0\nhostapd.phy00.1-ap1\n"
     end
@@ -91,8 +95,14 @@ result = clients(uci)
 assert(result[B].ssid == "TP-LINK_A59A")
 network_status_missing = true
 result = clients(uci)
-luci.sys.exec = original_exec
 assert(result[A].ssid == "TP-LINK_A59A" and result[A].band == "2.4G")
 assert(result[B].ssid == "TP-LINK_A59A" and result[B].band == "5.2G / 5.8G")
 assert(result[C].ssid == "Guest-WiFi" and result[C].band == "5.2G")
+runtime_bdf = "0x2"
+control_missing = false
+network_status_missing = false
+result = clients(uci)
+assert(result[B].ssid == "TP-LINK_A59A" and result[B].band == "5G")
+assert(result[C].ssid == "Guest-WiFi" and result[C].band == "5G")
+luci.sys.exec = original_exec
 print("device Wi-Fi SSID/band checks passed")

@@ -14,7 +14,10 @@ for radio in radio0 radio1 radio2; do
 done
 
 cmdline_bdf="$(sed -n 's/.*cnss2\.bdf_pci1=\([^ ]*\).*/\1/p' /proc/cmdline)"
-[ -n "$cmdline_bdf" ] || cmdline_bdf=0x2
+# With no explicit selector the device tree's qcom,board_id = <0x1008>
+# starts the split dual-MAC firmware. Treating an absent option as 0x2 made
+# a dual-band request skip the mandatory reboot while ath12k remained split.
+[ -n "$cmdline_bdf" ] || cmdline_bdf=0x1008
 old_bootargs="$(fw_printenv -n bootargs 2>/dev/null)" || { echo "boot mode storage is unavailable"; exit 5; }
 new_bootargs="$(printf '%s\n' "$old_bootargs" | sed 's/[[:space:]]*cnss2\.bdf_pci1=[^[:space:]]*//g; s/[[:space:]][[:space:]]*/ /g; s/^ //; s/ $//')"
 new_bootargs="$new_bootargs cnss2.bdf_pci1=$target_bdf"

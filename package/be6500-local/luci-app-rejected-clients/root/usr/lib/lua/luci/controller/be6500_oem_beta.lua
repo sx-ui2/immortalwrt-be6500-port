@@ -264,10 +264,22 @@ local function radio_device(uci, index)
     return nil
 end
 
-local function wifi_band_from_interface(uci, phy, ifname, frequency)
+local function wifi_runtime_personality()
+    local runtime_bdf = trim(luci.sys.exec(
+        "sed -n 's/.*cnss2\\.bdf_pci1=\\([^ ]*\\).*/\\1/p' /proc/cmdline 2>/dev/null"))
+    -- The device tree selects 0x1008 when no explicit boot argument exists.
+    -- Only 0x2 asks the BE6500 ath12k patch for single-MAC 4-chain 5 GHz.
+    if runtime_bdf == "0x2" then return 0, runtime_bdf end
+    return 1, runtime_bdf ~= "" and runtime_bdf or "0x1008 (DT default)"
+end
+
+local function wifi_band_from_interface(uci, phy, ifname, frequency, runtime_mode)
     -- Use the actual QSDK physical radio, not a shared SSID or an arbitrary
     -- 5 GHz frequency.  radio1 is 5.2G and radio2 is 5.8G in tri-band mode.
     phy, ifname = tostring(phy or ""), tostring(ifname or "")
+    local mode = runtime_mode
+    if mode == nil then mode = wifi_runtime_personality() end
+    local tri = tonumber(mode) == 1
     local index = tonumber(phy:match("^phy%d+%.(%d+)$")
         or ifname:match("^phy%d+%.(%d+)%-"))
     if index ~= nil and index <= 2 then
@@ -275,9 +287,8 @@ local function wifi_band_from_interface(uci, phy, ifname, frequency)
         local configured_index = device and uci:get("wireless", device, "radio")
         if device and (configured_index == nil or tonumber(configured_index) == index) then
             if index == 0 then return "2.4G" end
-            if index == 2 then return "5.8G" end
-            local mode = tostring(uci:get("wireless", "main", "freq_mode") or "")
-            return (mode == "1" or mode == "tri") and "5.2G" or "5G"
+            if not tri then return "5G" end
+            return index == 2 and "5.8G" or "5.2G"
         end
     end
     -- A few hostapd control sockets expose an MLD name instead of the link
@@ -285,8 +296,7 @@ local function wifi_band_from_interface(uci, phy, ifname, frequency)
     frequency = tonumber(frequency) or 0
     if frequency >= 2400 and frequency < 3000 then return "2.4G" end
     if frequency >= 5000 and frequency < 5925 then
-        local mode = tostring(uci:get("wireless", "main", "freq_mode") or "")
-        if mode == "1" or mode == "tri" then
+        if tri then
             return frequency < 5500 and "5.2G" or "5.8G"
         end
         return "5G"
@@ -1017,20 +1027,22 @@ local function action_native_wifi_impl()
                 delete_value(section, "auth_port", device)
                 delete_value(section, "auth_secret", device)
             end
-            local channel = tonumber(band.channel) or 0
-            -- QCN92xx exposes the two 5 GHz RF ranges as separate hardware
-            -- radio indices under one wiphy.  Unrestricted ACS on logical
-            -- radio1 may select channel 100-144 and silently bind the BSS to
-            -- hardware radio2, whose data path is not active in dual-band
-            -- mode.  Resolve "auto" to a safe non-DFS channel for each 5 GHz
-            -- logical radio instead of allowing that cross-radio migration.
-            -- Preserve ACS/auto instead of converting it to a fixed channel;
-            -- top-performance width is resolved by the driver after ACS.
-            if device == radio_device(uci, 1) and tonumber(uci:get("wireless", "main", "freq_mode")) == 1 and channel > 64 then channel = 36 end
-            set_value(device, "channel", channel == 0 and "auto" or tostring(channel), device)
-            local power = normalize_wifi_power(band.power)
-            set_value(device, "be6500_power", tostring(power), device)
-            set_value(device, "txpower", tostring(wifi_power_dbm(power)), device)
+            if role == "main" then
+                local channel = tonumber(band.channel) or 0
+                -- QCN92xx exposes the two 5 GHz RF ranges as separate hardware
+                -- radio indices under one wiphy.  Unrestricted ACS on logical
+                -- radio1 may select channel 100-144 and silently bind the BSS to
+                -- hardware radio2, whose data path is not active in dual-band
+                -- mode.  Resolve "auto" to a safe non-DFS channel for each 5 GHz
+                -- logical radio instead of allowing that cross-radio migration.
+                -- Preserve ACS/auto instead of converting it to a fixed channel;
+                -- top-performance width is resolved by the driver after ACS.
+                if device == radio_device(uci, 1) and tonumber(uci:get("wireless", "main", "freq_mode")) == 1 and channel > 64 then channel = 36 end
+                set_value(device, "channel", channel == 0 and "auto" or tostring(channel), device)
+                local power = normalize_wifi_power(band.power)
+                set_value(device, "be6500_power", tostring(power), device)
+                set_value(device, "txpower", tostring(wifi_power_dbm(power)), device)
+            end
             return true
         end
         local device0, device1, device2 = radio_device(uci, 0), radio_device(uci, 1), radio_device(uci, 2)
@@ -1174,12 +1186,14 @@ local function action_native_wifi_impl()
 
         -- Wi-Fi 5 兼容模式会改变相应射频的协议能力，因此只重启被影响的
         -- 无线频段；关闭时恢复 BE/Wi-Fi 7 模式。其余纯界面配置立即落盘。
-        local compat_2g = compatible and selected_bands[0]
-        local compat_5g = compatible and selected_bands[1]
-        local compat_52g = compatible and selected_bands[2]
-        if device0 then set_value(device0, "hwmode", "11g", device0); set_value(device0, "htmode", wifi_protocol_htmode(uci, device0, compat_2g, bands["2g"] and bands["2g"].bandwidth), device0) end
-        if device1 then set_value(device1, "hwmode", "11a", device1); set_value(device1, "htmode", wifi_protocol_htmode(uci, device1, compat_5g, bands["5g"] and bands["5g"].bandwidth), device1) end
-        if device2 then set_value(device2, "hwmode", "11a", device2); set_value(device2, "htmode", wifi_protocol_htmode(uci, device2, compat_52g, bands["52g"] and bands["52g"].bandwidth), device2) end
+        if role == "main" then
+            local compat_2g = compatible and selected_bands[0]
+            local compat_5g = compatible and selected_bands[1]
+            local compat_52g = compatible and selected_bands[2]
+            if device0 then set_value(device0, "hwmode", "11g", device0); set_value(device0, "htmode", wifi_protocol_htmode(uci, device0, compat_2g, bands["2g"] and bands["2g"].bandwidth), device0) end
+            if device1 then set_value(device1, "hwmode", "11a", device1); set_value(device1, "htmode", wifi_protocol_htmode(uci, device1, compat_5g, bands["5g"] and bands["5g"].bandwidth), device1) end
+            if device2 then set_value(device2, "hwmode", "11a", device2); set_value(device2, "htmode", wifi_protocol_htmode(uci, device2, compat_52g, bands["52g"] and bands["52g"].bandwidth), device2) end
+        end
 
         local radios = {}
         local radio_devices = {}
@@ -1207,8 +1221,7 @@ local function action_native_wifi_impl()
         })
     end
     local role = luci.http.formvalue("profile") == "guest" and "guest" or "main"
-    local runtime_bdf = trim(luci.sys.exec("sed -n 's/.*cnss2\\.bdf_pci1=\\([^ ]*\\).*/\\1/p' /proc/cmdline 2>/dev/null"))
-    local actual_mode = runtime_bdf == "0x1008" and 1 or 0
+    local actual_mode, runtime_bdf = wifi_runtime_personality()
     local configured_mode = tonumber((uci:get("wireless", "main", "freq_mode"))) or 0
     local wifi5_bands = {}
     for band in tostring(uci:get("wireless", "main", "wifi5_bands") or "0"):gmatch("%d+") do wifi5_bands[#wifi5_bands + 1] = tonumber(band) end
@@ -1437,6 +1450,7 @@ end
 local function known_wireless_clients(uci)
     local result = {}
     local runtime_ssids = {}
+    local runtime_mode = wifi_runtime_personality()
 
     local function live_ssid(iface, reported, phy, frequency)
         local ssid = clean(reported, 64)
@@ -1461,7 +1475,7 @@ local function known_wireless_clients(uci)
         local index = tonumber(tostring(phy or ""):match("^phy%d+%.(%d+)$")
             or iface:match("^phy%d+%.(%d+)%-"))
         if index == nil then
-            local band = wifi_band_from_interface(uci, phy, iface, frequency)
+            local band = wifi_band_from_interface(uci, phy, iface, frequency, runtime_mode)
             index = ({ ["2.4G"] = 0, ["5G"] = 1, ["5.2G"] = 1, ["5.8G"] = 2 })[band]
         end
         local ap_index = tonumber(iface:match("%-ap(%d+)"))
@@ -1513,7 +1527,7 @@ local function known_wireless_clients(uci)
                 local status_ok, bss = pcall(connection.call, connection, object, "get_status", {})
                 bss = status_ok and type(bss) == "table" and bss or {}
                 local iface = object:match("^hostapd%.(.+)$") or ""
-                local band = wifi_band_from_interface(uci, bss.phy, iface, bss.freq or status.freq)
+                local band = wifi_band_from_interface(uci, bss.phy, iface, bss.freq or status.freq, runtime_mode)
                 local ssid = live_ssid(iface, bss.ssid, bss.phy, bss.freq or status.freq)
                 for mac, client in pairs(status.clients or {}) do
                     if valid_mac(mac) and (type(client) ~= "table" or client.authorized ~= false) then
@@ -1531,7 +1545,7 @@ local function known_wireless_clients(uci)
     for iface in interfaces:gmatch("[^%s]+") do
         local info = luci.sys.exec("iw dev " .. iface .. " info 2>/dev/null") or ""
         local frequency = tonumber(info:match("channel%s+%d+%s+%((%d+)%s+MHz%)")) or 0
-        local band = wifi_band_from_interface(uci, "", iface, frequency)
+        local band = wifi_band_from_interface(uci, "", iface, frequency, runtime_mode)
         local ssid = clean(info:match("[\r\n]%s*ssid%s+([^\r\n]+)") or "", 64)
         local output = luci.sys.exec("iwinfo " .. iface .. " assoclist 2>/dev/null") or ""
         for mac in output:gmatch("(%x%x:%x%x:%x%x:%x%x:%x%x:%x%x)") do
@@ -1962,9 +1976,9 @@ local function with_wifi_reject_lock(callback)
     return ok and result or false
 end
 
-local function wifi_reject_band(uci, record)
+local function wifi_reject_band(uci, record, runtime_mode)
     -- Rejections and live stations share the same physical-radio mapping.
-    return wifi_band_from_interface(uci, record.phy, record.ifname, record.freq)
+    return wifi_band_from_interface(uci, record.phy, record.ifname, record.freq, runtime_mode)
 end
 
 local function wifi_reject_rows(uci)
@@ -1976,6 +1990,7 @@ local function wifi_reject_rows(uci)
     if type(records) ~= "table" then return {} end
 
     local catalog, leases, rows = device_name_catalog(uci), {}, {}
+    local runtime_mode = wifi_runtime_personality()
     local lease_file = io.open("/tmp/dhcp.leases", "r")
     if lease_file then
         for line in lease_file:lines() do
@@ -2016,7 +2031,7 @@ local function wifi_reject_rows(uci)
                 last_seen = last_seen, count = count,
                 rejected_at = last_seen > 0 and os.date("%Y-%m-%d %H:%M:%S", last_seen) or "-",
                 network = ssid ~= "" and ssid or "未知 SSID",
-                band = wifi_reject_band(uci, record),
+                band = wifi_reject_band(uci, record, runtime_mode),
                 scope = guest_ssids[ssid] and "guest" or "main",
                 device_type = device_type, vendor = vendor, brand = vendor
             }

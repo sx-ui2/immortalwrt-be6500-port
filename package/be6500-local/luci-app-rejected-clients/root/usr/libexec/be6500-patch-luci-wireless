@@ -1,11 +1,12 @@
 #!/bin/sh
 
-# Recover the persisted mode marker from the hardware personality selected by
-# the bootloader. Older migrated configs may lack wireless.main.freq_mode even
-# though ath12k is already running either the 4-chain or split-2-chain BDF.
+# Recover a missing marker from the hardware personality selected at boot.
+# Keep an existing different value: it is the pending target shown by the UI.
+# With no explicit selector the device tree defaults to 0x1008 (split
+# dual-MAC); only cnss2.bdf_pci1=0x2 selects single-MAC 4-chain 5 GHz.
 if ! uci -q get wireless.main.freq_mode >/dev/null; then
 	runtime_bdf="$(sed -n 's/.*cnss2\.bdf_pci1=\([^ ]*\).*/\1/p' /proc/cmdline 2>/dev/null)"
-	[ "$runtime_bdf" = "0x1008" ] && runtime_mode=1 || runtime_mode=0
+	[ "$runtime_bdf" = "0x2" ] && runtime_mode=0 || runtime_mode=1
 	uci -q set wireless.main='be6500-profile'
 	uci -q set wireless.main.freq_mode="$runtime_mode"
 	uci -q set system.@system[0].freq_mode="$runtime_mode"
