@@ -12,21 +12,10 @@ config settings 'qos'
 
 config settings 'led'
 	option enabled '1'
-	option policy 'auto'
+	option policy 'custom'
 	option color 'blue'
 	option effect 'steady'
-
-config led_rule
-	option state 'booting'
-	option color 'blue'
-	option effect 'slow'
-	option enabled '1'
-
-config led_rule
-	option state 'upgrading'
-	option color 'blue'
-	option effect 'fast'
-	option enabled '1'
+	option defaults_revision '20260923-1'
 
 config led_rule
 	option state 'overheat'
@@ -35,15 +24,33 @@ config led_rule
 	option enabled '1'
 
 config led_rule
-	option state 'wps'
-	option color 'blue'
+	option state 'booting'
+	option color 'red+green'
+	option effect 'fast'
+	option enabled '1'
+
+config led_rule
+	option state 'upgrading'
+	option color 'green'
 	option effect 'fast'
 	option enabled '1'
 
 config led_rule
 	option state 'wifi_off'
-	option color 'red'
-	option effect 'slow'
+	option color 'green+blue'
+	option effect 'steady'
+	option enabled '1'
+
+config led_rule
+	option state 'plugin'
+	option color 'red+green'
+	option effect 'steady'
+	option enabled '1'
+
+config led_rule
+	option state 'usb'
+	option color 'red+blue'
+	option effect 'steady'
 	option enabled '1'
 
 config led_rule
@@ -55,17 +62,5 @@ config led_rule
 config led_rule
 	option state 'online'
 	option color 'blue'
-	option effect 'steady'
-	option enabled '1'
-
-config led_rule
-	option state 'usb'
-	option color 'green'
-	option effect 'steady'
-	option enabled '1'
-
-config led_rule
-	option state 'plugin'
-	option color 'green'
-	option effect 'steady'
+	option effect 'fast'
 	option enabled '1'

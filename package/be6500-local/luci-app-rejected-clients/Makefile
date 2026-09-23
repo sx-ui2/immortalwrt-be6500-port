@@ -1,7 +1,7 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=luci-app-rejected-clients
-PKG_RELEASE:=21
+PKG_RELEASE:=29
 PKG_MAINTAINER:=Codex
 
 include $(INCLUDE_DIR)/package.mk
@@ -65,6 +65,7 @@ define Package/luci-app-rejected-clients/install
 	$(INSTALL_BIN) ./root/etc/uci-defaults/99-be6500-wireless-runtime-fix $(1)/etc/uci-defaults/99-be6500-wireless-runtime-fix
 	$(INSTALL_BIN) ./root/etc/uci-defaults/99-be6500-encryption-normalize $(1)/etc/uci-defaults/99-be6500-encryption-normalize
 	$(INSTALL_BIN) ./root/etc/uci-defaults/99-be6500-wireless-dedupe $(1)/etc/uci-defaults/99-be6500-wireless-dedupe
+	$(INSTALL_BIN) ./root/etc/uci-defaults/99-be6500-led-defaults $(1)/etc/uci-defaults/99-be6500-led-defaults
 	$(INSTALL_BIN) ./root/etc/uci-defaults/99-be6500-switch-port-labels $(1)/etc/uci-defaults/99-be6500-switch-port-labels
 	$(INSTALL_BIN) ./root/etc/uci-defaults/99-be6500-runtime-services $(1)/etc/uci-defaults/99-be6500-runtime-services
 	$(INSTALL_DIR) $(1)/etc/sysctl.d

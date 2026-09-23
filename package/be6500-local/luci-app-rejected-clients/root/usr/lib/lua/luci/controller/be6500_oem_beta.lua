@@ -264,6 +264,37 @@ local function radio_device(uci, index)
     return nil
 end
 
+local function wifi_band_from_interface(uci, phy, ifname, frequency)
+    -- Use the actual QSDK physical radio, not a shared SSID or an arbitrary
+    -- 5 GHz frequency.  radio1 is 5.2G and radio2 is 5.8G in tri-band mode.
+    phy, ifname = tostring(phy or ""), tostring(ifname or "")
+    local index = tonumber(phy:match("^phy%d+%.(%d+)$")
+        or ifname:match("^phy%d+%.(%d+)%-"))
+    if index ~= nil and index <= 2 then
+        local device = radio_device(uci, index)
+        local configured_index = device and uci:get("wireless", device, "radio")
+        if device and (configured_index == nil or tonumber(configured_index) == index) then
+            if index == 0 then return "2.4G" end
+            if index == 2 then return "5.8G" end
+            local mode = tostring(uci:get("wireless", "main", "freq_mode") or "")
+            return (mode == "1" or mode == "tri") and "5.2G" or "5G"
+        end
+    end
+    -- A few hostapd control sockets expose an MLD name instead of the link
+    -- name.  Live stations still have an actual operating frequency.
+    frequency = tonumber(frequency) or 0
+    if frequency >= 2400 and frequency < 3000 then return "2.4G" end
+    if frequency >= 5000 and frequency < 5925 then
+        local mode = tostring(uci:get("wireless", "main", "freq_mode") or "")
+        if mode == "1" or mode == "tri" then
+            return frequency < 5500 and "5.2G" or "5.8G"
+        end
+        return "5G"
+    end
+    if frequency >= 5925 then return "6G" end
+    return "未知频段"
+end
+
 local function ipv4_cidr(value)
     local a, b, c, d, prefix = tostring(value or ""):match("^(%d+)%.(%d+)%.(%d+)%.(%d+)/(%d+)$")
     a, b, c, d, prefix = tonumber(a), tonumber(b), tonumber(c), tonumber(d), tonumber(prefix)
@@ -1403,28 +1434,91 @@ local function oem_device_section(mac)
     return "device_" .. tostring(mac or ""):lower():gsub("[^%x]", "")
 end
 
-local function known_wireless_clients()
+local function known_wireless_clients(uci)
     local result = {}
+    local runtime_ssids = {}
+
+    local function live_ssid(iface, reported, phy, frequency)
+        local ssid = clean(reported, 64)
+        if ssid ~= "" or not tostring(iface):match("^[%w_.%-]+$") then return ssid end
+        -- Some QSDK hostapd get_status replies omit ssid even though the AP
+        -- and its clients are live.  Read the BSS's own control socket rather
+        -- than guessing from a shared/multi-band UCI SSID.
+        local config = luci.sys.exec("hostapd_cli -p /var/run/hostapd -i " .. iface
+            .. " get_config 2>/dev/null") or ""
+        ssid = clean(config:match("^ssid=([^\r\n]*)")
+            or config:match("[\r\n]ssid=([^\r\n]*)"), 64)
+        if ssid ~= "" then return ssid end
+        ssid = runtime_ssids[iface] or runtime_ssids[iface:gsub("_link%d+$", "")]
+        if ssid and ssid ~= "" then return ssid end
+        local info = luci.sys.exec("iwinfo " .. iface .. " info 2>/dev/null") or ""
+        ssid = clean(info:match('ESSID:%s*"([^"]+)"'), 64)
+        if ssid ~= "" then return ssid end
+        -- On this QSDK build all three live probes can omit the SSID.  An AP
+        -- interface still identifies its physical radio and BSS index; use
+        -- that exact configured BSS as the final fallback.  Do not substitute
+        -- the unified SSID blindly: guest BSSes may use a different name.
+        local index = tonumber(tostring(phy or ""):match("^phy%d+%.(%d+)$")
+            or iface:match("^phy%d+%.(%d+)%-"))
+        if index == nil then
+            local band = wifi_band_from_interface(uci, phy, iface, frequency)
+            index = ({ ["2.4G"] = 0, ["5G"] = 1, ["5.2G"] = 1, ["5.8G"] = 2 })[band]
+        end
+        local ap_index = tonumber(iface:match("%-ap(%d+)"))
+        local device = index and radio_device(uci, index)
+        if device and ap_index ~= nil then
+            local configured = oem_iface(uci, device, ap_index == 0 and "main" or "guest")
+            return clean(configured.ssid, 64)
+        end
+        return ""
+    end
+
+    local function add(mac, ssid, band, signature)
+        mac = tostring(mac or ""):upper()
+        if not valid_mac(mac) then return end
+        local item = result[mac]
+        if not item then
+            item = { ssid = "", signature = "", bands = {} }
+            result[mac] = item
+        end
+        if ssid and ssid ~= "" then item.ssid = ssid end
+        if signature and signature ~= "" then item.signature = signature end
+        if band and band ~= "未知频段" then item.bands[band] = true end
+    end
 
     -- hostapd is authoritative for stations associated with the current BSS.
     -- This also works with ath12k/mac80211 interface names used by this build.
     local loaded, ubus = pcall(require, "ubus")
     local connection = loaded and ubus and ubus.connect() or nil
     if connection then
+        local wireless_ok, wireless_status = pcall(connection.call, connection,
+            "network.wireless", "status", {})
+        if wireless_ok and type(wireless_status) == "table" then
+            for _, radio in pairs(wireless_status) do
+                for _, runtime in pairs(type(radio) == "table" and radio.interfaces or {}) do
+                    local config = type(runtime.config) == "table" and runtime.config or {}
+                    local iface = tostring(runtime.ifname or config.ifname or "")
+                    local section = tostring(runtime.section or config.section or "")
+                    local ssid = section ~= "" and uci:get("wireless", section, "ssid") or config.ssid
+                    if iface:match("^[%w_.%-]+$") and ssid and ssid ~= "" then
+                        runtime_ssids[iface] = clean(ssid, 64)
+                    end
+                end
+            end
+        end
         local objects = luci.sys.exec("ubus list 'hostapd.*' 2>/dev/null") or ""
         for object in objects:gmatch("[^%s]+") do
             local ok, status = pcall(connection.call, connection, object, "get_clients", {})
             if ok and type(status) == "table" then
-                local frequency = tonumber(status.freq) or 0
-                local band = frequency > 0 and frequency < 3000 and "2.4 GHz Wi-Fi"
-                    or (frequency >= 3000 and frequency < 5925 and "5 GHz Wi-Fi")
-                    or (frequency >= 5925 and "6 GHz Wi-Fi") or "Wi-Fi"
+                local status_ok, bss = pcall(connection.call, connection, object, "get_status", {})
+                bss = status_ok and type(bss) == "table" and bss or {}
+                local iface = object:match("^hostapd%.(.+)$") or ""
+                local band = wifi_band_from_interface(uci, bss.phy, iface, bss.freq or status.freq)
+                local ssid = live_ssid(iface, bss.ssid, bss.phy, bss.freq or status.freq)
                 for mac, client in pairs(status.clients or {}) do
                     if valid_mac(mac) and (type(client) ~= "table" or client.authorized ~= false) then
-                        result[mac:upper()] = {
-                            band = band,
-                            signature = type(client) == "table" and tostring(client.signature or "") or ""
-                        }
+                        add(mac, ssid, band,
+                            type(client) == "table" and tostring(client.signature or "") or "")
                     end
                 end
             end
@@ -1437,13 +1531,21 @@ local function known_wireless_clients()
     for iface in interfaces:gmatch("[^%s]+") do
         local info = luci.sys.exec("iw dev " .. iface .. " info 2>/dev/null") or ""
         local frequency = tonumber(info:match("channel%s+%d+%s+%((%d+)%s+MHz%)")) or 0
-        local band = frequency > 0 and frequency < 3000 and "2.4 GHz Wi-Fi"
-            or (frequency >= 3000 and frequency < 5925 and "5 GHz Wi-Fi")
-            or (frequency >= 5925 and "6 GHz Wi-Fi") or "Wi-Fi"
+        local band = wifi_band_from_interface(uci, "", iface, frequency)
+        local ssid = clean(info:match("[\r\n]%s*ssid%s+([^\r\n]+)") or "", 64)
         local output = luci.sys.exec("iwinfo " .. iface .. " assoclist 2>/dev/null") or ""
         for mac in output:gmatch("(%x%x:%x%x:%x%x:%x%x:%x%x:%x%x)") do
-            if not result[mac:upper()] then result[mac:upper()] = { band = band, signature = "" } end
+            add(mac, ssid, band, "")
         end
+    end
+    local ordered_bands = { "2.4G", "5.2G", "5.8G", "5G", "6G" }
+    for _, item in pairs(result) do
+        local bands = {}
+        for _, band in ipairs(ordered_bands) do
+            if item.bands[band] then bands[#bands + 1] = band end
+        end
+        item.band = #bands > 0 and table.concat(bands, " / ") or "未知频段"
+        item.bands = nil
     end
     return result
 end
@@ -1517,14 +1619,14 @@ local function find_access(uci, policy, mac)
     return found
 end
 
-local function request_client()
+local function request_client(uci)
     local ip = tostring(luci.http.getenv("REMOTE_ADDR") or "")
     if not ip:match("^[%x%.:]+$") then return "", false end
     local output = luci.sys.exec("ip neigh show " .. ip .. " 2>/dev/null") or ""
     local mac = output:match("lladdr%s+(%x%x:%x%x:%x%x:%x%x:%x%x:%x%x)")
     if not mac then return "", false end
     mac = mac:upper()
-    return mac, known_wireless_clients()[mac] ~= nil
+    return mac, known_wireless_clients(uci)[mac] ~= nil
 end
 
 local function replace_access_entries(uci, policy, entries)
@@ -1625,11 +1727,23 @@ local function live_hostapd_ifaces(uci, role)
     return result, next(objects) ~= nil
 end
 
-local function apply_mac_policy(uci, policy)
+local function access_policy_snapshot(uci)
+    local policy = uci:get("be6500_oem", "access", "policy") == "allow" and "allow" or "deny"
+    local previous = {
+        enabled = uci:get("be6500_oem", "access", "enabled") ~= "0",
+        policy = policy,
+        listed = {}
+    }
+    uci:foreach("be6500_oem", "access", function(section)
+        local mac = tostring(section.mac or ""):upper()
+        if section.policy == policy and valid_mac(mac) then previous.listed[mac] = true end
+    end)
+    return previous
+end
+
+local function apply_mac_policy(uci, policy, previous)
     local list = access_entries(uci, policy)
     local enabled = uci:get("be6500_oem", "access", "enabled") ~= "0"
-    local listed = {}
-    for _, item in ipairs(list) do listed[tostring(item.mac or ""):upper()] = true end
     for index = 0, 2 do
         local device = radio_device(uci, index)
         local iface = device and oem_iface(uci, device, "main") or {}
@@ -1643,21 +1757,6 @@ local function apply_mac_policy(uci, policy)
         end
     end
     if not uci:commit("wireless") then return false, "无线访问控制配置提交失败" end
-    local command = tonumber(policy == "allow" and 1 or 2)
-    for _, iface in ipairs({ "ath0", "ath1", "ath2" }) do
-        if luci.sys.call("ip link show " .. iface .. " >/dev/null 2>&1") == 0 then
-            luci.sys.call("iwpriv " .. iface .. " maccmd 3 >/dev/null 2>&1")
-            if enabled then
-                for _, item in ipairs(list) do
-                    luci.sys.call("iwpriv " .. iface .. " addmac " .. item.mac .. " >/dev/null 2>&1")
-                end
-                luci.sys.call("iwpriv " .. iface .. " maccmd " .. tostring(command) .. " >/dev/null 2>&1")
-            else
-                luci.sys.call("iwpriv " .. iface .. " maccmd 0 >/dev/null 2>&1")
-            end
-        end
-    end
-
     -- QSDK accepts ACL changes on a running hostapd instance.  Updating both
     -- ACL lists here avoids a radio restart (and therefore avoids dropping
     -- every connected station) when a black/white-list is edited.
@@ -1673,16 +1772,33 @@ local function apply_mac_policy(uci, policy)
         end
         return true, command_output
     end
-    local function sync_hostapd_acl(iface, command_name, active)
+    local function sync_hostapd_acl(iface, command_name, active, previous_active)
         local ok, current = hostapd_command(iface, command_name .. " SHOW")
         if not ok then return false end
+        local present, desired = {}, {}
         for mac in current:gmatch("(%x%x:%x%x:%x%x:%x%x:%x%x:%x%x)") do
-            if not hostapd_command(iface, command_name .. " DEL_MAC " .. mac:upper()) then return false end
+            present[mac:upper()] = true
         end
         if active then
             for _, item in ipairs(list) do
-                if not hostapd_command(iface, command_name .. " ADD_MAC " .. item.mac) then return false end
+                desired[item.mac] = true
+                -- Match the stock router's per-MAC add/delete behavior: an
+                -- ordinary save must not rewrite entries that did not change.
+                -- In particular, touching an unchanged deny entry can cause
+                -- hostapd to reconsider an associated station.
+                local newly_added = not previous_active
+                    or not (previous and previous.listed[item.mac])
+                if newly_added and not present[item.mac]
+                    and not hostapd_command(iface, command_name .. " ADD_MAC " .. item.mac) then return false end
             end
+        end
+        for mac in pairs(present) do
+            -- During an ordinary list edit, remove only MACs that this save
+            -- actually removed.  Deleting unrelated runtime entries makes
+            -- hostapd re-evaluate associated stations and can drop links.
+            local changed_here = previous_active and previous and previous.listed[mac]
+            if not desired[mac] and (active ~= previous_active or changed_here)
+                and not hostapd_command(iface, command_name .. " DEL_MAC " .. mac) then return false end
         end
         return true
     end
@@ -1693,37 +1809,25 @@ local function apply_mac_policy(uci, policy)
     for _, iface in ipairs(ifaces) do
         local accept_active = enabled and policy == "allow"
         local deny_active = enabled and policy == "deny"
-        if not sync_hostapd_acl(iface, "accept_acl", accept_active)
-            or not sync_hostapd_acl(iface, "deny_acl", deny_active) then
+        local mode = accept_active and "1" or "0"
+        local previous_mode = previous and previous.enabled and previous.policy == "allow" and "1" or "0"
+        local previous_accept = previous and previous.enabled and previous.policy == "allow" or false
+        local previous_deny = previous and previous.enabled and previous.policy == "deny" or false
+        if not sync_hostapd_acl(iface, "accept_acl", accept_active, previous_accept)
+            or not sync_hostapd_acl(iface, "deny_acl", deny_active, previous_deny) then
             return false, "运行中的 Wi-Fi ACL 更新失败，名单已保存但尚未即时生效"
         end
         -- 0 = accept unless denied; 1 = deny unless accepted.  This QSDK
         -- hostapd supports changing macaddr_acl at runtime and immediately
         -- re-evaluates connected stations, so mode changes need no reload.
-        local mode = accept_active and "1" or "0"
-        if not hostapd_command(iface, "set macaddr_acl " .. mode) then
+        if mode ~= previous_mode and not hostapd_command(iface, "set macaddr_acl " .. mode) then
             return false, "运行中的 Wi-Fi 访问模式更新失败，名单已保存但尚未即时生效"
         end
 
-        -- A runtime ACL change affects future authentication attempts, but
-        -- hostapd does not consistently evict stations which were already
-        -- associated. Query each control socket (including MLO partner links)
-        -- and remove only clients rejected by the new policy.
-        local station_ok, stations = hostapd_command(iface, "all_sta")
-        if station_ok then
-            for line in stations:gmatch("[^\r\n]+") do
-                local address = line:match("^(%x%x:%x%x:%x%x:%x%x:%x%x:%x%x)$")
-                if address then
-                    local mac = address:upper()
-                    local rejected = enabled
-                        and ((policy == "allow" and not listed[mac])
-                            or (policy == "deny" and listed[mac]))
-                    if rejected then
-                        hostapd_command(iface, "deauthenticate " .. mac .. " reason=1")
-                    end
-                end
-            end
-        end
+        -- The hostapd ACL commands themselves re-evaluate only affected
+        -- stations (DENY_ACL ADD_MAC / ACCEPT_ACL DEL_MAC).  A second all_sta
+        -- pass with explicit deauthenticate is redundant and can kick MLO
+        -- links that were not changed by this save.
     end
     return true, #ifaces > 0 and "名单已即时生效，Wi-Fi 未重启"
         or "名单已保存；主 Wi-Fi 当前未运行，将在启动后生效"
@@ -1858,6 +1962,11 @@ local function with_wifi_reject_lock(callback)
     return ok and result or false
 end
 
+local function wifi_reject_band(uci, record)
+    -- Rejections and live stations share the same physical-radio mapping.
+    return wifi_band_from_interface(uci, record.phy, record.ifname, record.freq)
+end
+
 local function wifi_reject_rows(uci)
     local file = io.open(wifi_reject_file, "r")
     if not file then return {} end
@@ -1888,6 +1997,8 @@ local function wifi_reject_rows(uci)
         if valid_mac(mac) then
             local lease = leases[mac] or {}
             local name = resolved_device_name(uci, catalog, mac, lease.name)
+            local suffix = mac:gsub(":", ""):sub(-4)
+            if name == "有线设备-" .. suffix then name = "无线设备-" .. suffix end
             local device_type, vendor = device_identity(name, mac)
             if vendor == "暂未识别" and mac_is_private(mac) then vendor = "私有 MAC（厂商隐藏）" end
             local ssid = clean(record.ssid, 64)
@@ -1904,8 +2015,8 @@ local function wifi_reject_rows(uci)
                 first_seen = tonumber(record.first_seen) or last_seen,
                 last_seen = last_seen, count = count,
                 rejected_at = last_seen > 0 and os.date("%Y-%m-%d %H:%M:%S", last_seen) or "-",
-                network = guest_ssids[ssid] and "访客 Wi-Fi" or (ssid ~= "" and ssid or "主 Wi-Fi"),
-                band = reason_name .. " · " .. tostring(count) .. " 次",
+                network = ssid ~= "" and ssid or "未知 SSID",
+                band = wifi_reject_band(uci, record),
                 scope = guest_ssids[ssid] and "guest" or "main",
                 device_type = device_type, vendor = vendor, brand = vendor
             }
@@ -2081,7 +2192,7 @@ local function device_traffic_rates(devices)
 end
 
 local function build_device_list(uci)
-    local wireless = known_wireless_clients()
+    local wireless = known_wireless_clients(uci)
     local online_macs, result, leases_by_mac, configured_names, hinted_names = {}, {}, {}, {}, {}
     local guest_ip = uci:get("network", "guest", "ipaddr") or "192.168.4.1"
     local guest_prefix = guest_ip:match("^(%d+%.%d+%.%d+)%.") or "192.168.4"
@@ -2149,7 +2260,7 @@ local function build_device_list(uci)
             elseif vendor:lower():find("xiaomi", 1, true) or vendor:find("小米", 1, true) then
                 display_name = "小米设备-" .. suffix
             elseif wifi then
-                display_name = wifi.band:gsub(" Wi%-Fi$", "") .. " 无线设备-" .. suffix
+                display_name = wifi.band .. " 无线设备-" .. suffix
             else
                 display_name = "有线设备-" .. suffix
             end
@@ -2159,7 +2270,8 @@ local function build_device_list(uci)
         result[#result + 1] = {
             id = mac, uid = mac, ip = ip or "", name = display_name,
             device_type = device_type, vendor = vendor, brand = vendor,
-            type = wifi and wifi.band or "wire", online = online and 1 or 0,
+            type = wifi and "Wi-Fi" or "wire", band = wifi and wifi.band or "",
+            ssid = wifi and wifi.ssid or "", online = online and 1 or 0,
             is_guest = tostring(ip or ""):match("^" .. guest_prefix:gsub("%.", "%%.") .. "%.") and 1 or 0,
             is_remesh = 0, protect = 0, net_enable = net_enable and 1 or 0,
             qos_enable = qos_enable and 1 or 0,
@@ -2800,7 +2912,7 @@ local function extended_jdcapi(method, args, uci)
         return true, { status = 0, message = trim(output) }
     elseif method == "get_macfilter_info" then
         local policy = uci:get("be6500_oem", "access", "policy") or "deny"
-        local client_mac, client_wireless = request_client()
+        local client_mac, client_wireless = request_client(uci)
         return true, { status = 0, enable = uci:get("be6500_oem", "access", "enabled") == "0" and 0 or 1,
             macpolicy = policy, blacklist = access_entries(uci, "deny"), whitelist = access_entries(uci, "allow"),
             client_mac = client_mac, client_wireless = client_wireless and 1 or 0 }
@@ -2808,6 +2920,7 @@ local function extended_jdcapi(method, args, uci)
         if not ensure_oem_config(uci) then
             return true, { status = 1, message = "访问控制配置文件创建失败" }
         end
+        local previous = access_policy_snapshot(uci)
         local policy = args.macpolicy == "allow" and "allow" or "deny"
         if not uci:get("be6500_oem", "access") then uci:section("be6500_oem", "settings", "access", {}) end
         uci:set("be6500_oem", "access", "policy", policy); uci:set("be6500_oem", "access", "enabled", tostring(args.enable) == "0" and "0" or "1")
@@ -2829,7 +2942,7 @@ local function extended_jdcapi(method, args, uci)
         end
         local committed = uci:commit("be6500_oem")
         if not committed then return true, { status = 1, message = "访问控制配置保存失败" } end
-        local applied, apply_message = apply_mac_policy(uci, policy)
+        local applied, apply_message = apply_mac_policy(uci, policy, previous)
         if not applied then return true, { status = 1, message = apply_message } end
         if not reconcile_wifi_reject_rows(uci) then
             return true, { status = 1, message = "名单已生效，但拒绝记录同步清理失败" }

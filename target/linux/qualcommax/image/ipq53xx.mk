@@ -24,6 +24,7 @@ define Device/jdcloud_be6500
 			kmod-qca-nss-ppe-ath-clients \
 			kmod-qca-nss-wifi-plugins \
 			kmod-qca-nss-ecm \
+			kmod-qca-nss-ecm-wifi-plugin \
 			be6500-oem-wifi-firmware \
 		luci-app-rejected-clients \
 		be6500-current-config \

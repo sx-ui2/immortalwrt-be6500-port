@@ -28,6 +28,13 @@
     var suffix = String(mac || '').replace(/[^0-9a-f]/gi, '').slice(-4).toUpperCase();
     return suffix ? '设备-' + suffix : '未命名设备';
   }
+  function rejectedWifiName(name, mac) {
+    name = String(name || '').trim();
+    var suffix = String(mac || '').replace(/[^0-9a-f]/gi, '').slice(-4).toUpperCase();
+    if (/^有线设备-[0-9a-f]{4}$/i.test(name) && name.slice(-4).toUpperCase() === suffix)
+      return '无线设备-' + suffix;
+    return deviceDisplayName(name, mac);
+  }
   function normalizeMac(mac) {
     var compact = String(mac || '').trim().toUpperCase().replace(/[^0-9A-F]/g, '');
     if (compact.length === 12)
@@ -785,7 +792,8 @@
   function deviceRow(device, index) {
     var mac = device.uid || device.id || device.mac || '';
     var online = Number(device.online);
-    var connection = device.type === 'wire' ? '有线连接' : (device.band || device.type || '无线连接');
+    var connection = device.type === 'wire' ? '有线连接' :
+      (String(device.ssid || '未知 SSID') + ' · ' + String(device.band || '未知频段'));
     function formatRate(bytes) {
       bytes = Number(bytes) || 0;
       if (bytes >= 1048576) return (bytes / 1048576).toFixed(bytes >= 10485760 ? 1 : 2) + ' MB/s';
@@ -930,6 +938,9 @@
       var candidates = {}, order = [];
       state.devices.forEach(function (device) {
         var mac = normalizeMac(device.uid || device.id || device.mac);
+        // The access list controls Wi-Fi only.  DHCP/ARP history is not proof
+        // of a wired connection, and wired clients are not valid ACL targets.
+        if (String(device.type || '').indexOf('Wi-Fi') < 0) return;
         if (!mac || listed[mac] || candidates[mac]) return;
         candidates[mac] = { mac: mac, name: device.name || '', rejected_at: '' };
         order.push(mac);
@@ -938,11 +949,12 @@
         var mac = normalizeMac(device.mac || device.uid);
         if (!mac || listed[mac]) return;
         if (!candidates[mac]) {
-          candidates[mac] = { mac: mac, name: device.name || '', rejected_at: device.rejected_at || '' };
+          candidates[mac] = { mac: mac, name: rejectedWifiName(device.name, mac), rejected_at: device.rejected_at || '' };
           order.push(mac);
         } else if (device.rejected_at) {
           candidates[mac].rejected_at = device.rejected_at;
-          if (!candidates[mac].name) candidates[mac].name = device.name || '';
+          if (!candidates[mac].name || /^有线设备-[0-9a-f]{4}$/i.test(candidates[mac].name))
+            candidates[mac].name = rejectedWifiName(device.name, mac);
         }
       });
       id('access-device').innerHTML = '<option value="">-- 请选择 --</option>' + order.map(function (mac) {
@@ -1021,7 +1033,7 @@
     page('拒绝记录',
       '<div class="native-inline-actions native-rejected-actions"><button type="button" id="rejected-refresh">刷新记录</button><button type="button" id="rejected-clear-all">清除全部</button></div>' +
       '<div class="native-info">这里只记录被访问控制实际拒绝的认证或连接请求，不记录附近设备的 Wi-Fi 扫描。加入白名单或移出黑名单后，对应记录会自动清除。</div>' +
-      '<div class="native-table native-rejected-table"><ul class="native-table-head"><li style="width:16%">设备名称</li><li style="width:18%">MAC / IP</li><li style="width:12%">设备类型</li><li style="width:15%">品牌 / 厂商</li><li style="width:11%">网络 / 频段</li><li style="width:16%">最后一次被拒时间</li><li style="width:12%">操作</li></ul><div id="rejected-list"><div class="native-empty">正在读取拒绝记录…</div></div></div>');
+      '<div class="native-table native-rejected-table"><ul class="native-table-head"><li style="width:16%">设备名称</li><li style="width:18%">MAC / IP</li><li style="width:12%">设备类型</li><li style="width:15%">品牌 / 厂商</li><li style="width:11%">SSID / 频段</li><li style="width:16%">最后一次被拒时间</li><li style="width:12%">操作</li></ul><div id="rejected-list"><div class="native-empty">正在读取拒绝记录…</div></div></div>');
     function load() {
       return Promise.all([rpc('web_get_rejected_list', {}), rpc('get_macfilter_info', {})]).then(function (items) {
         state.rejected = asArray(items[0].data || items[0].rejected_list);
@@ -1036,13 +1048,13 @@
           var alreadyResolved = policy === 'allow' ? activeMacs[itemMac] : !activeMacs[itemMac];
           var action = alreadyResolved ? (policy === 'allow' ? '已在白名单' : '已移出黑名单') : (policy === 'allow' ? '加入白名单' : '移出黑名单');
           var actionButton = '<button class="edit rejected-policy"' + (alreadyResolved ? ' disabled' : '') + '>' + action + '</button>';
-          return '<ul class="native-table-row" data-rejected-index="' + index + '"><li style="width:16%"><b>' + esc(deviceDisplayName(item.name, item.mac || item.uid)) + '</b></li><li style="width:18%">' + address + '</li><li style="width:12%">' + esc(item.device_type || '其他设备') + '</li><li style="width:15%">' + esc(item.vendor || item.brand || '暂未识别') + '</li><li style="width:11%"><b>' + esc(item.network || '主 Wi-Fi') + '</b><small>' + esc(item.band || '') + '</small></li><li style="width:16%">' + esc(item.rejected_at || '-') + '</li><li style="width:12%">' + actionButton + '<button class="edit rejected-clear">清除</button></li></ul>';
+          return '<ul class="native-table-row" data-rejected-index="' + index + '"><li style="width:16%"><b>' + esc(rejectedWifiName(item.name, item.mac || item.uid)) + '</b></li><li style="width:18%">' + address + '</li><li style="width:12%">' + esc(item.device_type || '其他设备') + '</li><li style="width:15%">' + esc(item.vendor || item.brand || '暂未识别') + '</li><li style="width:11%"><b>' + esc(item.ssid || item.network || '未知 SSID') + '</b><small>' + esc(item.band || '未知频段') + '</small><small>' + esc(item.reason_name || '访问控制拒绝') + ' · ' + esc(item.count || 1) + ' 次</small></li><li style="width:16%">' + esc(item.rejected_at || '-') + '</li><li style="width:12%">' + actionButton + '<button class="edit rejected-clear">清除</button></li></ul>';
         }).join('') : '<div class="native-empty">暂无被访问控制拒绝的设备</div>';
         document.querySelectorAll('.rejected-policy').forEach(function (button) {
           bindClick(button, function () {
             var item = state.rejected[Number(button.closest('[data-rejected-index]').getAttribute('data-rejected-index'))];
             var mac = item.mac || item.uid;
-            var listItem = { name: item.name || '未知设备', macaddr: mac, mod: policy === 'allow' ? 1 : 0 };
+            var listItem = { name: rejectedWifiName(item.name, mac), macaddr: mac, mod: policy === 'allow' ? 1 : 0 };
             var change = rpc('set_macfilter', { enable: Number(state.rejectedAccess.enable) ? 1 : 0, macpolicy: policy, list: [listItem] })
               .then(function () { return rpc('clear_rejected_devices', { mac: mac, ssid: item.ssid || '' }); });
             busy(button, change, policy === 'allow' ? '已加入白名单' : '已移出黑名单').then(load);
@@ -1404,15 +1416,14 @@
       check('led-enabled', result.enabled);
       set('led-policy', result.policy || 'auto');
       var rules = result.rules && result.rules.length ? result.rules : [
-        { state: 'booting', color: 'blue', mode: 'slow' },
-        { state: 'upgrading', color: 'blue', mode: 'fast' },
         { state: 'overheat', color: 'red', mode: 'fast' },
-        { state: 'wps', color: 'blue', mode: 'fast' },
-        { state: 'wifi_off', color: 'red', mode: 'slow' },
+        { state: 'booting', color: 'red+green', mode: 'fast' },
+        { state: 'upgrading', color: 'green', mode: 'fast' },
+        { state: 'wifi_off', color: 'green+blue', mode: 'steady' },
+        { state: 'plugin', color: 'red+green', mode: 'steady' },
+        { state: 'usb', color: 'red+blue', mode: 'steady' },
         { state: 'offline', color: 'red', mode: 'steady' },
-        { state: 'online', color: 'blue', mode: 'steady' },
-        { state: 'usb', color: 'green', mode: 'steady' },
-        { state: 'plugin', color: 'green', mode: 'steady' }
+        { state: 'online', color: 'blue', mode: 'fast' }
       ];
       rules.forEach(addRule);
       syncFields();

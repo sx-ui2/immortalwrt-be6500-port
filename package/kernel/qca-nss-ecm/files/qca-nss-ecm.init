@@ -75,6 +75,11 @@ start() {
 			front_end_selection="$mode" \
 			register_ip_post_routing=1 register_br_post_routing=1 || return 1
 	fi
+	# ath12k passes PPE-DS node metadata through the ECM Wi-Fi classifier.
+	# Without this bridge, PPE can steer return traffic to a DS Wi-Fi VP
+	# without its enqueue node, leaving the client unable to receive it.
+	modprobe ecm_wifi_plugin >/dev/null 2>&1 ||
+		logger -t qca-nss-ecm 'unable to load ECM Wi-Fi metadata bridge'
 
 	# The factory image only loads the L2 helper in explicit SFE mode.
 	if [ "${engine:-auto}" = sfe ] && [ ! -d /sys/module/ecm_sfe_l2 ]; then
@@ -102,6 +107,7 @@ stop() {
 		[ -w "$path" ] && echo 1 > "$path"
 	done
 	sleep 1
+	rmmod ecm_wifi_plugin 2>/dev/null || true
 	rmmod ecm_sfe_l2 2>/dev/null || true
 	rmmod ecm 2>/dev/null || true
 	rmmod qca_nss_sfe 2>/dev/null || true

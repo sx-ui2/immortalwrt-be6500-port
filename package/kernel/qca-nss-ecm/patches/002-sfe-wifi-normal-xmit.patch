@@ -1,0 +1,31 @@
+--- a/frontends/sfe/ecm_sfe_common.c
++++ b/frontends/sfe/ecm_sfe_common.c
+@@ -101,5 +101,6 @@ static bool ecm_sfe_common_fast_xmit_check(struct ecm_db_iface_instance *to_ii, struct ecm_db_iface_instance *from_ii)
+ {
+ 	ecm_db_iface_type_t type;
++	struct net_device *out_dev;
+ 
+ 	/*
+ 	 * Return failure if user has disabled SFE fast_xmit
+@@ -111,5 +112,21 @@ static bool ecm_sfe_common_fast_xmit_check(struct ecm_db_iface_instance *to_ii, struct ecm_db_iface_instance *from_ii)
+ 
+ 	BUG_ON(!rcu_read_lock_bh_held());
+ 
++	/*
++	 * The ath12k MLD netdev does not transmit packets delivered through
++	 * SFE's fast_xmit path on this platform.  Keep the SFE connection
++	 * accelerated, but use the normal netdev transmit path for Wi-Fi.
++	 * Wired interfaces retain fast_xmit.
++	 */
++	out_dev = dev_get_by_index(&init_net, ecm_db_iface_interface_identifier_get(to_ii));
++	if (out_dev) {
++		bool is_wifi = !!out_dev->ieee80211_ptr;
++
++		dev_put(out_dev);
++		if (is_wifi) {
++			return false;
++		}
++	}
++
+ 	type = ecm_db_iface_type_get(to_ii);
+ 	switch (type) {

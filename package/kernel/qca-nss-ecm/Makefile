@@ -1,7 +1,7 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=qca-nss-ecm
-PKG_RELEASE:=5
+PKG_RELEASE:=7
 
 # Keep ECM on the same QSDK 14.0 r9 release line as qca-nss-ppe.  This tree
 # contains the IPQ5332 PPE front end and the Linux 6.6 compatibility work.
@@ -58,6 +58,7 @@ ECM_MAKE_OPTS:= \
 	ECM_CLASSIFIER_MARK_ENABLE=y \
 	ECM_CLASSIFIER_DSCP_ENABLE=y \
 	ECM_CLASSIFIER_PCC_ENABLE=y \
+	ECM_CLASSIFIER_WIFI_ENABLE=y \
 	ECM_MULTICAST_ENABLE=n \
 	ECM_INTERFACE_PPPOE_ENABLE=y \
 	ECM_INTERFACE_PPP_ENABLE=y \
@@ -77,6 +78,14 @@ define Build/Compile
 		SoC="$(ECM_SOC)" \
 		$(ECM_MAKE_OPTS) \
 		modules
+endef
+
+define Build/InstallDev
+	$(INSTALL_DIR) $(1)/usr/include/qca-nss-ecm $(1)/usr/share/qca-nss-ecm
+	$(CP) $(PKG_BUILD_DIR)/exports/ecm_classifier_wifi_public.h \
+		$(1)/usr/include/qca-nss-ecm/
+	$(CP) $(PKG_BUILD_DIR)/../symvers/qca-nss-ecm.symvers \
+		$(1)/usr/share/qca-nss-ecm/
 endef
 
 $(eval $(call KernelPackage,qca-nss-ecm))
