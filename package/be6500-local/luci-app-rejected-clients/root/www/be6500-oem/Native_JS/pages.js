@@ -1124,11 +1124,18 @@
     page('访客 Wi-Fi 限速',
       row('启用', toggle('qos-enabled', '')) + '<div id="qos-fields"><div class="native-grid">' + row('上传速度（Mbps）', input('qos-upload', 'number', '0.5', 'min="0" step="0.1"')) + row('下载速度（Mbps）', input('qos-download', 'number', '0.5', 'min="0" step="0.1"')) + '</div></div>' + buttons(['qos-save', '保存']) +
       section('奖励模式', row('模式', select('qos-mode', [['0', '性能优先'], ['1', '智能均衡'], ['2', '上网优先']])) +
-        '<p class="native-help">按原厂 smartqos 逻辑：性能优先仅保障 DNS 和网络控制流量；智能均衡启用网页与游戏优先队列；上网优先启用网页与小包优先队列。切换模式会即时刷新 ECM/PPE 流量分类，不会重启 Wi-Fi。</p>' + buttons(['qos-mode-save', '保存'])));
+        '<p class="native-help" id="qos-mode-description"></p>' + buttons(['qos-mode-save', '保存'])));
+    var modeDescriptions = {
+      '0': '除了DNS不做任何优先',
+      '1': '开启网页优先和游戏优先',
+      '2': '开启网页优先和小包优先'
+    };
+    function syncModeDescription() { id('qos-mode-description').textContent = modeDescriptions[value('qos-mode')] || ''; }
     id('qos-enabled').addEventListener('change', function () { show('#qos-fields', checked('qos-enabled')); });
+    id('qos-mode').addEventListener('change', syncModeDescription);
     bindClick('#qos-save', function () { busy(this, rpc('web_set_guest_limit_speed', { enable: checked('qos-enabled') ? 1 : 0, upload: number('qos-upload'), download: number('qos-download') }), '访客限速已即时保存').then(function () { reloadView(); }); });
     bindClick('#qos-mode-save', function () { busy(this, rpc('web_set_credit_mode', { mode: value('qos-mode') }), '流量模式已保存').then(function () { reloadView(); }); });
-    Promise.all([rpc('web_get_guest_limit_speed', {}), rpc('web_get_credit_mode', {})]).then(function (items) { check('qos-enabled', items[0].enable); set('qos-upload', items[0].upload); set('qos-download', items[0].download); set('qos-mode', items[1].mode); show('#qos-fields', checked('qos-enabled')); }).catch(function (error) { notify(error.message, false); });
+    Promise.all([rpc('web_get_guest_limit_speed', {}), rpc('web_get_credit_mode', {})]).then(function (items) { check('qos-enabled', items[0].enable); set('qos-upload', items[0].upload); set('qos-download', items[0].download); set('qos-mode', items[1].mode); show('#qos-fields', checked('qos-enabled')); syncModeDescription(); }).catch(function (error) { notify(error.message, false); });
   }
 
   function ddnsPage() {

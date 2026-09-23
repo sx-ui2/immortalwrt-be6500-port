@@ -48,7 +48,14 @@ class FactoryQosModesTest(unittest.TestCase):
         source = PAGES.read_text()
         for label in ("性能优先", "智能均衡", "上网优先"):
             self.assertIn(label, source)
-        self.assertIn("按原厂 smartqos 逻辑", source)
+        for description in (
+            "除了DNS不做任何优先",
+            "开启网页优先和游戏优先",
+            "开启网页优先和小包优先",
+        ):
+            self.assertIn(description, source)
+        self.assertIn("qos-mode-description", source)
+        self.assertIn("addEventListener('change', syncModeDescription)", source)
 
 
 if __name__ == "__main__":
