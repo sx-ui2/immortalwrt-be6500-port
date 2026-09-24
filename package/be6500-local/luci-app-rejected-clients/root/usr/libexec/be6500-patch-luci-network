@@ -1,0 +1,40 @@
+#!/bin/sh
+
+# QCA8386 is exposed through the legacy swconfig CPU link (eth1), so its three
+# physical sockets are switch ports rather than Linux netdevs.  Keep the
+# regular Devices list truthful and direct users to the switch VLAN editor,
+# where a socket can be made an access or trunk port.  Once a VLAN is saved,
+# its eth1.<vid> netdev becomes available to ordinary LuCI interfaces.
+
+interfaces="${BE6500_LUCI_INTERFACES_VIEW:-/www/luci-static/resources/view/network/interfaces.js}"
+switch_view="${BE6500_LUCI_SWITCH_VIEW:-/www/luci-static/resources/view/network/switch.js}"
+headers="${BE6500_LUCI_HEADERS:-/usr/share/ucode/luci/template/header.ut}"
+cache_root="${BE6500_LUCI_CACHE_ROOT:-/tmp}"
+
+if [ -f "$interfaces" ] && ! grep -q 'be6500PhysicalPortLink' "$interfaces"; then
+	tmp="${interfaces}.be6500.$$"
+	sed "s@s = m.section(form.GridSection, 'device', _('Devices'));@s = m.section(form.GridSection, 'device', _('Devices'), E('div', { 'class': 'cbi-section-descr', 'data-be6500-port-help': '1' }, [ 'LAN1–LAN3 是 eth1 后面的物理交换机端口。要单独使用某个网口或继续添加 VLAN，请打开 ', E('a', { 'href': L.url('admin/network/ports') }, 'LAN 端口与 VLAN'), '；保存后在接口中选择 eth1.<VLAN ID>。' ])); /* be6500PhysicalPortLink */@" "$interfaces" >"$tmp" && mv "$tmp" "$interfaces"
+fi
+
+if [ -f "$switch_view" ] && ! grep -q 'be6500PhysicalPortTitle' "$switch_view"; then
+	tmp="${switch_view}.be6500.$$"
+	sed "s@m = new form.Map('network', _('Switch'),@m = new form.Map('network', 'LAN 端口与 VLAN', /* be6500PhysicalPortTitle */@" "$switch_view" >"$tmp" && mv "$tmp" "$switch_view"
+fi
+
+# The menu and class loader are cached by LuCI.  Bump the shared board cache
+# token and clear only generated caches; network and Wi-Fi are not restarted.
+for header in $headers; do
+	if [ -f "$header" ]; then
+		tmp="${header}.be6500.$$"
+		sed \
+			-e 's#luci\.js?v=26\.236\.50592~9b8ee64-{{ pkgs_update_time }}#luci.js?v=26.236.50592~9b8ee64-be6500v21-{{ pkgs_update_time }}#' \
+			-e 's#be6500v[0-9]*-{{ pkgs_update_time }}#be6500v21-{{ pkgs_update_time }}#' \
+			"$header" >"$tmp" && mv "$tmp" "$header"
+	fi
+done
+
+rm -f "$cache_root/luci-indexcache"
+rm -f "$cache_root"/luci-modulecache/* 2>/dev/null
+
+grep -q 'be6500PhysicalPortLink' "$interfaces" &&
+	grep -q 'be6500PhysicalPortTitle' "$switch_view"

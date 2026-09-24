@@ -1,5 +1,6 @@
 #!/bin/sh
 /usr/libexec/be6500-patch-luci-wireless
+[ -x /usr/libexec/be6500-patch-luci-network ] && /usr/libexec/be6500-patch-luci-network
 [ -x /usr/libexec/be6500-patch-luci-firewall ] && /usr/libexec/be6500-patch-luci-firewall
 if [ -d /usr/share/be6500-luci-overrides/status/include ]; then
 	mkdir -p /www/luci-static/resources/view/status/include

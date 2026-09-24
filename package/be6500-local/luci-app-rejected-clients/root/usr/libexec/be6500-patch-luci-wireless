@@ -3,16 +3,20 @@
 # A sysupgrade may preserve a stale profile from an image built for the other
 # QCN9224 personality.  Synchronize it before LuCI decides which channels to
 # show.  The same helper runs before netifd on every subsequent boot.
-/usr/libexec/be6500-sync-wifi-personality || exit 1
+[ "${BE6500_SKIP_WIFI_PERSONALITY_SYNC:-0}" = 1 ] ||
+	/usr/libexec/be6500-sync-wifi-personality || exit 1
 
-view=/www/luci-static/resources/view/network/wireless.js
+view="${BE6500_LUCI_WIRELESS_VIEW:-/www/luci-static/resources/view/network/wireless.js}"
 [ -f "$view" ] || exit 0
 
-# Width is derived from the regulatory channel/chandef on this board.  Keep
-# LuCI's value in the form for compatibility, but do not expose a separate
-# width selector that can create an invalid 149+160 MHz combination.
-if ! grep -q 'be6500-width-fixed' "$view"; then
-	sed -i "s/E('label',{'style':'float:left; margin-right:3px'},\[_('Width')/E('label',{'class':'be6500-width-fixed','style':'position:absolute;visibility:hidden;width:0;height:0;overflow:hidden'},[_('Width')/" "$view"
+# Width is a user-selectable radio setting.  Earlier development images hid
+# the control to avoid invalid 149+160 MHz combinations; restore it here.  The
+# OEM page and Wi-Fi mode helper already constrain 160 MHz to channels whose
+# complete chandef is supported, so hiding every width was unnecessary.
+if grep -q 'be6500-width-fixed' "$view"; then
+	sed -i "s/E('label',{'class':'be6500-width-fixed','style':'[^']*'},\[_('Width')/E('label',{'style':'float:left; margin-right:3px'},[\/\*be6500-width-selectable\*\/_('Width')/" "$view"
+elif ! grep -q 'be6500-width-selectable' "$view"; then
+	sed -i "s/E('label',{'style':'float:left; margin-right:3px'},\[_('Width')/E('label',{'style':'float:left; margin-right:3px'},[\/\*be6500-width-selectable\*\/_('Width')/" "$view"
 fi
 
 # The QCN9224 split firmware reports a shared regulatory list for both pdevs.
@@ -48,7 +52,7 @@ fi
 # 36.  CAC normally takes about 60 seconds.  The BE6500 serializes radio setup
 # because all pdevs share one QSDK wiphy, so both the AP-ready wait and the next
 # radio's lock wait must exceed CAC or netifd tears the AP down prematurely.
-wifi_script=/lib/netifd/wireless/mac80211.sh
+wifi_script="${BE6500_NETIFD_WIFI_SCRIPT:-/lib/netifd/wireless/mac80211.sh}"
 if [ -f "$wifi_script" ]; then
 	sed -i \
 		-e 's/\[ "$be6500_radio_wait" -lt 45 \]/[ "$be6500_radio_wait" -lt 300 ]/' \
@@ -61,25 +65,26 @@ fi
 # iwinfo exposes the shared QCN92xx frequency capabilities on every logical
 # radio. Channel Analysis must follow each UCI wifi-device's configured band,
 # otherwise it incorrectly creates 2.4 GHz and 5 GHz tabs for every radio.
-channel_view=/www/luci-static/resources/view/status/channel_analysis.js
+channel_view="${BE6500_LUCI_CHANNEL_VIEW:-/www/luci-static/resources/view/status/channel_analysis.js}"
 if [ -f "$channel_view" ] && ! grep -q 'be6500ConfiguredBand' "$channel_view"; then
 	sed -i "s/for(var band in bands){if(bands\[band\]\.channels\.length==0)/for(var band in bands){var be6500ConfiguredBand=wifiDevs[ifname].dev.get('band'),be6500Disabled=String(wifiDevs[ifname].dev.get('disabled'))==='1';if(be6500Disabled||(be6500ConfiguredBand==='2g'\&\&band!=2)||(be6500ConfiguredBand==='5g'\&\&band!=5)||(be6500ConfiguredBand==='6g'\&\&band!=6))continue;if(bands[band].channels.length==0)/" "$channel_view"
 fi
 
 # Change the loader URL whenever this board-specific view patch changes. This
 # prevents a previously opened LuCI tab from reusing the unfiltered class file.
-for header in /usr/share/ucode/luci/template/header.ut; do
+headers="${BE6500_LUCI_HEADERS:-/usr/share/ucode/luci/template/header.ut}"
+for header in $headers; do
 	[ ! -f "$header" ] || sed -i \
-		-e 's#luci\.js?v=26\.236\.50592~9b8ee64-{{ pkgs_update_time }}#luci.js?v=26.236.50592~9b8ee64-be6500v19-{{ pkgs_update_time }}#' \
-		-e 's#be6500v[0-9]*-{{ pkgs_update_time }}#be6500v19-{{ pkgs_update_time }}#' "$header"
+		-e 's#luci\.js?v=26\.236\.50592~9b8ee64-{{ pkgs_update_time }}#luci.js?v=26.236.50592~9b8ee64-be6500v21-{{ pkgs_update_time }}#' \
+		-e 's#be6500v[0-9]*-{{ pkgs_update_time }}#be6500v21-{{ pkgs_update_time }}#' "$header"
 done
 
-grep -q 'be6500SplitMode' "$view"
+grep -q 'be6500SplitMode' "$view" && grep -q 'be6500-width-selectable' "$view"
 
 # LuCI's stock swconfig RPC only exposes link state and speed.  Export the
 # QCA8386 per-port MIB byte counters as well so the overview does not show
 # every LAN socket as 0 B.
-rpcd_luci=/usr/share/rpcd/ucode/luci
+rpcd_luci="${BE6500_RPCD_LUCI:-/usr/share/rpcd/ucode/luci}"
 if [ -f "$rpcd_luci" ] && ! grep -q 'port.rx_bytes = +m\[1\]' "$rpcd_luci"; then
 	sed -i '/^[[:space:]]*getSwconfigPortState:/,/^[[:space:]]*setPassword:/ {
 		/^[[:space:]]*let m;[[:space:]]*$/a\
