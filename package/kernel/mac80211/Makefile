@@ -35,7 +35,7 @@ PKG_BUILD_DIR:=$(MAC80211_PKG_BUILD_DIR)/backports-6.1-$(MAC80211_PKG_KERNEL_VER
 PKG_BUILD_PARALLEL:=1
 
 MKHASH ?= $(STAGING_DIR_HOST)/bin/mkhash
-PKG_BUILD_ID:=qcn92xx-stage1
+PKG_BUILD_ID:=qcn92xx-rfpath-stage2
 
 ifeq (y, $(filter y, $(CONFIG_TARGET_echo) $(CONFIG_TARGET_sdx85)))
 	SRCPREFIX:=
@@ -498,6 +498,7 @@ define Build/Prepare
 	cp -rf $(LOCAL_SRC)/* $(PKG_BUILD_DIR)
 	$(PATCH) -d $(PKG_BUILD_DIR) -p1 < $(PATCH_DIR)/ath12k/0999-d-BE6500-select-single-or-dual-mac-firmware.patch
 	$(PATCH) -d $(PKG_BUILD_DIR) -p1 < $(PATCH_DIR)/ath12k/1000-d-BE6500-skip-absent-IPQ5332-rxgainlut.patch
+	$(PATCH) -d $(PKG_BUILD_DIR) -p1 < $(PATCH_DIR)/ath12k/1001-d-BE6500-auto-switch-single-mac-rf-path.patch
 ifdef CONFIG_PACKAGE_QCN_EXTN
 	$(CP) $(TOPDIR)/$(SRCPREFIX)src/wlan-open-extns/subsys/src $(PKG_BUILD_DIR)/net/mac80211/qcn_extns
 	$(CP) $(TOPDIR)/$(SRCPREFIX)src/wlan-open-extns/ath/ath12k/src $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/qcn_extns
