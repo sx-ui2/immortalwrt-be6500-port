@@ -5,6 +5,25 @@
 [ -x /etc/init.d/be6500-fw4-multiwan ] && /etc/init.d/be6500-fw4-multiwan enable
 [ -x /etc/init.d/be6500-guest-qos ] && /etc/init.d/be6500-guest-qos enable
 [ -x /etc/init.d/be6500-wifi-personality ] && /etc/init.d/be6500-wifi-personality enable
+[ -x /etc/init.d/be6500-game-port ] && /etc/init.d/be6500-game-port enable
+
+# Remove the temporary per-PHY disable experiment. The factory port page does
+# not power LAN sockets off; it assigns IPTV and game-port roles instead.
+[ -x /etc/init.d/be6500-port-control ] && /etc/init.d/be6500-port-control disable
+rm -f /etc/init.d/be6500-port-control /usr/libexec/be6500-port-control
+if [ "$(uci -q get be6500_oem.game)" != "settings" ]; then
+	uci -q set be6500_oem.game=settings
+	uci -q set be6500_oem.game.enable=0
+	uci -q set be6500_oem.game.port=lan2
+fi
+uci -q delete be6500_oem.lan1
+uci -q delete be6500_oem.lan2
+uci -q delete be6500_oem.lan3
+uci -q commit be6500_oem
+while section="$(uci -q show network | sed -n "s/^network\.\(@switch_ext\[[0-9][0-9]*\]\)\.be6500_port=.*/\1/p" | head -n1)"; [ -n "$section" ]; do
+	uci -q delete "network.$section" || break
+done
+uci -q commit network
 # ECM is the only owner of the Qualcomm connection fast path. Remove service
 # links left by development images that used a separate WAN hotplug controller.
 [ -x /etc/init.d/be6500-accel ] && /etc/init.d/be6500-accel disable

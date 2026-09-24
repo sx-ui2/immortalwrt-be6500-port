@@ -1,0 +1,18 @@
+#!/bin/sh
+
+# Apply the factory IPTV 802.1p value to every skb priority on the WAN VLAN.
+# This runs after netifd creates the implicit eth0.<VID> device.
+
+[ "$(uci -q get network.iptv.be6500_enabled)" = "1" ] || exit 0
+[ "$(uci -q get network.iptv.be6500_access_mode)" = "vlan" ] || exit 0
+
+vid="$(uci -q get network.iptv.be6500_vlan_id)"
+priority="$(uci -q get network.iptv.be6500_vlan_priority)"
+case "$vid" in ''|*[!0-9]*) exit 1;; esac
+case "$priority" in 0|1|2|3|4|5|6|7) ;; *) priority=0;; esac
+
+device="eth0.$vid"
+ip link show dev "$device" >/dev/null 2>&1 || exit 0
+ip link set dev "$device" type vlan egress-qos-map \
+	0:"$priority" 1:"$priority" 2:"$priority" 3:"$priority" \
+	4:"$priority" 5:"$priority" 6:"$priority" 7:"$priority"

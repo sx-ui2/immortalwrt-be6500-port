@@ -1,0 +1,16 @@
+#!/bin/sh /etc/rc.common
+
+START=98
+STOP=10
+
+start() {
+	/usr/libexec/be6500-game-port start
+}
+
+stop() {
+	/usr/libexec/be6500-game-port stop
+}
+
+reload() {
+	/usr/libexec/be6500-game-port reload
+}

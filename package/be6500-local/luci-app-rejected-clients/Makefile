@@ -1,7 +1,7 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=luci-app-rejected-clients
-PKG_RELEASE:=36
+PKG_RELEASE:=38
 PKG_MAINTAINER:=Codex
 
 include $(INCLUDE_DIR)/package.mk
@@ -60,6 +60,8 @@ define Package/luci-app-rejected-clients/install
 	$(INSTALL_BIN) ./root/usr/libexec/be6500-sync-wifi-personality $(1)/usr/libexec/be6500-sync-wifi-personality
 	$(INSTALL_BIN) ./root/usr/libexec/be6500-patch-luci-wireless $(1)/usr/libexec/be6500-patch-luci-wireless
 	$(INSTALL_BIN) ./root/usr/libexec/be6500-patch-luci-network $(1)/usr/libexec/be6500-patch-luci-network
+	$(INSTALL_BIN) ./root/usr/libexec/be6500-game-port $(1)/usr/libexec/be6500-game-port
+	$(INSTALL_BIN) ./root/usr/libexec/be6500-iptv-priority $(1)/usr/libexec/be6500-iptv-priority
 	$(INSTALL_BIN) ./root/usr/libexec/be6500-patch-luci-firewall $(1)/usr/libexec/be6500-patch-luci-firewall
 	$(INSTALL_BIN) ./root/usr/libexec/be6500-fw4-multiwan $(1)/usr/libexec/be6500-fw4-multiwan
 	$(INSTALL_DIR) $(1)/etc/uci-defaults
@@ -79,9 +81,11 @@ define Package/luci-app-rejected-clients/install
 	$(INSTALL_BIN) ./root/etc/init.d/be6500-led $(1)/etc/init.d/be6500-led
 	$(INSTALL_BIN) ./root/etc/init.d/be6500-fw4-multiwan $(1)/etc/init.d/be6500-fw4-multiwan
 	$(INSTALL_BIN) ./root/etc/init.d/be6500-guest-qos $(1)/etc/init.d/be6500-guest-qos
+	$(INSTALL_BIN) ./root/etc/init.d/be6500-game-port $(1)/etc/init.d/be6500-game-port
 	$(INSTALL_DIR) $(1)/etc/hotplug.d/iface
 	$(INSTALL_BIN) ./root/etc/hotplug.d/iface/95-be6500-fw4-multiwan $(1)/etc/hotplug.d/iface/95-be6500-fw4-multiwan
 	$(INSTALL_BIN) ./root/etc/hotplug.d/iface/96-be6500-guest-qos $(1)/etc/hotplug.d/iface/96-be6500-guest-qos
+	$(INSTALL_BIN) ./root/etc/hotplug.d/iface/97-be6500-iptv-priority $(1)/etc/hotplug.d/iface/97-be6500-iptv-priority
 	$(INSTALL_DIR) $(1)/usr/sbin
 	$(INSTALL_BIN) ./root/usr/sbin/be6500-switch-wifi-mode $(1)/usr/sbin/be6500-switch-wifi-mode
 	$(INSTALL_BIN) ./root/usr/sbin/be6500-qos-apply $(1)/usr/sbin/be6500-qos-apply
@@ -92,7 +96,6 @@ define Package/luci-app-rejected-clients/install
 	$(INSTALL_DATA) ./root/usr/share/rpcd/acl.d/luci-app-rejected-clients.json $(1)/usr/share/rpcd/acl.d/luci-app-rejected-clients.json
 	$(INSTALL_DIR) $(1)/usr/share/luci/menu.d
 	$(INSTALL_DATA) ./root/usr/share/luci/menu.d/luci-app-rejected-clients.json $(1)/usr/share/luci/menu.d/luci-app-rejected-clients.json
-	$(INSTALL_DATA) ./root/usr/share/luci/menu.d/be6500-network-ports.json $(1)/usr/share/luci/menu.d/be6500-network-ports.json
 	$(INSTALL_DIR) $(1)/etc/config
 	$(INSTALL_CONF) ./root/etc/config/be6500_oem $(1)/etc/config/be6500_oem
 	$(INSTALL_CONF) ./root/etc/config/be6500_oem_api $(1)/etc/config/be6500_oem_api

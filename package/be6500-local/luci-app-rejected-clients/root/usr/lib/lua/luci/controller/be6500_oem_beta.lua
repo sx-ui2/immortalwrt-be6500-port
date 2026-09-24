@@ -2385,6 +2385,78 @@ end
 -- port 3, LAN2 is port 2 and LAN3 is port 1.
 local iptv_ports = { lan1 = "3", lan2 = "2", lan3 = "1" }
 
+local function read_sysfs_value(path)
+    local file = io.open(path, "r")
+    if not file then return "" end
+    local value = trim(file:read("*l") or "")
+    file:close()
+    return value
+end
+
+local function switch_port_states()
+    local raw = luci.sys.exec([[ubus call luci getSwconfigPortState '{"switch":"switch1"}' 2>/dev/null]]) or ""
+    local decoded = require("luci.jsonc").parse(raw) or {}
+    local values = decoded.result or decoded
+    if type(values) == "table" and type(values[1]) == "table" and values[1].port == nil
+        and type(values[1][1]) == "table" then values = values[1] end
+    local states = {}
+    for _, item in pairs(type(values) == "table" and values or {}) do
+        local port = tonumber(item.port)
+        if port then
+            local linked = item.link == true or tonumber(item.link) == 1 or item.link == "up"
+            local full_duplex = item.duplex == true or tonumber(item.duplex) == 1 or item.duplex == "full"
+            states[port] = {
+                link = linked and 1 or 0,
+                speed = tonumber(item.speed) or 0,
+                duplex = full_duplex and 1 or 0,
+                rx_bytes = tonumber(item.rx_bytes) or 0,
+                tx_bytes = tonumber(item.tx_bytes) or 0
+            }
+        end
+    end
+    return states
+end
+
+local function configured_port_role(uci, name)
+    local enabled = uci:get("network", "iptv", "be6500_enabled") == "1"
+    if enabled and uci:get("network", "iptv", "be6500_access_mode") == "lan"
+        and uci:get("network", "iptv", "be6500_source_port") == name then
+        return "iptv_source"
+    end
+    if enabled and uci:get("network", "iptv", "be6500_stb_port") == name then
+        return "iptv_stb"
+    end
+    if uci:get("be6500_oem", "game", "enable") == "1"
+        and uci:get("be6500_oem", "game", "port") == name then
+        return "game"
+    end
+    return "lan"
+end
+
+local function port_settings_payload(uci)
+    local switch_states = switch_port_states()
+    local ports = {
+        {
+            id = "wan", name = "WAN", switch_port = "独立", role = "wan",
+            link = read_sysfs_value("/sys/class/net/eth0/carrier") == "1" and 1 or 0,
+            speed = tonumber(read_sysfs_value("/sys/class/net/eth0/speed")) or 0,
+            duplex = read_sysfs_value("/sys/class/net/eth0/duplex"):lower() == "full" and 1 or 0
+        }
+    }
+    for _, name in ipairs({ "lan1", "lan2", "lan3" }) do
+        local number = tonumber(iptv_ports[name])
+        local state = switch_states[number] or {}
+        local role = configured_port_role(uci, name)
+        ports[#ports + 1] = {
+            id = name, name = name:upper(), switch_port = number, role = role,
+            link = tonumber(state.link) or 0, speed = tonumber(state.speed) or 0,
+            duplex = tonumber(state.duplex) or 0,
+            rx_bytes = tonumber(state.rx_bytes) or 0, tx_bytes = tonumber(state.tx_bytes) or 0
+        }
+    end
+    return { status = 0, ports = ports }
+end
+
 local function configure_iptv_switch(uci, source_port, stb_port)
     local stale, lan_vlan = {}, nil
     uci:foreach("network", "switch_vlan", function(section)
@@ -2771,6 +2843,8 @@ local function extended_jdcapi(method, args, uci)
         local ifname = clean(args.ifname, 16)
         if ifname ~= "eth0" then return true, { status = 1, message = "当前交换机布局仅支持 eth0 作为 WAN" } end
         uci:set("network", "wan", "device", ifname); uci:delete("network", "wan", "ifname"); uci:commit("network"); return true, status
+    elseif method == "get_port_settings" then
+        return true, port_settings_payload(uci)
     elseif method == "get_iptv_info" then
         local runtime = ubus_interface("iptv")
         local source_port = uci:get("network", "iptv", "be6500_source_port") or "lan1"
@@ -2780,6 +2854,7 @@ local function extended_jdcapi(method, args, uci)
             enable = uci:get("network", "iptv", "be6500_enabled") == "1" and 1 or 0,
             access_mode = uci:get("network", "iptv", "be6500_access_mode") or "vlan",
             vlan_id = tonumber((uci:get("network", "iptv", "be6500_vlan_id"))) or 4000,
+            vlan_priority = tonumber((uci:get("network", "iptv", "be6500_vlan_priority"))) or 0,
             source_port = source_port,
             stb_port = uci:get("network", "iptv", "be6500_stb_port") or "none",
             auth_enable = uci:get("be6500_oem", "iptv", "auth_enable") == "1" and 1 or 0,
@@ -2800,6 +2875,7 @@ local function extended_jdcapi(method, args, uci)
         local enabled = tonumber(args.enable) == 1
         local access_mode = args.access_mode == "lan" and "lan" or "vlan"
         local vlan_id = tonumber(args.vlan_id) or 0
+        local vlan_priority = tonumber(args.vlan_priority) or 0
         local source_port = iptv_ports[args.source_port] and args.source_port or "lan1"
         local stb_port = args.stb_port == "none" and "none" or (iptv_ports[args.stb_port] and args.stb_port or "none")
         local auth_enable = tonumber(args.auth_enable) == 1
@@ -2809,12 +2885,17 @@ local function extended_jdcapi(method, args, uci)
         local udpxy_enable = tonumber(args.udpxy_enable) == 1
         local udpxy_port = tonumber(args.udpxy_port) or 4022
         if enabled and access_mode == "vlan" and (vlan_id < 1 or vlan_id > 4094) then return true, { status = 1, message = "IPTV VLAN ID 必须为 1–4094" } end
+        if vlan_priority < 0 or vlan_priority > 7 or vlan_priority % 1 ~= 0 then return true, { status = 1, message = "IPTV VLAN 优先级必须为 0–7" } end
         if enabled and access_mode == "vlan" and uci:get("network", "wan", "be6500_vlan_mode") == "tagged"
             and tonumber((uci:get("network", "wan", "be6500_vlan_id"))) == vlan_id then
             return true, { status = 1, message = "IPTV VLAN ID 不能与互联网 VLAN ID 相同" }
         end
         if enabled and access_mode == "lan" and stb_port ~= "none" and source_port == stb_port then
             return true, { status = 1, message = "IPTV 上联口不能同时作为机顶盒输出口" }
+        end
+        if enabled and stb_port ~= "none" and uci:get("be6500_oem", "game", "enable") == "1"
+            and uci:get("be6500_oem", "game", "port") == stb_port then
+            return true, { status = 1, message = stb_port:upper() .. " 已设为游戏口，请先关闭游戏口或选择其他 IPTV 端口" }
         end
         if auth_enable and (not enabled or not valid_mac(auth_mac)) then return true, { status = 1, message = "请先开启 IPTV 并填写正确的机顶盒 MAC 地址" } end
         if auth_enable and stb_port ~= "none" then return true, { status = 1, message = "启用身份模拟时，机顶盒端口绑定必须设为不绑定" } end
@@ -2853,6 +2934,7 @@ local function extended_jdcapi(method, args, uci)
         uci:set("network", "iptv", "be6500_enabled", enabled and "1" or "0")
         uci:set("network", "iptv", "be6500_access_mode", access_mode)
         uci:set("network", "iptv", "be6500_vlan_id", tostring(vlan_id))
+        uci:set("network", "iptv", "be6500_vlan_priority", tostring(vlan_priority))
         uci:set("network", "iptv", "be6500_source_port", source_port)
         uci:set("network", "iptv", "be6500_stb_port", stb_port)
         if auth_enable then
@@ -2885,7 +2967,7 @@ local function extended_jdcapi(method, args, uci)
         end)
         ensure_iptv_firewall(uci, enabled)
         uci:commit("network"); uci:commit("firewall"); uci:commit("udpxy"); uci:commit("be6500_oem")
-        luci.sys.call("ubus call network reload >/dev/null 2>&1; /etc/init.d/firewall reload >/dev/null 2>&1; [ -x /etc/init.d/udpxy ] && /etc/init.d/udpxy restart >/dev/null 2>&1 &")
+        luci.sys.call("(ubus call network reload >/dev/null 2>&1; sleep 1; /usr/libexec/be6500-iptv-priority >/dev/null 2>&1; /etc/init.d/firewall reload >/dev/null 2>&1; [ -x /etc/init.d/udpxy ] && /etc/init.d/udpxy restart >/dev/null 2>&1) &")
         return true, { status = 0, message = udpxy_enable and not (file_exists("/usr/bin/udpxy") or file_exists("/usr/sbin/udpxy")) and "IPTV 已保存；udpxy 组件尚未安装" or "IPTV 设置已保存" }
     elseif method == "capture_iptv_dhcp" then
         if luci.sys.call("command -v tcpdump >/dev/null 2>&1") ~= 0 then return true, { status = 1, message = "路由器未安装 tcpdump，无法自动抓取" } end
@@ -3654,7 +3736,38 @@ function action_jdcapi()
     elseif method == "get_mesh_re_status" then
         payload = { enabled = 0, status = 0 }
     elseif method == "web_get_smart_gaming" or method == "get_game_info" then
-        payload = { enabled = 0, enable = 0, status = 0 }
+        local enabled = uci:get("be6500_oem", "game", "enable") == "1" and 1 or 0
+        local port = uci:get("be6500_oem", "game", "port") or "lan2"
+        payload = { enabled = enabled, enable = enabled, port = port, status = 0 }
+    elseif method == "web_set_smart_gaming" or method == "set_game_info" then
+        local enabled = tonumber(args.enable or args.enabled) == 1
+        local port = tostring(args.port or "lan2"):lower()
+        if not iptv_ports[port] then
+            payload = { status = 1, message = "请选择 LAN1、LAN2 或 LAN3 作为游戏口" }
+        else
+            local iptv_enabled = uci:get("network", "iptv", "be6500_enabled") == "1"
+            local conflicts = iptv_enabled and (
+                uci:get("network", "iptv", "be6500_stb_port") == port or
+                (uci:get("network", "iptv", "be6500_access_mode") == "lan" and
+                    uci:get("network", "iptv", "be6500_source_port") == port))
+            if enabled and conflicts then
+                payload = { status = 1, message = port:upper() .. " 已由 IPTV 使用，请选择其他游戏口" }
+            else
+                if not uci:get("be6500_oem", "game") then
+                    uci:section("be6500_oem", "settings", "game", {})
+                end
+                uci:set("be6500_oem", "game", "enable", enabled and "1" or "0")
+                uci:set("be6500_oem", "game", "port", port)
+                if not uci:commit("be6500_oem") then
+                    payload = { status = 1, message = "游戏口设置保存失败" }
+                else
+                    local rc = luci.sys.call("/etc/init.d/be6500-game-port restart >/tmp/be6500-game-port.log 2>&1")
+                    payload = rc == 0 and { status = 0, enable = enabled and 1 or 0, enabled = enabled and 1 or 0, port = port,
+                        message = "游戏口设置已即时应用" }
+                        or { status = 1, message = "游戏口硬件优先级应用失败，请查看系统日志" }
+                end
+            end
+        end
     elseif method == "get_wifi_freq_mode" then
         payload = { mode = tonumber((uci:get("wireless", "main", "freq_mode"))) or 0 }
     elseif method == "web_get_dual_frequency_optimization" then

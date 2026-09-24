@@ -1,0 +1,10 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR BSD-3-Clause)
+/* RAM-only diagnostic variant.  The MDIO controller is packaged as a module
+ * without autoload so the already-proven raw eth1 management path comes up
+ * first.  It is not a factory or sysupgrade target.
+ */
+#include "ipq5332-jdcloud-be6500-wired-initramfs.dts"
+
+/ {
+	be6500,mdio-staged;
+};

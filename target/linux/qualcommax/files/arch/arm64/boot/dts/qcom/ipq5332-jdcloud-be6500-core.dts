@@ -1,0 +1,209 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR BSD-3-Clause)
+/*
+ * JDCloud ZhaoYun BE6500 — core-only QSDK 14 / Linux 6.6 migration.
+ * STATIC DEVELOPMENT INPUT, NOT A FLASHABLE OR BOOT-VALIDATED BOARD PORT.
+ * Board wiring is transcribed from be6500-qwrt-live.dtb; SoC bindings come
+ * from the pinned QSDK 6.6 ipq5332.dtsi, not the flattened 5.4 device tree.
+ */
+
+/dts-v1/;
+
+#include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/input/input.h>
+#include "ipq5332.dtsi"
+
+/ {
+	model = "JDCloud ZhaoYun BE6500 (6.6 core-only development)";
+	compatible = "jdcloud,be6500", "qcom,ipq5332";
+	be6500,port-stage = "core-only-not-boot-validated";
+
+	aliases {
+		serial0 = &blsp1_uart0;
+		mmc0 = &sdhc;
+	};
+
+	chosen {
+		stdout-path = "serial0:115200n8";
+		/* No old root PARTUUID, board-data override or boot command copied. */
+	};
+
+	memory@40000000 {
+		device_type = "memory";
+		reg = <0x0 0x40000000 0x0 0x40000000>;
+	};
+
+	/delete-node/ pmu-v7;
+
+	reserved-memory {
+		/delete-node/ tzapp@0;
+
+		jd_tzapp: tzapp@49b00000 {
+			reg = <0x0 0x49b00000 0x0 0x600000>;
+			no-map;
+		};
+
+		/* Preserve captured fixed reservations; do not let Linux reuse them.
+		 * These are NOT a claim of 6.6 wireless firmware compatibility.
+		 * The radio/remoteproc nodes remain disabled with no memory binding.
+		 */
+		wcnss@4a900000 {
+			reg = <0x0 0x4a900000 0x0 0x2300000>;
+			no-map;
+		};
+		m3-dump@4cc00000 {
+			reg = <0x0 0x4cc00000 0x0 0x100000>;
+			no-map;
+		};
+		q6-etr-dump@4cd00000 {
+			reg = <0x0 0x4cd00000 0x0 0x100000>;
+			no-map;
+		};
+		q6-caldb@4ce00000 {
+			reg = <0x0 0x4ce00000 0x0 0x500000>;
+			no-map;
+		};
+		jd_mlo_global_mem: mlo@4db00000 {
+			/* QSDK 14's IPQ5332 firmware requests the full 18 MiB MLO
+			 * arena.  The earlier 17 MiB factory-map carry-over made the
+			 * integrated ath12k QMI memory assignment fail with -EINVAL.
+			 */
+			reg = <0x0 0x4db00000 0x0 0x1200000>;
+			no-map;
+		};
+		jd_qcn9224_pcie1: qcn9224-pcie1@51e00000 {
+			reg = <0x0 0x51e00000 0x0 0x3200000>;
+			no-map;
+		};
+	};
+
+	leds {
+		compatible = "gpio-leds";
+		pinctrl-0 = <&jd_led_pins>;
+		pinctrl-names = "default";
+
+		led-red {
+			label = "led_red";
+			gpios = <&tlmm 24 GPIO_ACTIVE_HIGH>;
+			default-state = "keep";
+		};
+		led-green {
+			label = "led_green";
+			gpios = <&tlmm 33 GPIO_ACTIVE_HIGH>;
+			default-state = "keep";
+		};
+		led-blue {
+			label = "led_blue";
+			gpios = <&tlmm 49 GPIO_ACTIVE_HIGH>;
+			default-state = "keep";
+		};
+	};
+
+	keys {
+		compatible = "gpio-keys";
+		pinctrl-0 = <&jd_key_pins>;
+		pinctrl-names = "default";
+		/* The live tree also contains an inconsistent WPS GPIO35 node.
+		 * Keep buttons disabled until physical mapping is confirmed.
+		 */
+		status = "disabled";
+		joy {
+			label = "joy";
+			linux,code = <KEY_WPS_BUTTON>;
+			gpios = <&tlmm 31 GPIO_ACTIVE_LOW>;
+			debounce-interval = <60>;
+		};
+		reset {
+			label = "reset";
+			linux,code = <KEY_RESTART>;
+			gpios = <&tlmm 32 GPIO_ACTIVE_LOW>;
+			debounce-interval = <60>;
+		};
+	};
+};
+
+&sleep_clk { clock-frequency = <32000>; };
+&xo { clock-frequency = <24000000>; };
+
+&blsp1_uart0 {
+	pinctrl-0 = <&serial_0_pins>;
+	pinctrl-names = "default";
+	status = "okay";
+};
+
+&sdhc {
+	bus-width = <4>;
+	max-frequency = <192000000>;
+	mmc-ddr-1_8v;
+	mmc-hs200-1_8v;
+	non-removable;
+	pinctrl-0 = <&jd_emmc_pins>;
+	pinctrl-names = "default";
+	status = "okay";
+};
+
+&tlmm {
+	jd_emmc_pins: emmc-state {
+		clk-pins {
+			pins = "gpio13";
+			function = "sdc_clk";
+			drive-strength = <8>;
+			bias-disable;
+		};
+		cmd-pins {
+			pins = "gpio12";
+			function = "sdc_cmd";
+			drive-strength = <8>;
+			bias-pull-up;
+		};
+		data-pins {
+			pins = "gpio8", "gpio9", "gpio10", "gpio11";
+			function = "sdc_data";
+			drive-strength = <8>;
+			bias-pull-up;
+		};
+	};
+	jd_led_pins: leds-state {
+		pins = "gpio24", "gpio33", "gpio49";
+		function = "gpio";
+		drive-strength = <8>;
+		bias-pull-down;
+	};
+	jd_key_pins: keys-state {
+		pins = "gpio31", "gpio32";
+		function = "gpio";
+		drive-strength = <8>;
+		bias-pull-up;
+	};
+};
+
+/* Do not silently enable a reference board's network or radio topology. */
+&mdio { status = "disabled"; };
+&ess_instance { status = "disabled"; };
+&{/soc@0/edma@3ab00000} { status = "disabled"; };
+&{/soc@0/nss-ppe} { status = "disabled"; };
+&wifi0 { status = "disabled"; };
+&wifi1 { status = "disabled"; };
+&wifi2 { status = "disabled"; };
+&wifi3 { status = "disabled"; };
+&wifi4 { status = "disabled"; };
+&wifi5 { status = "disabled"; };
+&q6v5_wcss {
+	/delete-property/ memory-region;
+	status = "disabled";
+};
+&qcom_test_userpd1 { status = "disabled"; };
+&wcss { status = "disabled"; };
+&usb3 { status = "disabled"; };
+&seccrypt { status = "disabled"; };
+&eip { status = "disabled"; };
+&eip_crypto { status = "disabled"; };
+&qseecom {
+	memory-region = <&jd_tzapp>;
+	status = "disabled";
+};
+&ctx_save { status = "disabled"; };
+&minidump_mem { status = "disabled"; };
+&uio_firmware { status = "disabled"; };
+&uio_host { status = "disabled"; };
+&uio_nss { status = "disabled"; };
+&{/soc@0/qfprom} { status = "disabled"; };

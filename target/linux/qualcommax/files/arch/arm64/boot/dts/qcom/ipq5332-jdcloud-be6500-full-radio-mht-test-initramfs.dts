@@ -1,0 +1,24 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR BSD-3-Clause)
+/*
+ * RAM-only full-radio plus QCA8386/MHT cold-boot test.
+ *
+ * Keep the boot-validated v67 radio/memory topology.  Enable the second SSDK
+ * MHT instance while retaining the preserve-state MDIO policy inherited by
+ * the v67 DTS (no late GPIO reset or PHY/UNIPHY address rewrite).  Match the
+ * factory/QWRT ownership model: SSDK alone owns QCA8386; the experimental DSA
+ * node must not probe the same switch at the same time.
+ */
+#include "ipq5332-jdcloud-be6500-full-radio-initramfs.dts"
+
+/ {
+	model = "JDCloud ZhaoYun BE6500 (6.6 v72 QWRT swconfig port test)";
+	be6500,port-stage = "v72-qwrt-swconfig-port-test";
+};
+
+&mdio {
+	/delete-node/ switch@10;
+};
+
+&jd_mht {
+	status = "okay";
+};

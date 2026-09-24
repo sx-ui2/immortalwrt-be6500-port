@@ -516,6 +516,88 @@
     }).catch(function (error) { notify(error.message, false); });
   }
 
+  function portsPage() {
+    var roleLabels = {
+      wan: '互联网（WAN）', lan: '局域网（LAN）', game: '游戏口',
+      iptv_source: 'IPTV 上联口', iptv_stb: 'IPTV 专用口'
+    };
+    function linkText(port) {
+      if (!Number(port.link)) return '未连接';
+      var speed = Number(port.speed) || 0;
+      return (speed >= 1000 ? (speed / 1000) + ' Gbps' : speed + ' Mbps') + (Number(port.duplex) ? ' · 全双工' : '');
+    }
+    function renderPorts(result) {
+      var ports = asArray(result.ports);
+      id('physical-port-list').innerHTML = ports.map(function (port) {
+        var role = String(port.role || (port.id === 'wan' ? 'wan' : 'lan'));
+        var speed = Number(port.speed) || 0;
+        var warning = Number(port.link) && speed > 0 && speed < 1000 ? '<small class="native-port-warning">协商速率偏低，请检查网线和对端设备</small>' : '';
+        return '<div class="native-port-row" data-port="' + esc(port.id) + '">' +
+          '<div class="native-port-name"><strong>' + esc(port.name || String(port.id).toUpperCase()) + '</strong><small>物理端口 ' + esc(port.switch_port || '') + '</small></div>' +
+          '<div class="native-port-link"><i class="' + (Number(port.link) ? 'up' : '') + '"></i><span>' + esc(linkText(port)) + '</span>' + warning + '</div>' +
+          '<div class="native-port-role"><span class="native-value">' + esc(roleLabels[role] || roleLabels.lan) + '</span></div></div>';
+      }).join('');
+      state.physicalPorts = ports;
+    }
+    function sync() {
+      show('#port-iptv-fields', checked('port-iptv-enabled'));
+      show('#port-game-fields', checked('port-game-enabled'));
+    }
+    function render(items) {
+      var portInfo = items[0] || {}, iptv = items[1] || {}, game = items[2] || {};
+      state.portIptv = iptv;
+      renderPorts(portInfo);
+      check('port-iptv-enabled', iptv.enable); set('port-iptv-vlan-id', iptv.vlan_id || 4000);
+      set('port-iptv-priority', iptv.vlan_priority == null ? 0 : iptv.vlan_priority);
+      set('port-iptv-lan', iptv.stb_port && iptv.stb_port !== 'none' ? iptv.stb_port : 'lan3');
+      check('port-game-enabled', game.enable); set('port-game-lan', game.port || 'lan2');
+      sync();
+    }
+    function load() {
+      return Promise.all([rpc('get_port_settings', {}), rpc('get_iptv_info', {}), rpc('get_game_info', {})])
+        .then(render).catch(function (error) { notify(error.message, false); });
+    }
+    page('端口设置',
+      section('网口信息',
+        '<p class="native-info">显示 WAN 与 LAN1–LAN3 的真实连接状态和协商速率。LAN 口属于 QCA8386 交换机，不会伪装成独立 Linux 网卡。</p>' +
+        '<div class="native-port-head"><span>端口</span><span>连接状态</span><span>端口功能</span></div>' +
+        '<div id="physical-port-list"><div class="native-empty">正在读取端口状态…</div></div>') +
+      '<div class="native-settings-grid native-port-services">' +
+      '<section class="native-settings-panel"><h2>IPTV</h2>' +
+      row('开启 IPTV', toggle('port-iptv-enabled', '')) +
+      '<div id="port-iptv-fields">' +
+      row('VLAN ID', input('port-iptv-vlan-id', 'number', '4000', 'min="1" max="4094"')) +
+      row('VLAN 优先级', select('port-iptv-priority', [[0, '0'], [1, '1'], [2, '2'], [3, '3'], [4, '4'], [5, '5'], [6, '6'], [7, '7']])) +
+      row('自定义 IPTV 口', select('port-iptv-lan', [['lan1', 'LAN1'], ['lan2', 'LAN2'], ['lan3', 'LAN3']])) +
+      '</div><p class="native-info">打开 IPTV 后可以使用数字电视服务；选中的 IPTV 口不再提供普通上网。VLAN 参数由运营商提供。</p>' +
+      buttons(['port-iptv-save', '保存 IPTV 设置']) +
+      '<p class="native-info"><a href="/cgi-bin/luci/admin/router_settings/iptv">打开高级 IPTV、组播转播与机顶盒鉴权设置</a></p></section>' +
+      '<section class="native-settings-panel"><h2>游戏网口</h2>' +
+      row('开启游戏网口', toggle('port-game-enabled', '')) +
+      '<div id="port-game-fields">' + row('自定义游戏网口', select('port-game-lan', [['lan1', 'LAN1'], ['lan2', 'LAN2'], ['lan3', 'LAN3']])) + '</div>' +
+      '<p class="native-info">游戏口传输的数据会被优先转发，延迟更低，适用于游戏和语音场景。</p>' +
+      buttons(['port-game-save', '保存游戏口设置']) + '</section></div>' +
+      '<p class="native-warning">IPTV 端口切换会让对应有线接口短暂重载；游戏口优先级即时生效。两者都不会重启 Wi-Fi。</p>');
+    ['port-iptv-enabled', 'port-game-enabled'].forEach(function (name) { id(name).addEventListener('change', sync); });
+    bindClick('#port-iptv-save', function () {
+      var current = state.portIptv || {};
+      var enabled = checked('port-iptv-enabled');
+      if (enabled && (number('port-iptv-vlan-id') < 1 || number('port-iptv-vlan-id') > 4094)) return notify('IPTV VLAN ID 必须为 1–4094', false);
+      busy(this, rpc('set_iptv_info', {
+        enable: enabled ? 1 : 0, access_mode: current.access_mode || 'vlan', vlan_id: number('port-iptv-vlan-id', 4000),
+        vlan_priority: number('port-iptv-priority', 0), source_port: current.source_port || 'lan1',
+        stb_port: enabled ? value('port-iptv-lan') : 'none', udpxy_enable: Number(current.udpxy_enable) || 0,
+        udpxy_port: Number(current.udpxy_port) || 4022, auth_enable: Number(current.auth_enable) || 0,
+        auth_mac: current.auth_mac || '', option12: current.option12 || '', option60: current.option60 || '',
+        capture_port: current.capture_port || current.source_port || 'lan1'
+      }), 'IPTV 设置已保存').then(load);
+    });
+    bindClick('#port-game-save', function () {
+      busy(this, rpc('set_game_info', { enable: checked('port-game-enabled') ? 1 : 0, port: value('port-game-lan') }), '游戏口设置已应用').then(load);
+    });
+    load();
+  }
+
   function internetPage() {
     var wdsNetworks = [];
     var wdsWasEnabled = false;
@@ -724,6 +806,7 @@
       '<div id="iptv-fields">' +
       row('IPTV 接入方式', select('iptv-access-mode', [['vlan', 'WAN VLAN 接入'], ['lan', 'LAN 口接光猫 IPTV 口']])) +
       '<div id="iptv-vlan-row">' + row('IPTV VLAN ID', input('iptv-vlan-id', 'number', '4000', 'min="1" max="4094"')) + '</div>' +
+      '<div id="iptv-priority-row">' + row('IPTV VLAN 优先级', select('iptv-vlan-priority', [[0, '0'], [1, '1'], [2, '2'], [3, '3'], [4, '4'], [5, '5'], [6, '6'], [7, '7']])) + '</div>' +
       '<div id="iptv-source-row">' + row('IPTV 上联 LAN 口', select('iptv-source-port', [['lan1', 'LAN1'], ['lan2', 'LAN2'], ['lan3', 'LAN3']])) + '</div>' +
       row('机顶盒端口绑定', select('iptv-stb-port', [['none', '不绑定（使用转播）'], ['lan1', 'LAN1'], ['lan2', 'LAN2'], ['lan3', 'LAN3']])) +
       '<p class="native-info">WAN VLAN 模式从连接光猫的 WAN 口获取服务；LAN 口模式用于连接光猫独立的 IPTV 口。只有实体机顶盒需要原始信号时才绑定输出 LAN 口。</p></div></section>' +
@@ -746,6 +829,7 @@
     function sync() {
       show('#iptv-fields', checked('iptv-enabled'));
       show('#iptv-vlan-row', value('iptv-access-mode') === 'vlan');
+      show('#iptv-priority-row', value('iptv-access-mode') === 'vlan');
       show('#iptv-source-row', value('iptv-access-mode') === 'lan');
       show('#iptv-auth-fields', checked('iptv-auth-enabled'));
       var port = number('iptv-udpxy-port', 4022) || 4022;
@@ -756,7 +840,7 @@
       if (checked('iptv-enabled') && value('iptv-access-mode') === 'vlan' && (number('iptv-vlan-id') < 1 || number('iptv-vlan-id') > 4094)) return notify('IPTV VLAN ID 必须为 1–4094', false);
       if (checked('iptv-auth-enabled') && !/^([0-9A-F]{2}:){5}[0-9A-F]{2}$/i.test(value('iptv-auth-mac'))) return notify('机顶盒 MAC 地址格式不正确', false);
       busy(this, rpc('set_iptv_info', {
-        enable: checked('iptv-enabled') ? 1 : 0, access_mode: value('iptv-access-mode'), vlan_id: number('iptv-vlan-id'),
+        enable: checked('iptv-enabled') ? 1 : 0, access_mode: value('iptv-access-mode'), vlan_id: number('iptv-vlan-id'), vlan_priority: number('iptv-vlan-priority'),
         source_port: value('iptv-source-port'), stb_port: value('iptv-stb-port'), udpxy_enable: checked('iptv-udpxy-enabled') ? 1 : 0,
         udpxy_port: number('iptv-udpxy-port', 4022), auth_enable: checked('iptv-auth-enabled') ? 1 : 0,
         auth_mac: value('iptv-auth-mac'), option12: value('iptv-option12'), option60: value('iptv-option60'), capture_port: value('iptv-capture-port')
@@ -769,7 +853,7 @@
       }).catch(function (error) { notify(error.message || '抓取失败', false); }).then(function () { button.disabled = false; button.textContent = '自动抓取'; });
     });
     function render(result) {
-      check('iptv-enabled', result.enable); set('iptv-access-mode', result.access_mode || 'vlan'); set('iptv-vlan-id', result.vlan_id || 4000);
+      check('iptv-enabled', result.enable); set('iptv-access-mode', result.access_mode || 'vlan'); set('iptv-vlan-id', result.vlan_id || 4000); set('iptv-vlan-priority', result.vlan_priority || 0);
       set('iptv-source-port', result.source_port || 'lan1'); set('iptv-stb-port', result.stb_port || 'none');
       check('iptv-udpxy-enabled', result.udpxy_enable); set('iptv-udpxy-port', result.udpxy_port || 4022);
       check('iptv-auth-enabled', result.auth_enable); set('iptv-auth-mac', result.auth_mac); set('iptv-option12', result.option12); set('iptv-option60', result.option60); set('iptv-capture-port', result.capture_port || 'lan1');
@@ -1509,10 +1593,17 @@
     @media(max-width:900px){.native-settings-grid{grid-template-columns:1fr!important}.native-settings-panel{padding:20px}.native-settings-wide{margin-top:18px}.native-settings-panel .native-row{display:block!important}.native-settings-panel .native-row>div:first-child,.native-settings-panel .native-row>.native-control{width:100%!important;max-width:none!important;flex:none!important}.native-settings-panel .native-actions,.native-settings-wide .native-actions{width:100%!important;margin-left:0!important}.native-auth-grid{grid-template-columns:1fr}.native-check-line{align-items:flex-start;flex-direction:column;gap:4px}.native-meta{grid-template-columns:1fr}.native-inline-actions{flex-wrap:wrap}}';
   document.head.appendChild(mainRouterPanelStyle);
 
+  var physicalPortStyle = document.createElement('style');
+  physicalPortStyle.textContent = '\
+    .native-port-head,.native-port-row{display:grid;grid-template-columns:minmax(160px,.8fr) minmax(180px,1fr) minmax(240px,1.2fr);align-items:center;gap:24px;padding:15px 20px}.native-port-head{margin-top:18px;border-bottom:1px solid var(--be-border);color:#888;font-weight:550}.native-port-row{min-height:78px;border-bottom:1px solid var(--be-border)}.native-port-name strong,.native-port-name small{display:block}.native-port-name small{margin-top:6px;color:#999}.native-port-link{display:flex;align-items:center;gap:10px}.native-port-link i{display:inline-block;width:10px;height:10px;border-radius:50%;background:#999}.native-port-link i.up{background:#35ad78}.native-port-role select{width:100%}.native-port-role .native-value{min-height:46px}\
+    @media(max-width:760px){.native-port-head{display:none}.native-port-row{grid-template-columns:1fr;gap:10px;padding:18px 4px}.native-port-role select{width:100%}}';
+  document.head.appendChild(physicalPortStyle);
+
   function start() {
     if (/wifi\.html$/.test(path)) wifiPage();
     else if (/guest_content\.html$/.test(path)) guestPage();
     else if (/localnet\.html$/.test(path)) localPage();
+    else if (/ports\.html$/.test(path)) portsPage();
     else if (/led\.html$/.test(path)) ledPage();
     else if (/system\.html$/.test(path)) systemPage();
     else if (/internet\.html$/.test(path)) internetPage();

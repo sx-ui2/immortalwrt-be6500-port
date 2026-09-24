@@ -704,6 +704,56 @@ body > .block,
   border: 1px solid var(--be-border) !important;
 }
 
+.native-page .native-port-head,
+.native-page .native-port-row {
+  display: grid;
+  grid-template-columns: minmax(120px, .8fr) minmax(210px, 1.4fr) minmax(150px, 1fr);
+  align-items: center;
+  gap: 18px;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--be-border);
+}
+
+.native-page .native-port-head {
+  font-weight: 600;
+  color: var(--be-text);
+  background: var(--be-input);
+}
+
+.native-page .native-port-name,
+.native-page .native-port-link {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.native-page .native-port-name small,
+.native-page .native-port-link small {
+  opacity: .68;
+}
+
+.native-page .native-port-link i {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  margin-right: 8px;
+  border-radius: 50%;
+  background: #888;
+}
+
+.native-page .native-port-link i.up {
+  background: #38a875;
+}
+
+.native-page .native-port-warning {
+  color: #e09a2b;
+}
+
+@media (max-width: 720px) {
+  .native-page .native-port-head { display: none; }
+  .native-page .native-port-row { grid-template-columns: 1fr; gap: 8px; }
+}
+
 .native-page .native-modal {
   background: var(--be-section) !important;
   border-color: var(--be-border) !important;

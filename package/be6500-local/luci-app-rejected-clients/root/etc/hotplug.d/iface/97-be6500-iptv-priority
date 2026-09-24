@@ -1,0 +1,5 @@
+#!/bin/sh
+
+[ "$ACTION" = "ifup" ] || exit 0
+[ "$INTERFACE" = "iptv" ] || exit 0
+/usr/libexec/be6500-iptv-priority >/dev/null 2>&1

@@ -1,0 +1,166 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR BSD-3-Clause)
+/* Static development candidate, NOT hardware-validated or flashable.
+ * Wiring: captured BE6500 QWRT DTB. New phylink/DSA binding pattern:
+ * QSDK e313f146 ipq5332-rdp468.dts (same MPPE + QCA8386 topology).
+ * Logical LAN port numbers still require physical-jack verification.
+ */
+#include "ipq5332-jdcloud-be6500-core.dts"
+#include "ipq5332-mht-edma-development.dtsi"
+
+/ {
+	model = "JDCloud ZhaoYun BE6500 (6.6 ethernet development)";
+	be6500,port-stage = "ethernet-only-not-boot-validated";
+	aliases {
+		/* References resolve to /soc@0, unlike old literal /soc paths. */
+		ethernet0 = &jd_wan;
+		ethernet1 = &jd_switch_cpu;
+	};
+	soc@0 {
+		jd_wan: ethernet@3a504000 {
+			device_type = "network";
+			compatible = "qcom,nss-dp";
+			reg = <0x3a504000 0x4000>;
+			qcom,id = <2>;
+			qcom,mactype = <1>;
+			status = "okay";
+			/* New NSS-DP obtains PHY from SSDK port 2. No old link-poll.
+			 * Factory MAC retrieval must be resolved before hardware use;
+			 * never copy reference/zero MAC addresses into a real router.
+			 */
+		};
+		jd_switch_cpu: ethernet@3a500000 {
+			device_type = "network";
+			compatible = "qcom,nss-dp";
+			reg = <0x3a500000 0x4000>;
+			qcom,id = <1>;
+			qcom,mactype = <1>;
+			qcom,mht-dev = <1>;
+			qcom,is_switch_connected = <1>;
+			qcom,ppe-offload-disabled = <1>;
+			status = "okay";
+		};
+	};
+};
+
+&mdio {
+	#address-cells = <1>;
+	#size-cells = <0>;
+	pinctrl-0 = <&mdio1_pins &mdio0_pins>;
+	pinctrl-names = "default";
+	/* The old SSDK only consumed the number. The 6.6 MDIO driver also obtains
+	 * this GPIO through gpiod and requires active-low to assert low/release
+	 * high, as in the pinned native QSDK board. Do not copy the old flag 0.
+	 */
+	phy-reset-gpio = <&tlmm 51 GPIO_ACTIVE_LOW>;
+	phyaddr_fixup = <0x0c90f018>;
+	uniphyaddr_fixup = <0x0c90f014>;
+	mdio_clk_fixup;
+	status = "okay";
+
+	jd_phy1: ethernet-phy@1 { reg = <1>; fixup; };
+	jd_phy2: ethernet-phy@2 { reg = <2>; fixup; };
+	jd_phy3: ethernet-phy@3 { reg = <3>; fixup; };
+	jd_phy4: ethernet-phy@4 { reg = <4>; fixup; };
+
+	/* QSDK qca8k handles LAN netdevices/VLANs; SSDK provides the linked
+	 * PHY/serdes configuration below. Do not add a swconfig owner as well.
+	 */
+	switch@10 {
+		compatible = "qca,qca8386";
+		reg = <0x10>;
+		#address-cells = <1>;
+		#size-cells = <0>;
+		ports {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			port@0 {
+				reg = <0>;
+				label = "cpu";
+				ethernet = <&jd_switch_cpu>;
+				dsa-tag-protocol = "qca_8021q";
+			};
+			port@1 {
+				reg = <1>; label = "lan1";
+				phy-handle = <&jd_phy1>; phy-mode = "internal";
+			};
+			port@2 {
+				reg = <2>; label = "lan2";
+				phy-handle = <&jd_phy2>; phy-mode = "internal";
+			};
+			port@3 {
+				reg = <3>; label = "lan3";
+				phy-handle = <&jd_phy3>; phy-mode = "internal";
+			};
+		};
+	};
+};
+
+&ess_instance {
+	num_devices = <2>;
+	status = "okay";
+	ess-switch@3a000000 {
+		mdio-bus = <&mdio>;
+		switch_cpu_bmp = <0x1>;
+		switch_lan_bmp = <0x2>;
+		switch_wan_bmp = <0x4>;
+		switch_mac_mode = <0xc>;
+		switch_mac_mode1 = <0xf>;
+		switch_mac_mode2 = <0xff>;
+		qcom,port_phyinfo {
+			port@0 {
+				port_id = <1>;
+				forced-speed = <2500>;
+				forced-duplex = <1>;
+				switch_external {
+					switch_handle = <&jd_mht>;
+					switch_cpu_port = <0>;
+				};
+				fixed-link { speed = <2500>; full-duplex; pause; };
+			};
+			port@1 {
+				port_id = <2>;
+				phy_address = <4>;
+				phy-handle = <&jd_phy4>;
+				phy-mode = "sgmii";
+			};
+		};
+		led_source@5 {
+			source = <5>; mode = "normal"; speed = "all";
+			blink_en = "enable"; active = "high";
+		};
+	};
+	jd_mht: ess-switch1@1 {
+		compatible = "qcom,ess-switch-qca8386";
+		device_id = <1>;
+		switch_access_mode = "mdio";
+		mdio-bus = <&mdio>;
+		switch_mac_mode = <0xc>;
+		switch_mac_mode1 = <0xff>;
+		switch_cpu_bmp = <0x1>;
+		switch_lan_bmp = <0xe>;
+		switch_wan_bmp = <0x0>;
+		link-polling-required = <0>;
+		fdb_sync = "interrupt";
+		link-intr-gpio = <&tlmm 23 GPIO_ACTIVE_HIGH>;
+		qcom,port_phyinfo {
+			port@0 { port_id = <0>; forced-speed = <2500>; forced-duplex = <1>; };
+			port@1 { port_id = <1>; phy_address = <1>; };
+			port@2 { port_id = <2>; phy_address = <2>; };
+			port@3 { port_id = <3>; phy_address = <3>; };
+		};
+		led_source@2 {
+			source = <2>; mode = "normal"; speed = "all";
+			blink_en = "enable"; active = "high";
+		};
+		led_source@5 {
+			source = <5>; mode = "normal"; speed = "all";
+			blink_en = "enable"; active = "high";
+		};
+		led_source@8 {
+			source = <8>; mode = "normal"; speed = "all";
+			blink_en = "enable"; active = "high";
+		};
+	};
+};
+
+&{/soc@0/nss-ppe} { status = "okay"; };

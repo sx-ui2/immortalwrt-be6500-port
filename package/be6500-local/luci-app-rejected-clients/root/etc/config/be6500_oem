@@ -10,6 +10,10 @@ config settings 'guest_qos'
 config settings 'qos'
 	option mode '1'
 
+config settings 'game'
+	option enable '0'
+	option port 'lan2'
+
 config settings 'led'
 	option enabled '1'
 	option policy 'custom'

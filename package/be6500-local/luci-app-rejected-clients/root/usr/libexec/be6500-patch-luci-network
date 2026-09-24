@@ -1,34 +1,100 @@
 #!/bin/sh
 
-# QCA8386 is exposed through the legacy swconfig CPU link (eth1), so its three
-# physical sockets are switch ports rather than Linux netdevs.  Keep the
-# regular Devices list truthful and direct users to the switch VLAN editor,
-# where a socket can be made an access or trunk port.  Once a VLAN is saved,
-# its eth1.<vid> netdev becomes available to ordinary LuCI interfaces.
+# QCA8386 exposes LAN1-LAN3 as switch ports behind eth1, not as independent
+# Linux netdevs. Keep LuCI's device model truthful and add a physical-port
+# summary above the normal device list. Per-port policy lives in Router
+# Settings; VLAN membership remains in LuCI's existing Switch page.
 
 interfaces="${BE6500_LUCI_INTERFACES_VIEW:-/www/luci-static/resources/view/network/interfaces.js}"
 switch_view="${BE6500_LUCI_SWITCH_VIEW:-/www/luci-static/resources/view/network/switch.js}"
+old_menu="${BE6500_LUCI_OLD_PORT_MENU:-/usr/share/luci/menu.d/be6500-network-ports.json}"
 headers="${BE6500_LUCI_HEADERS:-/usr/share/ucode/luci/template/header.ut}"
 cache_root="${BE6500_LUCI_CACHE_ROOT:-/tmp}"
 
-if [ -f "$interfaces" ] && ! grep -q 'be6500PhysicalPortLink' "$interfaces"; then
+# Undo the v38 experiment on upgraded installations. It duplicated the
+# existing switch editor and put VLAN instructions inside the device list.
+if [ -f "$interfaces" ] && grep -q 'be6500PhysicalPortLink' "$interfaces"; then
 	tmp="${interfaces}.be6500.$$"
-	sed "s@s = m.section(form.GridSection, 'device', _('Devices'));@s = m.section(form.GridSection, 'device', _('Devices'), E('div', { 'class': 'cbi-section-descr', 'data-be6500-port-help': '1' }, [ 'LAN1–LAN3 是 eth1 后面的物理交换机端口。要单独使用某个网口或继续添加 VLAN，请打开 ', E('a', { 'href': L.url('admin/network/ports') }, 'LAN 端口与 VLAN'), '；保存后在接口中选择 eth1.<VLAN ID>。' ])); /* be6500PhysicalPortLink */@" "$interfaces" >"$tmp" && mv "$tmp" "$interfaces"
+	awk '/be6500PhysicalPortLink/ { print "\t\ts = m.section(form.GridSection, '\''device'\'', _('\''Devices'\''));"; next } { print }' "$interfaces" >"$tmp" && mv "$tmp" "$interfaces"
 fi
-
-if [ -f "$switch_view" ] && ! grep -q 'be6500PhysicalPortTitle' "$switch_view"; then
+if [ -f "$switch_view" ] && grep -q 'be6500PhysicalPortTitle' "$switch_view"; then
 	tmp="${switch_view}.be6500.$$"
-	sed "s@m = new form.Map('network', _('Switch'),@m = new form.Map('network', 'LAN 端口与 VLAN', /* be6500PhysicalPortTitle */@" "$switch_view" >"$tmp" && mv "$tmp" "$switch_view"
+	sed "s@'LAN 端口与 VLAN', /\\* be6500PhysicalPortTitle \\*/@_('Switch'),@" "$switch_view" >"$tmp" && mv "$tmp" "$switch_view"
+fi
+rm -f "$old_menu"
+
+if [ -f "$interfaces" ] && ! grep -q 'be6500PhysicalPortSummary' "$interfaces"; then
+	work="${interfaces}.be6500.work.$$"
+	snippet="${interfaces}.be6500.snippet.$$"
+	cp "$interfaces" "$work" || exit 1
+
+	if ! grep -q "^'require rpc';" "$work"; then
+		tmp="${work}.tmp"
+		awk '{ print; if ($0 == "'\''require network'\'';") print "'\''require rpc'\'';" }' "$work" >"$tmp" && mv "$tmp" "$work"
+	fi
+
+	cat >"$snippet" <<'EOF'
+
+/* be6500PhysicalPortSummary: switch ports are physical sockets, not netdevs. */
+var callBe6500SwitchPorts = rpc.declare({
+	object: 'luci', method: 'getSwconfigPortState', params: [ 'switch' ], expect: { result: [] }
+});
+
+function be6500PhysicalPortSummary(ports) {
+	var states = {};
+	L.toArray(ports).forEach(function(state) { states[+state.port] = state; });
+	function card(name, number) {
+		var state = states[number] || {}, link = !!state.link, speed = +state.speed || 0;
+		var text = !link ? _('未连接') : (speed >= 1000 ? '%s Gbps'.format(speed / 1000) : '%s Mbps'.format(speed));
+		return E('div', { 'style': 'min-width:112px;padding:12px 16px;border:1px solid var(--border-color-medium,#ddd);border-radius:6px' }, [
+			E('strong', {}, [ name ]), E('br'), E('small', {}, [ link ? '\u25cf ' + text : '\u25cb ' + text ])
+		]);
+	}
+	return E('div', { 'data-be6500-physical-ports': '1' }, [
+		E('p', {}, [ _('LAN1–LAN3 是 QCA8386 的真实物理交换端口，不是可单独选择的 Linux 网卡。') ]),
+		E('div', { 'style': 'display:flex;gap:12px;flex-wrap:wrap;margin:12px 0' }, [ card('LAN1', 3), card('LAN2', 2), card('LAN3', 1) ]),
+		E('a', { 'class': 'btn cbi-button cbi-button-action', 'href': L.url('admin/router_settings/ports') }, [ _('打开端口设置') ])
+	]);
+}
+EOF
+
+	# Add the helper after the regular read-only flag.
+	tmp="${work}.tmp"
+	awk -v snippet="$snippet" '
+		{ print }
+		!done && /var isReadonlyView/ {
+			while ((getline line < snippet) > 0) print line
+			close(snippet); done = 1
+		}
+	' "$work" >"$tmp" && mv "$tmp" "$work"
+
+	# Extend load() with physical switch state and expose it in render().
+	tmp="${work}.tmp"
+	sed "s/^[[:space:]]*uci\.changes()$/\t\t\tuci.changes(),\\
+\t\t\tL.resolveDefault(callBe6500SwitchPorts('switch1'), [])/" "$work" >"$tmp" && mv "$tmp" "$work"
+	tmp="${work}.tmp"
+	sed "s/var dslModemType = data\[0\],/var be6500SwitchPorts = data[4] || [],\\
+\t\t    dslModemType = data[0],/" "$work" >"$tmp" && mv "$tmp" "$work"
+	tmp="${work}.tmp"
+	sed "s@s = m.section(form.GridSection, 'device', _('Devices'));@s = m.section(form.GridSection, 'device', _('Devices'), be6500PhysicalPortSummary(be6500SwitchPorts)); /* be6500PhysicalPortCards */@" "$work" >"$tmp" && mv "$tmp" "$work"
+
+	if grep -q 'be6500PhysicalPortCards' "$work" && grep -q "callBe6500SwitchPorts('switch1')" "$work"; then
+		mv "$work" "$interfaces"
+	else
+		rm -f "$work" "$snippet"
+		exit 1
+	fi
+	rm -f "$snippet"
 fi
 
-# The menu and class loader are cached by LuCI.  Bump the shared board cache
-# token and clear only generated caches; network and Wi-Fi are not restarted.
+# The menu and class loader are cached by LuCI. Bump the board cache token and
+# clear generated caches only; neither networking nor Wi-Fi is restarted.
 for header in $headers; do
 	if [ -f "$header" ]; then
 		tmp="${header}.be6500.$$"
 		sed \
-			-e 's#luci\.js?v=26\.236\.50592~9b8ee64-{{ pkgs_update_time }}#luci.js?v=26.236.50592~9b8ee64-be6500v21-{{ pkgs_update_time }}#' \
-			-e 's#be6500v[0-9]*-{{ pkgs_update_time }}#be6500v21-{{ pkgs_update_time }}#' \
+			-e 's#luci\.js?v=26\.236\.50592~9b8ee64-{{ pkgs_update_time }}#luci.js?v=26.236.50592~9b8ee64-be6500v23-{{ pkgs_update_time }}#' \
+			-e 's#be6500v[0-9]*-{{ pkgs_update_time }}#be6500v23-{{ pkgs_update_time }}#' \
 			"$header" >"$tmp" && mv "$tmp" "$header"
 	fi
 done
@@ -36,5 +102,6 @@ done
 rm -f "$cache_root/luci-indexcache"
 rm -f "$cache_root"/luci-modulecache/* 2>/dev/null
 
-grep -q 'be6500PhysicalPortLink' "$interfaces" &&
-	grep -q 'be6500PhysicalPortTitle' "$switch_view"
+grep -q 'be6500PhysicalPortCards' "$interfaces" &&
+	[ ! -e "$old_menu" ] &&
+	{ [ ! -f "$switch_view" ] || ! grep -q 'be6500PhysicalPortTitle' "$switch_view"; }

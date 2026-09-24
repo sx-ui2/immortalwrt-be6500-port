@@ -6,7 +6,7 @@ define Device/jdcloud_be6500
 	IMAGES := sysupgrade.bin
 	DEVICE_VENDOR := JDCloud
 	DEVICE_MODEL := ZhaoYun BE6500
-	DEVICE_VARIANT := 6.6 v75 LAN VLAN and selectable width
+	DEVICE_VARIANT := 6.6 v77 OEM ports and USB storage
 	# Keep the persistent image on the boot-validated QWRT/swconfig hardware
 	# description.  The generic native DTS does not boot on this board.
 	DEVICE_DTS := ipq5332-jdcloud-be6500-full-radio-mht-test-initramfs
