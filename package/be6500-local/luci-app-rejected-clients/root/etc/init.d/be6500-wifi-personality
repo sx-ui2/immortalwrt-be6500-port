@@ -1,0 +1,9 @@
+#!/bin/sh /etc/rc.common
+
+# Run before netifd so a preserved configuration cannot expose a phantom
+# radio2 or make LuCI apply split-radio channel limits to single-radio mode.
+START=18
+
+start() {
+	/usr/libexec/be6500-sync-wifi-personality
+}

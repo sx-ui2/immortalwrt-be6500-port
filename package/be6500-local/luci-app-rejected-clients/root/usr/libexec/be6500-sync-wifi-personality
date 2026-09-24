@@ -1,0 +1,52 @@
+#!/bin/sh
+
+# Keep the saved LuCI profile aligned with the QCN9224 firmware personality
+# that ath12k actually selected at boot.  Preserved /etc/config files can come
+# from an image whose default profile differs from the persistent U-Boot
+# selector, so the runtime BDF is the source of truth after every boot.
+runtime_bdf="$(sed -n 's/.*cnss2\.bdf_pci1=\([^ ]*\).*/\1/p' /proc/cmdline 2>/dev/null)"
+[ -n "$runtime_bdf" ] || runtime_bdf=0x1008
+
+case "$runtime_bdf" in
+	0x2)
+		runtime_mode=0
+		radio2_disabled=1
+		marker=single
+		;;
+	*)
+		runtime_mode=1
+		radio2_disabled=0
+		marker=split
+		;;
+esac
+
+changed=0
+if [ "$(uci -q get wireless.main)" != be6500-profile ]; then
+	uci -q set wireless.main='be6500-profile'
+	changed=1
+fi
+if [ "$(uci -q get wireless.main.freq_mode)" != "$runtime_mode" ]; then
+	uci -q set wireless.main.freq_mode="$runtime_mode"
+	changed=1
+fi
+if [ "$(uci -q get system.@system[0].freq_mode)" != "$runtime_mode" ]; then
+	uci -q set system.@system[0].freq_mode="$runtime_mode"
+	changed=1
+fi
+if [ "$(uci -q get wireless.radio2.disabled)" != "$radio2_disabled" ]; then
+	uci -q set wireless.radio2.disabled="$radio2_disabled"
+	changed=1
+fi
+
+if [ "$changed" -eq 1 ]; then
+	uci -q commit wireless || exit 1
+	uci -q commit system || exit 1
+fi
+
+mkdir -p /etc/jdwifi
+case "$marker" in
+	single) rm -f /etc/jdwifi/split; : > /etc/jdwifi/single ;;
+	split) rm -f /etc/jdwifi/single; : > /etc/jdwifi/split ;;
+esac
+
+exit 0

@@ -1,19 +1,12 @@
 #!/bin/sh
 
-# Recover a missing marker from the hardware personality selected at boot.
-# Keep an existing different value: it is the pending target shown by the UI.
-# With no explicit selector the device tree defaults to 0x1008 (split
-# dual-MAC); only cnss2.bdf_pci1=0x2 selects single-MAC 4-chain 5 GHz.
-if ! uci -q get wireless.main.freq_mode >/dev/null; then
-	runtime_bdf="$(sed -n 's/.*cnss2\.bdf_pci1=\([^ ]*\).*/\1/p' /proc/cmdline 2>/dev/null)"
-	[ "$runtime_bdf" = "0x2" ] && runtime_mode=0 || runtime_mode=1
-	uci -q set wireless.main='be6500-profile'
-	uci -q set wireless.main.freq_mode="$runtime_mode"
-	uci -q set system.@system[0].freq_mode="$runtime_mode"
-	uci -q set wireless.radio2.disabled="$([ "$runtime_mode" = 1 ] && echo 0 || echo 1)"
-	uci -q commit wireless
-	uci -q commit system
-fi
+# A sysupgrade may preserve a stale profile from an image built for the other
+# QCN9224 personality.  Synchronize it before LuCI decides which channels to
+# show.  The same helper runs before netifd on every subsequent boot.
+/usr/libexec/be6500-sync-wifi-personality || exit 1
+
+view=/www/luci-static/resources/view/network/wireless.js
+[ -f "$view" ] || exit 0
 
 # Width is derived from the regulatory channel/chandef on this board.  Keep
 # LuCI's value in the form for compatibility, but do not expose a separate
@@ -23,9 +16,9 @@ if ! grep -q 'be6500-width-fixed' "$view"; then
 fi
 
 # The QCN9224 split firmware reports a shared regulatory list for both pdevs.
-# LuCI must additionally apply the board RF-path limits in tri-band mode.
-view=/www/luci-static/resources/view/network/wireless.js
-[ -f "$view" ] || exit 0
+# LuCI must additionally apply the board RF-path limits in tri-band mode. In
+# dual-band/single-radio mode no 5 GHz entries are removed: iwinfo's complete
+# regulatory list (36-165 where permitted by the selected country) is shown.
 
 # netifd keeps a 160 MHz 5 GHz radio pending while hostapd performs the DFS
 # channel-availability check.  LuCI otherwise reports this healthy transition
@@ -77,8 +70,8 @@ fi
 # prevents a previously opened LuCI tab from reusing the unfiltered class file.
 for header in /usr/share/ucode/luci/template/header.ut; do
 	[ ! -f "$header" ] || sed -i \
-		-e 's#luci\.js?v=26\.236\.50592~9b8ee64-{{ pkgs_update_time }}#luci.js?v=26.236.50592~9b8ee64-be6500v18-{{ pkgs_update_time }}#' \
-		-e 's#be6500v[0-9]*-{{ pkgs_update_time }}#be6500v18-{{ pkgs_update_time }}#' "$header"
+		-e 's#luci\.js?v=26\.236\.50592~9b8ee64-{{ pkgs_update_time }}#luci.js?v=26.236.50592~9b8ee64-be6500v19-{{ pkgs_update_time }}#' \
+		-e 's#be6500v[0-9]*-{{ pkgs_update_time }}#be6500v19-{{ pkgs_update_time }}#' "$header"
 done
 
 grep -q 'be6500SplitMode' "$view"

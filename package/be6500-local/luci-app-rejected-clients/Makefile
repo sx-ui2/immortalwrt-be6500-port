@@ -1,7 +1,7 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=luci-app-rejected-clients
-PKG_RELEASE:=33
+PKG_RELEASE:=34
 PKG_MAINTAINER:=Codex
 
 include $(INCLUDE_DIR)/package.mk
@@ -57,6 +57,7 @@ define Package/luci-app-rejected-clients/install
 	$(INSTALL_BIN) ./root/usr/libexec/be6500-led-control $(1)/usr/libexec/be6500-led-control
 	$(INSTALL_BIN) ./root/usr/libexec/be6500-led-blink.uc $(1)/usr/libexec/be6500-led-blink.uc
 	$(INSTALL_BIN) ./root/usr/libexec/be6500-radio0-auto-channel $(1)/usr/libexec/be6500-radio0-auto-channel
+	$(INSTALL_BIN) ./root/usr/libexec/be6500-sync-wifi-personality $(1)/usr/libexec/be6500-sync-wifi-personality
 	$(INSTALL_BIN) ./root/usr/libexec/be6500-patch-luci-wireless $(1)/usr/libexec/be6500-patch-luci-wireless
 	$(INSTALL_BIN) ./root/usr/libexec/be6500-patch-luci-firewall $(1)/usr/libexec/be6500-patch-luci-firewall
 	$(INSTALL_BIN) ./root/usr/libexec/be6500-fw4-multiwan $(1)/usr/libexec/be6500-fw4-multiwan
@@ -73,6 +74,7 @@ define Package/luci-app-rejected-clients/install
 	$(INSTALL_DIR) $(1)/etc/rc.button
 	$(INSTALL_BIN) ./root/etc/rc.button/joy $(1)/etc/rc.button/joy
 	$(INSTALL_DIR) $(1)/etc/init.d
+	$(INSTALL_BIN) ./root/etc/init.d/be6500-wifi-personality $(1)/etc/init.d/be6500-wifi-personality
 	$(INSTALL_BIN) ./root/etc/init.d/be6500-led $(1)/etc/init.d/be6500-led
 	$(INSTALL_BIN) ./root/etc/init.d/be6500-fw4-multiwan $(1)/etc/init.d/be6500-fw4-multiwan
 	$(INSTALL_BIN) ./root/etc/init.d/be6500-guest-qos $(1)/etc/init.d/be6500-guest-qos

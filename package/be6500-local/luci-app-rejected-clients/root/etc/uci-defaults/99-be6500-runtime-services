@@ -4,6 +4,7 @@
 # they run on a clean image before firewall and network services come up.
 [ -x /etc/init.d/be6500-fw4-multiwan ] && /etc/init.d/be6500-fw4-multiwan enable
 [ -x /etc/init.d/be6500-guest-qos ] && /etc/init.d/be6500-guest-qos enable
+[ -x /etc/init.d/be6500-wifi-personality ] && /etc/init.d/be6500-wifi-personality enable
 # ECM is the only owner of the Qualcomm connection fast path. Remove service
 # links left by development images that used a separate WAN hotplug controller.
 [ -x /etc/init.d/be6500-accel ] && /etc/init.d/be6500-accel disable
