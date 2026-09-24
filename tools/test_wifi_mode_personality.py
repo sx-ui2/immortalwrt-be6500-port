@@ -8,6 +8,8 @@ ROOT = Path(__file__).resolve().parents[1]
 CONTROLLER = ROOT / "package/be6500-local/luci-app-rejected-clients/root/usr/lib/lua/luci/controller/be6500_oem_beta.lua"
 SWITCH = ROOT / "package/be6500-local/luci-app-rejected-clients/root/usr/sbin/be6500-switch-wifi-mode"
 BOOT_SYNC = ROOT / "package/be6500-local/luci-app-rejected-clients/root/usr/libexec/be6500-patch-luci-wireless"
+MAC80211_MAKEFILE = ROOT / "package/kernel/mac80211/Makefile"
+FULL_5G_PATCH = ROOT / "package/kernel/mac80211/patches/ath12k/1001-d-BE6500-expose-full-single-radio-5g-range.patch"
 
 
 class WifiModePersonalityTest(unittest.TestCase):
@@ -30,6 +32,15 @@ class WifiModePersonalityTest(unittest.TestCase):
         self.assertIn("set wireless.radio2.disabled='1'", source)
         self.assertIn('149|153|157|161|165', source)
         self.assertNotIn('rf_path', source)
+
+        driver = FULL_5G_PATCH.read_text()
+        makefile = MAC80211_MAKEFILE.read_text()
+        self.assertIn("ath12k_mac_be6500_5g_union", driver)
+        self.assertIn('of_machine_is_compatible("jdcloud,be6500")', driver)
+        self.assertIn("BE6500 factory single-radio 5G range", driver)
+        self.assertNotIn("ath12k_mac_handle_rf_path_switch(ar, target)", driver)
+        self.assertNotIn("ath12k_mac_be6500_select_rf_path", driver)
+        self.assertIn(FULL_5G_PATCH.name, makefile)
 
     def test_shell_scripts_parse(self):
         for script in (SWITCH, BOOT_SYNC):
