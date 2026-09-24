@@ -88,13 +88,22 @@ class NetworkPortUiTests(unittest.TestCase):
         self.assertIn("&usb3", source)
         self.assertGreaterEqual(source.count('status = "okay";'), 3)
 
-    def test_ipq5332_usb_phy_drivers_are_built_in(self):
+    def test_unvalidated_ipq5332_usb_phy_drivers_stay_disabled(self):
         for path in KERNEL_CONFIGS:
             source = path.read_text()
-            self.assertIn("CONFIG_PHY_QCOM_M31_USB=y", source, path)
-            self.assertIn("CONFIG_PHY_IPQ_UNIPHY_USB=y", source, path)
-            self.assertNotIn("# CONFIG_PHY_QCOM_M31_USB is not set", source, path)
-            self.assertNotIn("# CONFIG_PHY_IPQ_UNIPHY_USB is not set", source, path)
+            self.assertIn("# CONFIG_PHY_QCOM_M31_USB is not set", source, path)
+            self.assertIn("# CONFIG_PHY_IPQ_UNIPHY_USB is not set", source, path)
+            self.assertNotIn("CONFIG_PHY_QCOM_M31_USB=y", source, path)
+            self.assertNotIn("CONFIG_PHY_IPQ_UNIPHY_USB=y", source, path)
+
+    def test_boot_validated_v39_kernel_settings_are_preserved(self):
+        for path in KERNEL_CONFIGS:
+            source = path.read_text()
+            self.assertIn("CONFIG_MDIO_IPQ4019=m", source, path)
+            self.assertIn("CONFIG_REGULATOR_CPR3_NPU=y", source, path)
+            self.assertIn("CONFIG_PSTORE=y", source, path)
+            self.assertIn("CONFIG_PSTORE_RAM=y", source, path)
+            self.assertIn("CONFIG_REED_SOLOMON=y", source, path)
 
     def test_patcher_adds_physical_cards_to_unminified_luci_idempotently(self):
         with tempfile.TemporaryDirectory() as td:
