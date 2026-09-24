@@ -6,6 +6,7 @@
 [ -x /etc/init.d/be6500-guest-qos ] && /etc/init.d/be6500-guest-qos enable
 [ -x /etc/init.d/be6500-wifi-personality ] && /etc/init.d/be6500-wifi-personality enable
 [ -x /etc/init.d/be6500-game-port ] && /etc/init.d/be6500-game-port enable
+[ -x /etc/init.d/be6500-luci-patches ] && /etc/init.d/be6500-luci-patches enable
 
 # Remove the temporary per-PHY disable experiment. The factory port page does
 # not power LAN sockets off; it assigns IPTV and game-port roles instead.

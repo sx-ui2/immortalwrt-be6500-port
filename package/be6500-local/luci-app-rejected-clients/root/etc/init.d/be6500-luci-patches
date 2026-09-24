@@ -1,0 +1,11 @@
+#!/bin/sh /etc/rc.common
+
+START=19
+
+start() {
+	# These patchers only update LuCI assets and caches. They deliberately do
+	# not reload networking or Wi-Fi, so running this check at boot is safe.
+	[ -x /usr/libexec/be6500-patch-luci-wireless ] && /usr/libexec/be6500-patch-luci-wireless >/dev/null 2>&1
+	[ -x /usr/libexec/be6500-patch-luci-network ] && /usr/libexec/be6500-patch-luci-network >/dev/null 2>&1
+	[ -x /usr/libexec/be6500-patch-luci-firewall ] && /usr/libexec/be6500-patch-luci-firewall >/dev/null 2>&1
+}

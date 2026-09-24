@@ -1,7 +1,7 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=luci-app-rejected-clients
-PKG_RELEASE:=38
+PKG_RELEASE:=39
 PKG_MAINTAINER:=Codex
 
 include $(INCLUDE_DIR)/package.mk
@@ -39,6 +39,8 @@ define Package/luci-app-rejected-clients/install
 	$(INSTALL_DATA) ./root/www/be6500-oem/Native_JS/pages.js $(1)/www/be6500-oem/Native_JS/pages.js
 	$(INSTALL_DIR) $(1)/www/be6500-oem/Native_CSS
 	$(INSTALL_DATA) ./root/www/be6500-oem/Native_CSS/system-theme.css $(1)/www/be6500-oem/Native_CSS/system-theme.css
+	$(INSTALL_DIR) $(1)/www/luci-static/resources/be6500
+	$(INSTALL_DATA) ./root/www/luci-static/resources/be6500/ports.js $(1)/www/luci-static/resources/be6500/ports.js
 	$(INSTALL_DIR) $(1)/usr/lib/lua/luci/controller
 	$(INSTALL_DATA) ./root/usr/lib/lua/luci/controller/be6500_oem_beta.lua $(1)/usr/lib/lua/luci/controller/be6500_oem_beta.lua
 	$(INSTALL_DIR) $(1)/usr/lib/lua/luci/view/be6500_oem_beta
@@ -80,6 +82,7 @@ define Package/luci-app-rejected-clients/install
 	$(INSTALL_BIN) ./root/etc/init.d/be6500-wifi-personality $(1)/etc/init.d/be6500-wifi-personality
 	$(INSTALL_BIN) ./root/etc/init.d/be6500-led $(1)/etc/init.d/be6500-led
 	$(INSTALL_BIN) ./root/etc/init.d/be6500-fw4-multiwan $(1)/etc/init.d/be6500-fw4-multiwan
+	$(INSTALL_BIN) ./root/etc/init.d/be6500-luci-patches $(1)/etc/init.d/be6500-luci-patches
 	$(INSTALL_BIN) ./root/etc/init.d/be6500-guest-qos $(1)/etc/init.d/be6500-guest-qos
 	$(INSTALL_BIN) ./root/etc/init.d/be6500-game-port $(1)/etc/init.d/be6500-game-port
 	$(INSTALL_DIR) $(1)/etc/hotplug.d/iface

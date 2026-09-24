@@ -18,6 +18,13 @@ TEMPLATE = PKG / "root/usr/lib/lua/luci/view/be6500_oem_beta/index.htm"
 GAME_PORT = PKG / "root/usr/libexec/be6500-game-port"
 IPTV_PRIORITY = PKG / "root/usr/libexec/be6500-iptv-priority"
 FULL_RADIO_DTS = ROOT / "target/linux/qualcommax/files/arch/arm64/boot/dts/qcom/ipq5332-jdcloud-be6500-full-radio-initramfs.dts"
+PORTS_JS = PKG / "root/www/luci-static/resources/be6500/ports.js"
+LUCI_PATCH_SERVICE = PKG / "root/etc/init.d/be6500-luci-patches"
+KERNEL_CONFIGS = [
+    ROOT / "target/linux/qualcommax/ipq53xx/config-default",
+    ROOT / "target/linux/qualcommax/ipq53xx/config-default.qsdk14",
+    ROOT / "native-6.6/kernel-overrides/target-ipq53xx/config-default",
+]
 
 
 class NetworkPortUiTests(unittest.TestCase):
@@ -81,7 +88,15 @@ class NetworkPortUiTests(unittest.TestCase):
         self.assertIn("&usb3", source)
         self.assertGreaterEqual(source.count('status = "okay";'), 3)
 
-    def test_patcher_restores_old_experiment_and_adds_physical_cards_idempotently(self):
+    def test_ipq5332_usb_phy_drivers_are_built_in(self):
+        for path in KERNEL_CONFIGS:
+            source = path.read_text()
+            self.assertIn("CONFIG_PHY_QCOM_M31_USB=y", source, path)
+            self.assertIn("CONFIG_PHY_IPQ_UNIPHY_USB=y", source, path)
+            self.assertNotIn("# CONFIG_PHY_QCOM_M31_USB is not set", source, path)
+            self.assertNotIn("# CONFIG_PHY_IPQ_UNIPHY_USB is not set", source, path)
+
+    def test_patcher_adds_physical_cards_to_unminified_luci_idempotently(self):
         with tempfile.TemporaryDirectory() as td:
             temp = pathlib.Path(td)
             interfaces = temp / "interfaces.js"
@@ -97,7 +112,7 @@ class NetworkPortUiTests(unittest.TestCase):
                 "\t\t\tuci.changes()\n"
                 "]); }, render: function(data) {\n"
                 "\t\tvar dslModemType = data[0], netDevs = data[1], m, s;\n"
-                "\t\ts = m.section(form.GridSection, 'device', _('Devices'), E('div', {}, [])); /* be6500PhysicalPortLink */\n"
+                "\t\ts = m.section(form.GridSection, 'device', _('Devices'));\n"
                 "} };\n"
             )
             switch_view.write_text(
@@ -120,19 +135,63 @@ class NetworkPortUiTests(unittest.TestCase):
 
             interface_source = interfaces.read_text()
             switch_source = switch_view.read_text()
-            self.assertEqual(1, interface_source.count("be6500PhysicalPortSummary:"))
             self.assertEqual(1, interface_source.count("be6500PhysicalPortCards"))
-            self.assertIn("callBe6500SwitchPorts('switch1')", interface_source)
-            self.assertIn("admin/router_settings/ports", interface_source)
-            self.assertNotIn("be6500PhysicalPortLink", interface_source)
+            self.assertIn("be6500ports.load()", interface_source)
+            self.assertIn("be6500ports.render(be6500SwitchPorts)", interface_source)
+            self.assertIn("require be6500.ports as be6500ports", interface_source)
             self.assertIn("new form.Map('network', _('Switch'), _('description'))", switch_source)
             self.assertFalse(old_menu.exists())
-            self.assertIn("be6500v23", header.read_text())
+            self.assertIn("be6500v24", header.read_text())
+
+    def test_patcher_adds_physical_cards_to_minified_release_luci(self):
+        with tempfile.TemporaryDirectory() as td:
+            temp = pathlib.Path(td)
+            interfaces = temp / "interfaces.js"
+            interfaces.write_text(
+                "'use strict';'require network';var isReadonlyView=null;"
+                "return view.extend({load:function(){return Promise.all(["
+                "network.getDSLModemType(),network.getDevices(),fs.lines('/etc/iproute2/rt_tables'),uci.changes()]);},"
+                "render:function(data){var dslModemType=data[0],netDevs=data[1],m,s,o;"
+                "s=m.section(form.GridSection,'device',_('Devices'));return m.render();}});"
+            )
+            env = os.environ.copy()
+            env.update({
+                "BE6500_LUCI_INTERFACES_VIEW": str(interfaces),
+                "BE6500_LUCI_SWITCH_VIEW": str(temp / "missing-switch.js"),
+                "BE6500_LUCI_OLD_PORT_MENU": str(temp / "old-menu.json"),
+                "BE6500_LUCI_HEADERS": str(temp / "missing-header.ut"),
+                "BE6500_LUCI_CACHE_ROOT": str(temp),
+            })
+            for _ in range(2):
+                subprocess.run(["sh", str(PATCHER)], env=env, check=True)
+
+            source = interfaces.read_text()
+            self.assertEqual(1, source.count("require be6500.ports as be6500ports"))
+            self.assertEqual(1, source.count("be6500ports.load()"))
+            self.assertEqual(1, source.count("be6500PhysicalPortCards"))
+            self.assertIn("be6500SwitchPorts=data[4]", source)
+
+    def test_physical_port_helper_uses_live_qca8386_state(self):
+        source = PORTS_JS.read_text()
+        self.assertIn("getSwconfigPortState", source)
+        self.assertIn("callSwitchPorts('switch1')", source)
+        self.assertIn("portCard('LAN1', 3", source)
+        self.assertIn("portCard('LAN2', 2", source)
+        self.assertIn("portCard('LAN3', 1", source)
+        self.assertIn("admin/router_settings/ports", source)
+
+    def test_luci_patch_service_rechecks_assets_without_network_reload(self):
+        source = LUCI_PATCH_SERVICE.read_text()
+        self.assertIn("be6500-patch-luci-network", source)
+        self.assertNotIn("wifi reload", source)
+        self.assertNotIn("network restart", source)
 
     def test_package_installs_factory_port_helpers_and_network_patcher(self):
         makefile = MAKEFILE.read_text()
-        self.assertIn("PKG_RELEASE:=38", makefile)
+        self.assertIn("PKG_RELEASE:=39", makefile)
         self.assertIn("be6500-patch-luci-network", makefile)
+        self.assertIn("be6500-luci-patches", makefile)
+        self.assertIn("luci-static/resources/be6500/ports.js", makefile)
         self.assertIn("be6500-game-port", makefile)
         self.assertIn("be6500-iptv-priority", makefile)
         self.assertNotIn("be6500-port-control $(1)", makefile)
