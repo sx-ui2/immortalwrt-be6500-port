@@ -1,4 +1,15 @@
-# BE6500 USB host and LuCI port fix v42
+# WITHDRAWN — DO NOT FLASH: BE6500 v42
+
+This image failed to boot on the BE6500 and is withdrawn. Use the
+boot-confirmed v41 image for recovery. The failure occurs when the generic
+Linux 6.6 M31/UniPHY modules complete the deferred DWC3/xHCI probe. The factory
+firmware instead uses the legacy QCA M31 `usb-phy` path for USB2 and a generic
+PHY only for USB3; v42 did not reproduce that topology.
+
+The downloadable v42 image and build metadata have been removed from the
+current branch. They must not be used.
+
+## Historical description
 
 This build keeps the boot-validated v41 kernel path and completes the USB host
 stack without making the USB PHY drivers built in.
