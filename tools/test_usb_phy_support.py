@@ -10,19 +10,18 @@ LUCI_PKG = ROOT / "package/be6500-local/luci-app-rejected-clients"
 
 
 class UsbPhySupportTests(unittest.TestCase):
-    def test_usb2_uses_factory_legacy_binding(self):
+    def test_failed_usb_phy_experiment_is_not_in_persistent_dtb(self):
         source = DTS.read_text()
-        self.assertIn('compatible = "qca,ipq5332-m31-usb-hsphy";', source)
-        self.assertIn('reg-names = "m31usb_phy_base", "qscratch_base";', source)
-        self.assertIn('reset-names = "usb2_phy_reset";', source)
-        self.assertIn('phy_type = "utmi";', source)
-        self.assertIn('usb-phy = <&hs_m31phy_0>;', source)
+        self.assertNotIn('compatible = "qca,ipq5332-m31-usb-hsphy";', source)
+        self.assertNotIn('reg-names = "m31usb_phy_base", "qscratch_base";', source)
+        self.assertNotIn('usb-phy = <&hs_m31phy_0>;', source)
 
-    def test_usb3_is_the_only_generic_phy_on_dwc3(self):
+    def test_persistent_dtb_matches_boot_confirmed_v41_shape(self):
         source = DTS.read_text()
-        self.assertIn('phys = <&ssuniphy_0>;', source)
-        self.assertIn('phy-names = "usb3-phy";', source)
-        self.assertNotIn('phy-names = "usb2-phy", "usb3-phy";', source)
+        self.assertIn('&hs_m31phy_0 {\n\tstatus = "okay";\n};', source)
+        self.assertIn('&ssuniphy_0 {\n\tstatus = "okay";\n};', source)
+        self.assertIn('&usb3 {\n\tstatus = "okay";\n};', source)
+        self.assertNotIn('&dwc_0 {', source)
 
     def test_legacy_driver_keeps_oem_ipq5332_tuning(self):
         source = (PKG / "src/qca-m31-usb-phy.c").read_text()
@@ -50,8 +49,8 @@ class UsbPhySupportTests(unittest.TestCase):
         self.assertIn("qca-m31-usb-phy.ko", package)
         self.assertNotIn("phy-qcom-m31.ko", package)
 
-    def test_image_contains_factory_usb_phy_package(self):
-        self.assertIn("kmod-usb-phy-ipq5018", PROFILE.read_text())
+    def test_image_excludes_unvalidated_usb_phy_package(self):
+        self.assertNotIn("kmod-usb-phy-ipq5018", PROFILE.read_text())
 
     def test_oem_usb_page_exposes_detection_and_full_management_links(self):
         controller = (LUCI_PKG / "root/usr/lib/lua/luci/controller/be6500_oem_beta.lua").read_text()

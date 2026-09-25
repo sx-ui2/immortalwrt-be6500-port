@@ -1,4 +1,18 @@
-# BE6500 v44 — signed sysupgrade, uBootKit factory image and OEM USB host
+# WITHDRAWN — DO NOT FLASH: BE6500 v44
+
+The v44 image failed to boot on the physical BE6500 and is withdrawn. Its
+downloadable firmware, package and build metadata are removed from the current
+branch. Use the boot-confirmed v41 uBootKit recovery image instead:
+
+`../2026-09-25-v41-uboot-recovery/be6500-v41-ubootkit-factory.bin`
+
+Static image validation cannot prove that a new USB PHY binding boots on this
+hardware. The v44 legacy M31/UniPHY topology is therefore isolated from the
+persistent image until it can be tested from a RAM-only image with serial boot
+logs. Do not force-upgrade v44 and do not upload its sysupgrade image to
+uBootKit.
+
+## Historical description
 
 This release replaces the invalid manually repacked v43 sysupgrade image.  The
 v44 sysupgrade image is produced by a complete ImmortalWrt image build and

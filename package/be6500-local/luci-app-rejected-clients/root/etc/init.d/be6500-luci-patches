@@ -5,6 +5,12 @@ START=19
 start() {
 	# These patchers only update LuCI assets and caches. They deliberately do
 	# not reload networking or Wi-Fi, so running this check at boot is safe.
+	if [ -d /usr/share/be6500-luci-overrides/status/include ]; then
+		for source in /usr/share/be6500-luci-overrides/status/include/*.js; do
+			[ -f "$source" ] || continue
+			cp -f "$source" /www/luci-static/resources/view/status/include/
+		done
+	fi
 	[ -x /usr/libexec/be6500-patch-luci-wireless ] && /usr/libexec/be6500-patch-luci-wireless >/dev/null 2>&1
 	[ -x /usr/libexec/be6500-patch-luci-network ] && /usr/libexec/be6500-patch-luci-network >/dev/null 2>&1
 	[ -x /usr/libexec/be6500-patch-luci-firewall ] && /usr/libexec/be6500-patch-luci-firewall >/dev/null 2>&1
