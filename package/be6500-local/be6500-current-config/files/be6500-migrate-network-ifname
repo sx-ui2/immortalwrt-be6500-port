@@ -1,0 +1,125 @@
+#!/bin/sh
+
+# Convert only the legacy fields recognized by LuCI's network migration
+# dialog.  Device types such as macvlan and 802.1Q legitimately use `ifname`
+# for their parent device and must not be rewritten.
+
+config_dir="${BE6500_UCI_CONFIG_DIR:-}"
+changed=0
+
+uci_call() {
+	if [ -n "$config_dir" ]; then
+		uci -q -c "$config_dir" "$@"
+	else
+		uci -q "$@"
+	fi
+}
+
+network_sections() {
+	uci_call show network 2>/dev/null |
+		sed -n "s/^network\.\([^.=]*\)=$1$/\1/p"
+}
+
+get_option() {
+	uci_call get "network.$1.$2" 2>/dev/null
+}
+
+find_device_by_name() {
+	local wanted="$1" section
+
+	for section in $(network_sections device); do
+		[ "$(get_option "$section" name)" = "$wanted" ] && {
+			printf '%s\n' "$section"
+			return 0
+		}
+	done
+
+	return 1
+}
+
+add_ports() {
+	local section="$1" words="$2" existing port
+
+	existing="$(get_option "$section" ports)"
+	for port in $words; do
+		case " $existing " in
+			*" $port "*) ;;
+			*)
+				uci_call add_list "network.$section.ports=$port" || return 1
+				existing="$existing $port"
+				;;
+		esac
+	done
+}
+
+migrate_bridge_interfaces() {
+	local section type ifname device_name device_section option value
+
+	for section in $(network_sections interface); do
+		type="$(get_option "$section" type)"
+		ifname="$(get_option "$section" ifname)"
+		[ "$type" = bridge ] && [ -n "$ifname" ] || continue
+
+		device_name="$(get_option "$section" device)"
+		[ -n "$device_name" ] || device_name="br-$section"
+		device_section="$(find_device_by_name "$device_name")"
+		if [ -z "$device_section" ]; then
+			device_section="$(uci_call add network device)" || return 1
+			uci_call set "network.$device_section.name=$device_name" || return 1
+			uci_call set "network.$device_section.type=bridge" || return 1
+		fi
+
+		add_ports "$device_section" "$ifname" || return 1
+		for option in mtu macaddr igmp_snooping; do
+			value="$(get_option "$section" "$option")"
+			[ -n "$value" ] && uci_call set "network.$device_section.$option=$value"
+		done
+
+		for option in type ifname mtu macaddr igmp_snooping; do
+			uci_call delete "network.$section.$option" 2>/dev/null || true
+		done
+		uci_call set "network.$section.device=$device_name" || return 1
+		changed=1
+	done
+}
+
+migrate_bridge_devices() {
+	local section type ifname ports
+
+	for section in $(network_sections device); do
+		type="$(get_option "$section" type)"
+		ifname="$(get_option "$section" ifname)"
+		ports="$(get_option "$section" ports)"
+		[ "$type" = bridge ] && [ -n "$ifname" ] && [ -z "$ports" ] || continue
+
+		add_ports "$section" "$ifname" || return 1
+		uci_call delete "network.$section.ifname" 2>/dev/null || true
+		changed=1
+	done
+}
+
+migrate_plain_interfaces() {
+	local section ifname device
+
+	for section in $(network_sections interface); do
+		ifname="$(get_option "$section" ifname)"
+		[ -n "$ifname" ] || continue
+
+		device="$(get_option "$section" device)"
+		[ -n "$device" ] || uci_call set "network.$section.device=$ifname" || return 1
+		uci_call delete "network.$section.ifname" 2>/dev/null || true
+		changed=1
+	done
+}
+
+migrate_bridge_interfaces || exit 1
+migrate_bridge_devices || exit 1
+migrate_plain_interfaces || exit 1
+
+if [ "$changed" -eq 1 ]; then
+	uci_call commit network || exit 1
+	logger -t be6500-network-migrate \
+		"converted legacy network ifname fields without restarting networking" 2>/dev/null || true
+fi
+
+exit 0

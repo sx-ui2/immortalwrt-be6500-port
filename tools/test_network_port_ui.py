@@ -21,6 +21,9 @@ FULL_RADIO_DTS = ROOT / "target/linux/qualcommax/files/arch/arm64/boot/dts/qcom/
 LUCI_PATCH_SERVICE = PKG / "root/etc/init.d/be6500-luci-patches"
 PHYSICAL_PORTS = PKG / "root/www/luci-static/resources/be6500/physicalports_v45.js"
 STORAGE = PKG / "htdocs/luci-static/resources/view/status/include/25_storage.js"
+CURRENT_CONFIG = ROOT / "package/be6500-local/be6500-current-config"
+IFNAME_MIGRATOR = CURRENT_CONFIG / "files/be6500-migrate-network-ifname"
+IFNAME_DEFAULT = CURRENT_CONFIG / "files/97-be6500-migrate-network-ifname"
 KERNEL_CONFIGS = [
     ROOT / "target/linux/qualcommax/ipq53xx/config-default",
     ROOT / "target/linux/qualcommax/ipq53xx/config-default.qsdk14",
@@ -205,6 +208,26 @@ class NetworkPortUiTests(unittest.TestCase):
         self.assertIn("物理 eMMC 容量", source)
         self.assertIn("mounts[i].mount == '/overlay'", source)
         self.assertIn("根目录（RAM，持久化存储未挂载）", source)
+
+    def test_preserved_ifname_is_migrated_without_network_restart(self):
+        source = IFNAME_MIGRATOR.read_text()
+        default = IFNAME_DEFAULT.read_text()
+        makefile = (CURRENT_CONFIG / "Makefile").read_text()
+
+        self.assertIn("PKG_RELEASE:=10", makefile)
+        self.assertIn("be6500-migrate-network-ifname", makefile)
+        self.assertIn("Package/be6500-current-config/postinst", makefile)
+        self.assertIn("migrate_bridge_interfaces", source)
+        self.assertIn("migrate_bridge_devices", source)
+        self.assertIn("migrate_plain_interfaces", source)
+        self.assertIn("network.$section.ports=$port", source)
+        self.assertIn("network.$section.device=$ifname", source)
+        self.assertIn("uci_call commit network", source)
+        self.assertIn("/usr/libexec/be6500-migrate-network-ifname", default)
+        self.assertNotIn("network restart", source)
+        self.assertNotIn("network reload", source)
+        self.assertNotIn("wifi reload", source)
+        self.assertFalse((CURRENT_CONFIG / "files/97-be6500-remove-ifname-migration").exists())
 
     def test_luci_patch_service_rechecks_assets_without_network_reload(self):
         source = LUCI_PATCH_SERVICE.read_text()

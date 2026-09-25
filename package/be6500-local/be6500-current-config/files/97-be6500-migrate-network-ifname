@@ -1,0 +1,12 @@
+#!/bin/sh
+
+# Migrate a preserved pre-21.02 network configuration before netifd starts.
+# This mirrors LuCI's migration rules but deliberately does not reload or
+# restart networking.  The running configuration therefore remains online;
+# the equivalent native `device` / bridge `ports` form is used on the next
+# normal network start.
+
+[ -x /usr/libexec/be6500-migrate-network-ifname ] || exit 0
+/usr/libexec/be6500-migrate-network-ifname
+
+exit $?
