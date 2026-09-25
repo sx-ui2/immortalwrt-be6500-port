@@ -25,5 +25,6 @@
 	"admin/router_settings/upnp": { "title": "UPnP", "order": 15, "action": { "type": "template", "path": "be6500_oem_beta/index" } },
 	"admin/router_settings/hosts": { "title": "自定义 Hosts", "order": 16, "action": { "type": "template", "path": "be6500_oem_beta/index" } },
 	"admin/router_settings/nat": { "title": "NAT 设置", "order": 17, "action": { "type": "template", "path": "be6500_oem_beta/index" } },
-	"admin/router_settings/certificates": { "title": "证书管理", "order": 18, "action": { "type": "template", "path": "be6500_oem_beta/index" } }
+	"admin/router_settings/certificates": { "title": "证书管理", "order": 18, "action": { "type": "template", "path": "be6500_oem_beta/index" } },
+	"admin/router_settings/usb": { "title": "USB 设备", "order": 19, "action": { "type": "template", "path": "be6500_oem_beta/index" } }
 }

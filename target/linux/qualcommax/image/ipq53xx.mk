@@ -6,7 +6,7 @@ define Device/jdcloud_be6500
 	IMAGES := sysupgrade.bin
 	DEVICE_VENDOR := JDCloud
 	DEVICE_MODEL := ZhaoYun BE6500
-	DEVICE_VARIANT := 6.6 v82 safe boot and LuCI port fix
+	DEVICE_VARIANT := 6.6 v83 factory USB PHY and complete USB host
 	# Keep the persistent image on the boot-validated QWRT/swconfig hardware
 	# description.  The generic native DTS does not boot on this board.
 	DEVICE_DTS := ipq5332-jdcloud-be6500-full-radio-mht-test-initramfs
@@ -26,6 +26,7 @@ define Device/jdcloud_be6500
 			kmod-qca-nss-ecm \
 			kmod-qca-nss-ecm-wifi-plugin \
 			be6500-oem-wifi-firmware \
+			kmod-usb-phy-ipq5018 \
 		luci-app-rejected-clients \
 		be6500-current-config \
 		openssh-sftp-server \

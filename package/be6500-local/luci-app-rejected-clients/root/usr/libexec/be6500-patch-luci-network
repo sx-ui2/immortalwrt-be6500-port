@@ -1,9 +1,10 @@
 #!/bin/sh
 
 # QCA8386 exposes LAN1-LAN3 as switch ports behind eth1, not as independent
-# Linux netdevs. Add a truthful physical-port summary to LuCI's Devices page
-# while leaving VLAN membership in the existing Switch page. Release LuCI
-# assets are minified to a single line, so support both asset layouts.
+# Linux netdevs. The regular Switch page already exposes those physical ports,
+# while the OEM router menu owns their role configuration. Remove the temporary
+# Devices-page module injected by development images: it duplicated the switch
+# UI and an old cached copy can abort the whole Network page during module load.
 
 interfaces="${BE6500_LUCI_INTERFACES_VIEW:-/www/luci-static/resources/view/network/interfaces.js}"
 switch_view="${BE6500_LUCI_SWITCH_VIEW:-/www/luci-static/resources/view/network/switch.js}"
@@ -18,47 +19,23 @@ if [ -f "$switch_view" ] && grep -q 'be6500PhysicalPortTitle' "$switch_view"; th
 	sed "s@'LAN 端口与 VLAN', /\\* be6500PhysicalPortTitle \\*/@_('Switch'),@" "$switch_view" >"$tmp" && mv "$tmp" "$switch_view"
 fi
 
-if [ -f "$interfaces" ] && ! grep -q 'be6500PhysicalPortCards' "$interfaces"; then
+if [ -f "$interfaces" ] && grep -q 'be6500\.ports\|be6500PhysicalPortCards\|be6500SwitchPorts' "$interfaces"; then
 	work="${interfaces}.be6500.work.$$"
 	cp "$interfaces" "$work" || exit 1
 
-	if ! grep -q "require be6500.ports as be6500ports" "$work"; then
-		tmp="${work}.tmp"
-		sed "s@'require network';@'require network';'require be6500.ports as be6500ports';@" "$work" >"$tmp" && mv "$tmp" "$work"
-	fi
+	tmp="${work}.tmp"
+	sed \
+		-e "s@'require be6500\.ports as be6500ports';@@g" \
+		-e 's@,L\.resolveDefault(be6500ports\.load(),\[\])@@g' \
+		-e '/^[[:space:]]*L\.resolveDefault(be6500ports\.load(), \[\])[[:space:]]*$/d' \
+		-e 's/^[[:space:]]*uci\.changes(),[[:space:]]*$/\t\t\tuci.changes()/' \
+		-e 's/var be6500SwitchPorts=data\[4\]||\[\],dslModemType=data\[0\],/var dslModemType=data[0],/g' \
+		-e '/^[[:space:]]*var be6500SwitchPorts = data\[4\] || \[\],[[:space:]]*$/d' \
+		-e "s@m\.section(form\.GridSection,'device',_('Devices'),be6500ports\.render(be6500SwitchPorts));/\* be6500PhysicalPortCards \*/@m.section(form.GridSection,'device',_('Devices'));@g" \
+		-e "s@m\.section(form\.GridSection, 'device', _('Devices'), be6500ports\.render(be6500SwitchPorts)); /\* be6500PhysicalPortCards \*/@m.section(form.GridSection, 'device', _('Devices'));@g" \
+		"$work" >"$tmp" && mv "$tmp" "$work"
 
-	# Unminified LuCI keeps uci.changes() on its own line.
-	if ! grep -q 'be6500ports.load()' "$work"; then
-		tmp="${work}.tmp"
-		sed "s/^[[:space:]]*uci\.changes()$/\t\t\tuci.changes(),\\
-\t\t\tL.resolveDefault(be6500ports.load(), [])/" "$work" >"$tmp" && mv "$tmp" "$work"
-	fi
-	# Release images contain the entire load() body inline.
-	if ! grep -q 'be6500ports.load()' "$work"; then
-		tmp="${work}.tmp"
-		sed "s@uci\.changes()]);}@uci.changes(),L.resolveDefault(be6500ports.load(),[])]);}@" "$work" >"$tmp" && mv "$tmp" "$work"
-	fi
-
-	if ! grep -q 'be6500SwitchPorts=data\[4\]' "$work"; then
-		tmp="${work}.tmp"
-		sed \
-			-e "s/var dslModemType = data\[0\],/var be6500SwitchPorts = data[4] || [],\\
-\t\t    dslModemType = data[0],/" \
-			-e "s/var dslModemType=data\[0\],/var be6500SwitchPorts=data[4]||[],dslModemType=data[0],/" \
-			"$work" >"$tmp" && mv "$tmp" "$work"
-	fi
-
-	if ! grep -q 'be6500PhysicalPortCards' "$work"; then
-		tmp="${work}.tmp"
-		sed \
-			-e "s@s = m.section(form.GridSection, 'device', _('Devices'));@s = m.section(form.GridSection, 'device', _('Devices'), be6500ports.render(be6500SwitchPorts)); /* be6500PhysicalPortCards */@" \
-			-e "s@s=m.section(form.GridSection,'device',_('Devices'));@s=m.section(form.GridSection,'device',_('Devices'),be6500ports.render(be6500SwitchPorts));/* be6500PhysicalPortCards */@" \
-			"$work" >"$tmp" && mv "$tmp" "$work"
-	fi
-
-	if grep -q 'be6500PhysicalPortCards' "$work" &&
-	   grep -q 'be6500ports.load()' "$work" &&
-	   grep -q 'be6500SwitchPorts=data\[4\]\|be6500SwitchPorts = data\[4\]' "$work"; then
+	if ! grep -q 'be6500\.ports\|be6500PhysicalPortCards\|be6500SwitchPorts' "$work"; then
 		mv "$work" "$interfaces"
 	else
 		rm -f "$work"
@@ -72,8 +49,8 @@ for header in $headers; do
 	if [ -f "$header" ]; then
 		tmp="${header}.be6500.$$"
 		sed \
-			-e 's#luci\.js?v=26\.236\.50592~9b8ee64-{{ pkgs_update_time }}#luci.js?v=26.236.50592~9b8ee64-be6500v25-{{ pkgs_update_time }}#' \
-			-e 's#be6500v[0-9]*-{{ pkgs_update_time }}#be6500v25-{{ pkgs_update_time }}#' \
+			-e 's#luci\.js?v=26\.236\.50592~9b8ee64-{{ pkgs_update_time }}#luci.js?v=26.236.50592~9b8ee64-be6500v26-{{ pkgs_update_time }}#' \
+			-e 's#be6500v[0-9]*-{{ pkgs_update_time }}#be6500v26-{{ pkgs_update_time }}#' \
 			"$header" >"$tmp" && mv "$tmp" "$header"
 	fi
 done
@@ -81,4 +58,4 @@ done
 rm -f "$cache_root/luci-indexcache"
 rm -f "$cache_root"/luci-modulecache/* 2>/dev/null
 
-grep -q 'be6500PhysicalPortCards' "$interfaces" && [ ! -e "$old_menu" ]
+! grep -q 'be6500\.ports\|be6500PhysicalPortCards\|be6500SwitchPorts' "$interfaces" && [ ! -e "$old_menu" ]

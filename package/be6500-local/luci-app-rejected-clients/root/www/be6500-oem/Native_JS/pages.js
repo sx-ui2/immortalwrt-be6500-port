@@ -1531,6 +1531,33 @@
     }).catch(function (error) { notify(error.message, false); });
   }
 
+  function usbPage() {
+    page('USB 设备',
+      '<p class="seniorManagement_info_p native-advanced-description">查看 USB 设备和已挂载存储；磁盘、共享与打印服务使用各自的完整管理页面。</p>' +
+      section('已连接设备', '<div id="usb-device-list" class="native-list"><div class="native-empty">正在检测…</div></div>') +
+      section('已挂载存储', '<div id="usb-mount-list" class="native-list"><div class="native-empty">正在读取…</div></div>') +
+      '<div class="native-inline-actions">' +
+        '<a class="native-link-button" href="/cgi-bin/luci/admin/system/diskman/disks">磁盘管理</a>' +
+        '<a class="native-link-button" href="/cgi-bin/luci/admin/nas/samba4">网络共享</a>' +
+        '<a class="native-link-button" href="/cgi-bin/luci/admin/nas/usb_printer">USB 打印服务</a>' +
+      '</div>');
+
+    rpc('get_usb_info', {}).then(function (result) {
+      var devices = asArray(result.devices), mounts = asArray(result.mounts);
+      id('usb-device-list').innerHTML = devices.length ? devices.map(function (device) {
+        var detail = [device.vendor, device.id, device.speed ? device.speed + ' Mbps' : '', device.serial].filter(Boolean).join(' · ');
+        return '<div class="native-list-row"><span><strong>' + esc(device.name || 'USB 设备') + '</strong><small>' + esc(detail || device.path || '') + '</small></span></div>';
+      }).join('') : '<div class="native-empty">未检测到外接 USB 设备</div>';
+      id('usb-mount-list').innerHTML = mounts.length ? mounts.map(function (mount) {
+        return '<div class="native-list-row"><span><strong>' + esc(mount.device || '') + '</strong><small>' + esc((mount.mountpoint || '') + (mount.fstype ? ' · ' + mount.fstype : '')) + '</small></span></div>';
+      }).join('') : '<div class="native-empty">没有已挂载的 USB 存储分区</div>';
+    }).catch(function (error) {
+      id('usb-device-list').innerHTML = '<div class="native-empty">读取失败</div>';
+      id('usb-mount-list').innerHTML = '<div class="native-empty">读取失败</div>';
+      notify(error.message, false);
+    });
+  }
+
   function firewallPage() {
     page('防火墙设置', '<p class="seniorManagement_info_p native-advanced-description">配置 WAN 区域的基础防护策略。</p>' + row('启用 SYN-flood 防御', toggle('fw-synflood', '')) + row('丢弃无效数据包', toggle('fw-invalid', '')) + row('暴露至公网', toggle('fw-expose', ''), '危险：开启后公网可以直接访问路由器服务，请自行承担安全风险。') + '<div id="fw-danger" class="native-warning" style="display:none">开启后 WAN 入站及转发策略会变为接受，管理界面和路由器服务可能暴露到公网。</div>' + buttons(['fw-save', '保存']));
     function syncWarning() { show('#fw-danger', checked('fw-expose')); }
@@ -1620,6 +1647,7 @@
     else if (/UPnP\.html$/.test(path)) upnpPage();
     else if (/CustomHosts\.html$/.test(path)) hostsPage();
     else if (/NATSet\.html$/.test(path)) natPage();
+    else if (/USB\.html$/.test(path)) usbPage();
     else if (/Firewall\.html$/.test(path)) firewallPage();
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start); else start();

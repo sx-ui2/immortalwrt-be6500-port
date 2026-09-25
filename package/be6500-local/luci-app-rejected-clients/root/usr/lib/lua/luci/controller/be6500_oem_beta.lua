@@ -2624,9 +2624,62 @@ local function physical_wan_has_carrier()
     return carrier == "1"
 end
 
+local function sysfs_text(path)
+    local file = io.open(path, "r")
+    if not file then return "" end
+    local value = trim(file:read("*l") or "")
+    file:close()
+    return value
+end
+
+local function usb_overview()
+    local devices, mounts = {}, {}
+    local ok, fs = pcall(require, "nixio.fs")
+    if ok and fs and fs.dir then
+        local iterator = fs.dir("/sys/bus/usb/devices")
+        if iterator then
+            for name in iterator do
+                -- Root hubs describe the controller itself.  Only list real
+                -- downstream devices so an empty socket remains visibly empty.
+                if tostring(name):match("^%d+%-%d+") and not tostring(name):find(":", 1, true) then
+                    local base = "/sys/bus/usb/devices/" .. name .. "/"
+                    local vendor = sysfs_text(base .. "manufacturer")
+                    local product = sysfs_text(base .. "product")
+                    local vid = sysfs_text(base .. "idVendor")
+                    local pid = sysfs_text(base .. "idProduct")
+                    devices[#devices + 1] = {
+                        path = name,
+                        name = product ~= "" and product or (vendor ~= "" and vendor or "USB 设备"),
+                        vendor = vendor,
+                        id = (vid ~= "" and pid ~= "") and (vid .. ":" .. pid) or "",
+                        serial = sysfs_text(base .. "serial"),
+                        speed = sysfs_text(base .. "speed")
+                    }
+                end
+            end
+        end
+    end
+    table.sort(devices, function(first, second) return tostring(first.path) < tostring(second.path) end)
+
+    local file = io.open("/proc/mounts", "r")
+    if file then
+        for line in file:lines() do
+            local device, mountpoint, fstype = line:match("^(%S+)%s+(%S+)%s+(%S+)")
+            if device and (device:match("^/dev/sd") or device:match("^/dev/mmcblk") or device:match("^/dev/nvme")) then
+                mountpoint = tostring(mountpoint):gsub("\\040", " "):gsub("\\011", "\t")
+                mounts[#mounts + 1] = { device = device, mountpoint = mountpoint, fstype = fstype or "" }
+            end
+        end
+        file:close()
+    end
+    return { status = 0, devices = devices, mounts = mounts }
+end
+
 local function extended_jdcapi(method, args, uci)
     local status = { status = 0 }
-    if method == "get_wan_info" then
+    if method == "get_usb_info" then
+        return true, usb_overview()
+    elseif method == "get_wan_info" then
         local active_wds = active_wds_iface(uci)
         local runtime_name = active_wds and "wwan" or "wan"
         local runtime = ubus_interface(runtime_name)
