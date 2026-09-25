@@ -6,7 +6,7 @@ define Device/jdcloud_be6500
 	IMAGES := sysupgrade.bin
 	DEVICE_VENDOR := JDCloud
 	DEVICE_MODEL := ZhaoYun BE6500
-	DEVICE_VARIANT := 6.6 v79 safe boot and physical ports
+	DEVICE_VARIANT := 6.6 v81 corrected USB2/USB3 PHY binding and LuCI port fix
 	# Keep the persistent image on the boot-validated QWRT/swconfig hardware
 	# description.  The generic native DTS does not boot on this board.
 	DEVICE_DTS := ipq5332-jdcloud-be6500-full-radio-mht-test-initramfs
@@ -26,16 +26,19 @@ define Device/jdcloud_be6500
 			kmod-qca-nss-ecm \
 			kmod-qca-nss-ecm-wifi-plugin \
 			be6500-oem-wifi-firmware \
+			kmod-usb-phy-ipq5018 \
 		luci-app-rejected-clients \
 		be6500-current-config \
 		openssh-sftp-server \
-		block-mount blockd usbutils \
+		automount block-mount blockd usbutils \
 		kmod-usb-core kmod-usb3 kmod-usb-dwc3 kmod-usb-dwc3-qcom \
 		kmod-usb-storage kmod-usb-storage-extras kmod-usb-storage-uas \
 		kmod-usb-printer \
-		kmod-fs-ext4 kmod-fs-exfat kmod-fs-vfat kmod-fs-ntfs3 ntfs3-mount \
-		luci-app-diskman luci-app-samba4 luci-app-hd-idle \
-		luci-i18n-samba4-zh-cn \
+		kmod-fs-btrfs kmod-fs-ext4 kmod-fs-exfat kmod-fs-vfat \
+		kmod-fs-ntfs3 ntfs3-mount \
+		luci-app-diskman luci-app-samba4 luci-app-hd-idle luci-app-usb-printer \
+		luci-i18n-diskman-zh-cn luci-i18n-samba4-zh-cn \
+		luci-i18n-usb-printer-zh-cn \
 		fdisk parted smartmontools \
 		udpxy tcpdump tc-full nftables
 endef

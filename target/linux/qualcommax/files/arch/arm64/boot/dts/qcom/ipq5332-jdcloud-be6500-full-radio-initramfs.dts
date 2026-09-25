@@ -126,6 +126,15 @@
 	status = "okay";
 };
 
+/* QSDK 14 carries a typo ("ubs2-phy") in the IPQ5332 DWC3 child.  Linux
+ * 6.6 looks up the generic M31 provider by the exact "usb2-phy" name; with
+ * the typo it never attaches the USB2 PHY and xHCI can stall while probing.
+ * Keep the factory two-PHY topology and correct only the consumer names.
+ */
+&dwc_0 {
+	phy-names = "usb2-phy", "usb3-phy";
+};
+
 /*
  * The 5.4 QWRT tree describes two WLAN chips with a legacy wsi node.  The
  * QSDK 14 ath12k driver additionally walks an OF graph to discover every

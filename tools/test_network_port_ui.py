@@ -88,11 +88,11 @@ class NetworkPortUiTests(unittest.TestCase):
         self.assertIn("&usb3", source)
         self.assertGreaterEqual(source.count('status = "okay";'), 3)
 
-    def test_unvalidated_ipq5332_usb_phy_drivers_stay_disabled(self):
+    def test_ipq5332_usb_phy_drivers_are_modules_not_builtins(self):
         for path in KERNEL_CONFIGS:
             source = path.read_text()
-            self.assertIn("# CONFIG_PHY_QCOM_M31_USB is not set", source, path)
-            self.assertIn("# CONFIG_PHY_IPQ_UNIPHY_USB is not set", source, path)
+            self.assertIn("CONFIG_PHY_QCOM_M31_USB=m", source, path)
+            self.assertIn("CONFIG_PHY_IPQ_UNIPHY_USB=m", source, path)
             self.assertNotIn("CONFIG_PHY_QCOM_M31_USB=y", source, path)
             self.assertNotIn("CONFIG_PHY_IPQ_UNIPHY_USB=y", source, path)
 
@@ -150,7 +150,7 @@ class NetworkPortUiTests(unittest.TestCase):
             self.assertIn("require be6500.ports as be6500ports", interface_source)
             self.assertIn("new form.Map('network', _('Switch'), _('description'))", switch_source)
             self.assertFalse(old_menu.exists())
-            self.assertIn("be6500v24", header.read_text())
+            self.assertIn("be6500v25", header.read_text())
 
     def test_patcher_adds_physical_cards_to_minified_release_luci(self):
         with tempfile.TemporaryDirectory() as td:
@@ -182,6 +182,8 @@ class NetworkPortUiTests(unittest.TestCase):
 
     def test_physical_port_helper_uses_live_qca8386_state(self):
         source = PORTS_JS.read_text()
+        self.assertIn("'require baseclass';", source)
+        self.assertIn("return baseclass.extend({", source)
         self.assertIn("getSwconfigPortState", source)
         self.assertIn("callSwitchPorts('switch1')", source)
         self.assertIn("portCard('LAN1', 3", source)
@@ -197,7 +199,7 @@ class NetworkPortUiTests(unittest.TestCase):
 
     def test_package_installs_factory_port_helpers_and_network_patcher(self):
         makefile = MAKEFILE.read_text()
-        self.assertIn("PKG_RELEASE:=39", makefile)
+        self.assertIn("PKG_RELEASE:=40", makefile)
         self.assertIn("be6500-patch-luci-network", makefile)
         self.assertIn("be6500-luci-patches", makefile)
         self.assertIn("luci-static/resources/be6500/ports.js", makefile)

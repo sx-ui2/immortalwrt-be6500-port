@@ -1,4 +1,5 @@
 'use strict';
+'require baseclass';
 'require rpc';
 
 var callSwitchPorts = rpc.declare({
@@ -30,7 +31,7 @@ function portCard(name, number, states) {
 	]);
 }
 
-return {
+return baseclass.extend({
 	load: function() {
 		return callSwitchPorts('switch1');
 	},
@@ -56,4 +57,4 @@ return {
 			}, [ _('打开端口设置') ])
 		]);
 	}
-};
+});

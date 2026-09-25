@@ -72,8 +72,8 @@ for header in $headers; do
 	if [ -f "$header" ]; then
 		tmp="${header}.be6500.$$"
 		sed \
-			-e 's#luci\.js?v=26\.236\.50592~9b8ee64-{{ pkgs_update_time }}#luci.js?v=26.236.50592~9b8ee64-be6500v24-{{ pkgs_update_time }}#' \
-			-e 's#be6500v[0-9]*-{{ pkgs_update_time }}#be6500v24-{{ pkgs_update_time }}#' \
+			-e 's#luci\.js?v=26\.236\.50592~9b8ee64-{{ pkgs_update_time }}#luci.js?v=26.236.50592~9b8ee64-be6500v25-{{ pkgs_update_time }}#' \
+			-e 's#be6500v[0-9]*-{{ pkgs_update_time }}#be6500v25-{{ pkgs_update_time }}#' \
 			"$header" >"$tmp" && mv "$tmp" "$header"
 	fi
 done
