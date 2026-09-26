@@ -1,123 +1,87 @@
 #!/bin/sh
 
-# The v42/v44 images loaded new PHY code in the boot-critical path and could
-# leave the router unbootable. Keep the proven kernel Image, wait until normal
-# services are up, and persist a one-shot guard before touching either PHY.
+# QWRT registers DWC3 first (83/84) and the two PHY drivers afterwards (85).
+# Keep the same ordering, but require an explicit probe so a PHY lockup never
+# repeats automatically on the next boot.
 
-STATE_CONFIG="be6500_usb_guard.guard"
 LOCK_DIR="/var/lock/be6500-usb-host.lock"
 
 log() {
 	logger -t be6500-usb-host -- "$*"
 }
 
-state_get() {
-	uci -q get "$STATE_CONFIG.state" || printf '%s\n' new
-}
-
-state_set() {
-	local state="$1"
-	local error="${2:-}"
-
-	uci -q batch <<-EOF
-		set $STATE_CONFIG=guard
-		set $STATE_CONFIG.state='$state'
-		set $STATE_CONFIG.last_error='$error'
-	EOF
-	uci -q commit be6500_usb_guard
-	sync
-}
-
 host_ready() {
 	local host
-	local platform
+	local controller
 
 	for host in /sys/class/usb_host/host*; do
 		[ -e "$host" ] || continue
-		for platform in /sys/bus/platform/devices/*8a00000*; do
-			[ -e "$platform" ] || continue
-			[ -L "$platform/driver" ] && return 0
+		for controller in /sys/bus/platform/devices/*8a00000*; do
+			[ -e "$controller" ] || continue
+			[ -L "$controller/driver" ] && return 0
 		done
 	done
 
 	return 1
 }
 
-load_phys() {
-	modprobe phy-qcom-m31 || return 1
-	modprobe phy-qca-uniphy || return 1
-	modprobe dwc3-qcom || return 1
-	modprobe xhci-plat-hcd || return 1
-
-	return 0
+module_loaded() {
+	grep -q "^$1 " /proc/modules 2>/dev/null
 }
 
-probe_once() {
-	local state
-	local remaining=20
-
-	state="$(state_get)"
-	case "$state" in
-		probing)
-			state_set blocked "previous PHY probe did not complete"
-			log "previous PHY probe was interrupted; automatic USB probing is blocked"
-			return 1
-			;;
-		blocked)
-			log "USB PHY probing is blocked after an earlier failed attempt"
-			return 1
-			;;
-	esac
-
-	state_set probing
-	log "loading Linux 6.6 IPQ5332 M31 and UniPHY drivers"
-	if ! load_phys; then
-		state_set blocked "PHY or DWC3 module load failed"
-		log "USB PHY module load failed; the next boot will remain on the safe path"
+probe_qwrt_order() {
+	[ "$(cat /tmp/sysinfo/board_name 2>/dev/null)" = "jdcloud,be6500" ] || {
+		printf '%s\n' 'This command is only valid on jdcloud,be6500.' >&2
 		return 1
-	fi
+	}
 
+	# These are normally already present through kmod-usb-dwc3-qcom. Calling
+	# modprobe is harmless and makes the intended QWRT order unambiguous.
+	modprobe dwc3-qcom || return 1
+	modprobe dwc3 || return 1
+	modprobe qca-m31-usb-phy || return 1
+	modprobe phy-qca-uniphy || return 1
+	modprobe xhci-plat-hcd || return 1
+
+	local remaining=20
 	while [ "$remaining" -gt 0 ]; do
 		if host_ready; then
-			state_set ready
-			log "IPQ5332 DWC3 host registered; USB hotplug is ready"
+			log "QWRT-compatible IPQ5332 USB host registered"
+			printf '%s\n' 'USB host is ready.'
 			return 0
 		fi
 		remaining=$((remaining - 1))
 		sleep 1
 	done
 
-	state_set blocked "DWC3 host did not register within 20 seconds"
-	log "DWC3 host did not register; automatic USB probing is blocked"
+	log "USB PHY modules loaded but DWC3 host did not register"
+	printf '%s\n' 'USB host did not register. Reboot restores the safe path.' >&2
 	return 1
 }
 
 run_locked() {
 	mkdir -p /var/lock
 	if ! mkdir "$LOCK_DIR" 2>/dev/null; then
-		log "another USB PHY probe is already running"
+		printf '%s\n' 'Another USB probe is already running.' >&2
 		return 1
 	fi
 	trap 'rmdir "$LOCK_DIR" 2>/dev/null' EXIT INT TERM
-	probe_once
+	probe_qwrt_order
 }
 
 case "${1:-status}" in
-	boot)
-		[ "$(cat /tmp/sysinfo/board_name 2>/dev/null)" = "jdcloud,be6500" ] || exit 0
-		sleep "${BE6500_USB_BOOT_DELAY:-45}"
-		run_locked
-		;;
-	retry)
-		state_set new
+	probe)
 		run_locked
 		;;
 	status)
-		printf 'state=%s\n' "$(state_get)"
 		host_ready && printf '%s\n' 'host=ready' || printf '%s\n' 'host=not-ready'
+		for module in dwc3_qcom dwc3 qca_m31_usb_phy phy_qca_uniphy xhci_plat_hcd; do
+			module_loaded "$module" && state=loaded || state=not-loaded
+			printf '%s=%s\n' "$module" "$state"
+		done
 		;;
 	*)
-		printf 'Usage: %s {status|retry|boot}\n' "$0" >&2
+		printf 'Usage: %s {status|probe}\n' "$0" >&2
 		exit 2
 		;;
 esac

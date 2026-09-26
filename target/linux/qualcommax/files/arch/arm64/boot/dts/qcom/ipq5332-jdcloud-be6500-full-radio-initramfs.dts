@@ -11,19 +11,6 @@
 	compatible = "jdcloud,be6500", "qcom,ipq5332-ap-mi01.6", "qcom,ipq5332";
 	be6500,port-stage = "full-three-band-wsi-m3-v59";
 
-	/* The board routes USB VDD from an always-on rail. Linux 6.6's M31
-	 * binding requires an explicit supply even though there is no GPIO to
-	 * toggle on this board.
-	 */
-	jd_usb_vdd: regulator-usb-vdd {
-		compatible = "regulator-fixed";
-		regulator-name = "be6500-usb-vdd-5v0";
-		regulator-min-microvolt = <5000000>;
-		regulator-max-microvolt = <5000000>;
-		regulator-boot-on;
-		regulator-always-on;
-	};
-
 	chosen {
 		/* QSDK's S04ath12k_dyn_dbg_enable.sh deliberately rebuilds the
 		 * first /etc/modules.d/ath12k line from ath12k_* kernel arguments.
@@ -83,6 +70,21 @@
 	compatible = "qcom,scm-ipq5332", "qcom,scm";
 };
 
+/* Keep the boot-confirmed v41 USB topology unchanged.  The base tree owns
+ * the PHY/controller bindings; the board overlay only enables those nodes.
+ */
+&hs_m31phy_0 {
+	status = "okay";
+};
+
+&ssuniphy_0 {
+	status = "okay";
+};
+
+&usb3 {
+	status = "okay";
+};
+
 &q6v5_wcss {
 	compatible = "qcom,ipq5332-q6-mpd";
 	firmware = "IPQ5332/q6_fw0.mdt";
@@ -121,36 +123,6 @@
 
 &wcss {
 	status = "okay";
-};
-
-/* Use the native QSDK 14 / Linux 6.6 PHY bindings. The selected production
- * tree already provides qcom,ipq5332-usb-hsphy; complete its required clock
- * and supply names instead of reviving the incompatible QWRT 5.4 usb_phy
- * binding from the unused flattened factory DTS.
- */
-&hs_m31phy_0 {
-	clock-names = "cfg_ahb";
-	vdd-supply = <&jd_usb_vdd>;
-	status = "okay";
-};
-
-&ssuniphy_0 {
-	status = "okay";
-};
-
-&usb3 {
-	/* USB3 and PCIe0 share the 4b0000 UniPHY. PCIe0 is disabled on this
-	 * board; match the factory firmware and select the USB side of the mux.
-	 */
-	qcom,multiplexed-phy;
-	status = "okay";
-};
-
-/* QSDK 14 carries "ubs2-phy" in ipq5332.dtsi. DWC3 looks up the provider by
- * the exact standard name, so the typo leaves the M31 PHY uninitialized.
- */
-&dwc_0 {
-	phy-names = "usb2-phy", "usb3-phy";
 };
 
 /*

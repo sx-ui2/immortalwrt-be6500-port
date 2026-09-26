@@ -1,3 +1,0 @@
-config guard 'state'
-	option state 'new'
-	option last_error ''

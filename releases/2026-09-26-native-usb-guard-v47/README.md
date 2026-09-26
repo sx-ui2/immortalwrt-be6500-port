@@ -1,4 +1,11 @@
-# BE6500 v47 — Linux 6.6 native IPQ5332 USB PHY
+# WITHDRAWN — DO NOT FLASH: BE6500 v47
+
+This image failed to boot on the physical router. Its firmware binaries and
+standalone PHY package were removed from the current release tree to prevent
+accidental use. Use the boot-confirmed v41 recovery image or v49, whose FIT is
+byte-for-byte identical to v41.
+
+The remaining text is retained only as a record of the failed experiment.
 
 This release replaces the incompatible QWRT 5.4 USB PHY path with the native
 QSDK 14 / Linux 6.6 implementation identified during diagnosis.

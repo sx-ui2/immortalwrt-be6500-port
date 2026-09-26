@@ -16,62 +16,57 @@ KERNEL_CONFIGS = [
 
 
 class UsbPhySupportTests(unittest.TestCase):
-    def test_production_tree_uses_native_qsdk14_soc_dtsi(self):
+    def test_production_tree_keeps_boot_confirmed_usb_topology(self):
         core = CORE_DTS.read_text()
         overlay = DTS.read_text()
         self.assertIn('#include "ipq5332.dtsi"', core)
+        self.assertIn('&hs_m31phy_0 {\n\tstatus = "okay";\n};', overlay)
+        self.assertIn('&ssuniphy_0 {\n\tstatus = "okay";\n};', overlay)
+        self.assertIn('&usb3 {\n\tstatus = "okay";\n};', overlay)
         self.assertNotIn('compatible = "qca,ipq5332-m31-usb-hsphy";', overlay)
         self.assertNotIn('usb-phy = <&hs_m31phy_0>;', overlay)
-
-    def test_linux66_m31_binding_is_completed(self):
-        source = DTS.read_text()
-        self.assertIn('compatible = "regulator-fixed";', source)
-        self.assertIn('regulator-name = "be6500-usb-vdd-5v0";', source)
-        self.assertIn('&hs_m31phy_0 {', source)
-        self.assertIn('clock-names = "cfg_ahb";', source)
-        self.assertIn('vdd-supply = <&jd_usb_vdd>;', source)
-        self.assertIn('&ssuniphy_0 {\n\tstatus = "okay";\n};', source)
-
-    def test_dwc3_selects_usb_combo_phy_and_correct_names(self):
-        source = DTS.read_text()
-        self.assertIn('&usb3 {', source)
-        self.assertIn('qcom,multiplexed-phy;', source)
-        self.assertIn('&dwc_0 {', source)
-        self.assertIn('phy-names = "usb2-phy", "usb3-phy";', source)
-        self.assertNotIn('phy-names = "ubs2-phy"', source)
+        self.assertNotIn('qcom,multiplexed-phy;', overlay)
 
     def test_phy_modules_are_external_and_not_in_boot_critical_image(self):
         package = (PKG / "Makefile").read_text()
-        self.assertIn("+kmod-usb3 +kmod-usb-dwc3-qcom", package)
+        self.assertIn("+kmod-usb-phy-nop +kmod-usb3 +kmod-usb-dwc3-qcom", package)
+        self.assertIn("CONFIG_USB_PHY=y", package)
         self.assertIn("CONFIG_PHY_QCOM_M31_USB=n", package)
         self.assertIn("CONFIG_PHY_IPQ_UNIPHY_USB=n", package)
-        self.assertIn("$(PKG_BUILD_DIR)/phy-qcom-m31.ko", package)
+        self.assertIn("$(PKG_BUILD_DIR)/qca-m31-usb-phy.ko", package)
         self.assertIn("$(PKG_BUILD_DIR)/phy-qca-uniphy.ko", package)
-        self.assertIn("$(LINUX_DIR)/drivers/phy/qualcomm/phy-qcom-m31.c", package)
+        self.assertIn("./src/qca-m31-usb-phy.c", package)
         self.assertIn("$(LINUX_DIR)/drivers/phy/qualcomm/phy-qca-uniphy.c", package)
         self.assertNotIn("AUTOLOAD", package)
-        self.assertFalse((PKG / "src/qca-m31-usb-phy.c").exists())
+        self.assertTrue((PKG / "src/qca-m31-usb-phy.c").exists())
         for path in KERNEL_CONFIGS:
             source = path.read_text()
             self.assertIn("# CONFIG_PHY_QCOM_M31_USB is not set", source, path)
             self.assertIn("# CONFIG_PHY_IPQ_UNIPHY_USB is not set", source, path)
 
-    def test_guarded_late_probe_recovers_after_interrupted_attempt(self):
-        init = (PKG / "files/be6500-usb-host.init").read_text()
+    def test_usb_probe_is_explicit_and_matches_qwrt_module_order(self):
         helper = (PKG / "files/be6500-usb-host").read_text()
-        self.assertIn("START=99", init)
-        self.assertIn("BE6500_USB_BOOT_DELAY:-45", helper)
-        self.assertIn("state_set probing", helper)
-        self.assertIn('probing)', helper)
-        self.assertIn('state_set blocked "previous PHY probe did not complete"', helper)
-        self.assertIn("modprobe phy-qcom-m31", helper)
-        self.assertIn("modprobe phy-qca-uniphy", helper)
+        self.assertFalse((PKG / "files/be6500-usb-host.init").exists())
+        self.assertFalse((PKG / "files/be6500_usb_guard").exists())
         self.assertIn("modprobe dwc3-qcom", helper)
-        self.assertIn("state_set ready", helper)
+        self.assertIn("modprobe dwc3", helper)
+        self.assertIn("modprobe qca-m31-usb-phy", helper)
+        self.assertIn("modprobe phy-qca-uniphy", helper)
+        self.assertLess(helper.index("modprobe dwc3-qcom"), helper.index("modprobe qca-m31-usb-phy"))
+        self.assertIn("probe)", helper)
+        self.assertNotIn("boot)", helper)
 
-    def test_image_includes_guarded_phy_package_and_usb_stack(self):
+    def test_ipq5332_m31_tuning_keeps_qwrt_write_delay_order(self):
+        source = (PKG / "src/qca-m31-usb-phy.c").read_text()
+        tune_current = source.index("HSTX_CURRENT_17_1MA_385MV")
+        settle_delay = source.index("udelay(4)", tune_current)
+        clear_por = source.index("writel(0, qphy->base + USB_PHY_UTMI_CTRL5)", settle_delay)
+        self.assertLess(tune_current, settle_delay)
+        self.assertLess(settle_delay, clear_por)
+
+    def test_image_excludes_unbootable_phy_experiment_but_keeps_usb_stack(self):
         profile = PROFILE.read_text()
-        self.assertIn("kmod-usb-phy-ipq5018", profile)
+        self.assertNotIn("kmod-usb-phy-ipq5018", profile)
         self.assertIn("kmod-usb3", profile)
         self.assertIn("kmod-usb-dwc3-qcom", profile)
 

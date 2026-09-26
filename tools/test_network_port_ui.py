@@ -84,14 +84,13 @@ class NetworkPortUiTests(unittest.TestCase):
         self.assertIn("vlan_priority", frontend)
         self.assertIn("egress-qos-map", helper)
 
-    def test_persistent_radio_dts_reenables_usb_controller_and_phys(self):
+    def test_persistent_radio_dts_keeps_boot_confirmed_usb_path(self):
         source = FULL_RADIO_DTS.read_text()
-        self.assertIn("&hs_m31phy_0", source)
-        self.assertIn("&ssuniphy_0", source)
-        self.assertIn("&usb3", source)
-        self.assertIn("qcom,multiplexed-phy;", source)
-        self.assertIn('phy-names = "usb2-phy", "usb3-phy";', source)
-        self.assertGreaterEqual(source.count('status = "okay";'), 3)
+        self.assertIn('&hs_m31phy_0 {\n\tstatus = "okay";\n};', source)
+        self.assertIn('&ssuniphy_0 {\n\tstatus = "okay";\n};', source)
+        self.assertIn('&usb3 {\n\tstatus = "okay";\n};', source)
+        self.assertNotIn("qcom,multiplexed-phy;", source)
+        self.assertNotIn('usb-phy = <&hs_m31phy_0>;', source)
 
     def test_unvalidated_usb_phys_stay_out_of_persistent_boot_path(self):
         for path in KERNEL_CONFIGS:
