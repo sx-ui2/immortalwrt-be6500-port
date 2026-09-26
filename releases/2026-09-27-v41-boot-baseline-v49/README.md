@@ -1,4 +1,9 @@
-# BE6500 v49 — v41 boot-path recovery
+# BE6500 v49 — withdrawn uBootKit factory path
+
+**Withdrawn:** the uBootKit factory image from this release did not boot and
+must not be used.  uBootKit's Firmware Update implementation writes the stock
+primary HLOS/rootfs path and does not perform this port's `HLOS_1`, overlay and
+boot-environment setup.  Use the v50 RAM-initramfs recovery release instead.
 
 v47 and v48 failed to boot and are withdrawn. v49 removes the experimental
 USB PHY package from the persistent image and restores the exact boot-critical
@@ -25,17 +30,14 @@ first been confirmed to boot reliably again.
 
 ## Which file to use
 
-- In the uBootKit recovery page, use
-  `immortalwrt-qualcommax-ipq53xx-jdcloud_be6500-ubootkit-factory.bin`.
-- In a running ImmortalWrt/OpenWrt system, use
+- Do not use a v49 image in uBootKit.
+- In an already running compatible ImmortalWrt/OpenWrt system, the v49
+  sysupgrade image remains available for reproducibility, but v50 supersedes
+  it.
+- Use
   `immortalwrt-qualcommax-ipq53xx-jdcloud_be6500-squashfs-sysupgrade.bin`.
-- Do not upload the sysupgrade archive to uBootKit.
+- Never upload the sysupgrade archive to uBootKit.
 - Do not use the withdrawn v47 or v48 images.
-
-The uBootKit image contains the sysupgrade FIT unchanged, zero-pads the HLOS
-slot, places the SquashFS root at `0x700000`, and ends with `DEADC0DE`. Its FIT
-and root filesystem were byte-compared with the sysupgrade members after the
-image was built.
 
 ## Validation
 

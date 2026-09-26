@@ -3,6 +3,15 @@
 This tree carries an experimental board-specific overlay for the JDCloud
 ZhaoYun BE6500. A successful build does not establish hardware bootability.
 
+## Current recovery release
+
+The uBootKit factory-image route is withdrawn because uBootKit writes the
+stock primary HLOS/bootconfig path and does not run this port's board-specific
+overlay setup.  Use the two-stage v50 recovery instead: boot the supplied FIT
+from uBootKit's **Initramfs** page, then flash the supplied sysupgrade image
+from the RAM system with configuration preservation disabled.  See
+[`releases/2026-09-27-ubootkit-initramfs-recovery-v50/README.md`](releases/2026-09-27-ubootkit-initramfs-recovery-v50/README.md).
+
 ## Current status (2026-09-12)
 
 The current 24.10/QSDK-based sysupgrade image is running on the JDCloud BE6500
