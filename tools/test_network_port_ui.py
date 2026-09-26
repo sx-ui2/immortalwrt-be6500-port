@@ -19,7 +19,6 @@ GAME_PORT = PKG / "root/usr/libexec/be6500-game-port"
 IPTV_PRIORITY = PKG / "root/usr/libexec/be6500-iptv-priority"
 FULL_RADIO_DTS = ROOT / "target/linux/qualcommax/files/arch/arm64/boot/dts/qcom/ipq5332-jdcloud-be6500-full-radio-initramfs.dts"
 LUCI_PATCH_SERVICE = PKG / "root/etc/init.d/be6500-luci-patches"
-PHYSICAL_PORTS = PKG / "root/www/luci-static/resources/be6500/physicalports_v45.js"
 STORAGE = PKG / "htdocs/luci-static/resources/view/status/include/25_storage.js"
 CURRENT_CONFIG = ROOT / "package/be6500-local/be6500-current-config"
 IFNAME_MIGRATOR = CURRENT_CONFIG / "files/be6500-migrate-network-ifname"
@@ -90,6 +89,8 @@ class NetworkPortUiTests(unittest.TestCase):
         self.assertIn("&hs_m31phy_0", source)
         self.assertIn("&ssuniphy_0", source)
         self.assertIn("&usb3", source)
+        self.assertIn("qcom,multiplexed-phy;", source)
+        self.assertIn('phy-names = "usb2-phy", "usb3-phy";', source)
         self.assertGreaterEqual(source.count('status = "okay";'), 3)
 
     def test_unvalidated_usb_phys_stay_out_of_persistent_boot_path(self):
@@ -115,6 +116,7 @@ class NetworkPortUiTests(unittest.TestCase):
             interfaces = temp / "interfaces.js"
             switch_view = temp / "switch.js"
             old_menu = temp / "be6500-network-ports.json"
+            retired_module = temp / "physicalports_v45.js"
             header = temp / "header.ut"
             cache = temp / "cache"
             (cache / "luci-modulecache").mkdir(parents=True)
@@ -134,6 +136,7 @@ class NetworkPortUiTests(unittest.TestCase):
                 "m = new form.Map('network', 'LAN 端口与 VLAN', /* be6500PhysicalPortTitle */ _('description'));\n"
             )
             old_menu.write_text("{}\n")
+            retired_module.write_text("retired\n")
             header.write_text(
                 "luci.js?v=26.236.50592~9b8ee64-{{ pkgs_update_time }}\n"
             )
@@ -142,6 +145,7 @@ class NetworkPortUiTests(unittest.TestCase):
                 "BE6500_LUCI_INTERFACES_VIEW": str(interfaces),
                 "BE6500_LUCI_SWITCH_VIEW": str(switch_view),
                 "BE6500_LUCI_OLD_PORT_MENU": str(old_menu),
+                "BE6500_LUCI_RETIRED_PORT_MODULE": str(retired_module),
                 "BE6500_LUCI_HEADERS": str(header),
                 "BE6500_LUCI_CACHE_ROOT": str(cache),
             })
@@ -151,14 +155,15 @@ class NetworkPortUiTests(unittest.TestCase):
             interface_source = interfaces.read_text()
             switch_source = switch_view.read_text()
             self.assertNotIn("require be6500.ports as be6500ports", interface_source)
-            self.assertEqual(1, interface_source.count("require be6500.physicalports_v45 as be6500ports"))
-            self.assertEqual(1, interface_source.count("be6500ports.load()"))
-            self.assertEqual(1, interface_source.count("be6500PhysicalPortCards"))
-            self.assertIn("be6500SwitchPorts = data[4]", interface_source)
-            self.assertIn("be6500ports.render(be6500SwitchPorts)", interface_source)
+            self.assertNotIn("be6500.physicalports_v45", interface_source)
+            self.assertNotIn("be6500ports.load()", interface_source)
+            self.assertNotIn("be6500PhysicalPortCards", interface_source)
+            self.assertNotIn("be6500SwitchPorts", interface_source)
+            self.assertIn("m.section(form.GridSection, 'device', _('Devices'));", interface_source)
             self.assertIn("new form.Map('network', _('Switch'), _('description'))", switch_source)
             self.assertFalse(old_menu.exists())
-            self.assertIn("be6500v27", header.read_text())
+            self.assertFalse(retired_module.exists())
+            self.assertIn("be6500v28", header.read_text())
 
     def test_patcher_replaces_old_physical_cards_in_minified_release_luci(self):
         with tempfile.TemporaryDirectory() as td:
@@ -176,6 +181,7 @@ class NetworkPortUiTests(unittest.TestCase):
                 "BE6500_LUCI_INTERFACES_VIEW": str(interfaces),
                 "BE6500_LUCI_SWITCH_VIEW": str(temp / "missing-switch.js"),
                 "BE6500_LUCI_OLD_PORT_MENU": str(temp / "old-menu.json"),
+                "BE6500_LUCI_RETIRED_PORT_MODULE": str(temp / "physicalports_v45.js"),
                 "BE6500_LUCI_HEADERS": str(temp / "missing-header.ut"),
                 "BE6500_LUCI_CACHE_ROOT": str(temp),
             })
@@ -184,21 +190,11 @@ class NetworkPortUiTests(unittest.TestCase):
 
             source = interfaces.read_text()
             self.assertNotIn("require be6500.ports as be6500ports", source)
-            self.assertEqual(1, source.count("require be6500.physicalports_v45 as be6500ports"))
-            self.assertEqual(1, source.count("be6500ports.load()"))
-            self.assertEqual(1, source.count("be6500PhysicalPortCards"))
-            self.assertIn("be6500SwitchPorts=data[4]", source)
-            self.assertIn("be6500ports.render(be6500SwitchPorts)", source)
-
-    def test_versioned_physical_port_module_is_a_valid_luci_constructor(self):
-        source = PHYSICAL_PORTS.read_text()
-        self.assertIn("'require baseclass';", source)
-        self.assertIn("return baseclass.extend({", source)
-        self.assertIn("getSwconfigPortState", source)
-        self.assertIn("portCard('LAN1', 3", source)
-        self.assertIn("portCard('LAN2', 2", source)
-        self.assertIn("portCard('LAN3', 1", source)
-        self.assertIn("admin/router_settings/ports", source)
+            self.assertNotIn("be6500.physicalports_v45", source)
+            self.assertNotIn("be6500ports.load()", source)
+            self.assertNotIn("be6500PhysicalPortCards", source)
+            self.assertNotIn("be6500SwitchPorts", source)
+            self.assertIn("m.section(form.GridSection,'device',_('Devices'));", source)
 
     def test_storage_uses_emmc_mounts_and_detects_ram_root(self):
         source = STORAGE.read_text()
@@ -238,14 +234,15 @@ class NetworkPortUiTests(unittest.TestCase):
 
     def test_package_installs_factory_port_helpers_and_network_patcher(self):
         makefile = MAKEFILE.read_text()
-        self.assertIn("PKG_RELEASE:=43", makefile)
+        self.assertIn("PKG_RELEASE:=44", makefile)
         self.assertIn("be6500-patch-luci-network", makefile)
         self.assertIn("be6500-luci-patches", makefile)
         self.assertIn("Package/luci-app-rejected-clients/postinst", makefile)
         self.assertIn('BE6500_LUCI_INTERFACES_VIEW="$$interfaces"', makefile)
         self.assertIn('status_source="$$root/usr/share/be6500-luci-overrides/status/include"', makefile)
         self.assertNotIn("luci-static/resources/be6500/ports.js", makefile)
-        self.assertIn("luci-static/resources/be6500/physicalports_v45.js", makefile)
+        self.assertNotIn("luci-static/resources/be6500/physicalports_v45.js", makefile)
+        self.assertFalse((PKG / "root/www/luci-static/resources/be6500/physicalports_v45.js").exists())
         self.assertIn("be6500-game-port", makefile)
         self.assertIn("be6500-iptv-priority", makefile)
         self.assertNotIn("be6500-port-control $(1)", makefile)

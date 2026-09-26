@@ -1,7 +1,7 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=luci-app-rejected-clients
-PKG_RELEASE:=43
+PKG_RELEASE:=44
 PKG_MAINTAINER:=Codex
 
 include $(INCLUDE_DIR)/package.mk
@@ -39,8 +39,6 @@ define Package/luci-app-rejected-clients/install
 	$(INSTALL_DATA) ./root/www/be6500-oem/Native_JS/pages.js $(1)/www/be6500-oem/Native_JS/pages.js
 	$(INSTALL_DIR) $(1)/www/be6500-oem/Native_CSS
 	$(INSTALL_DATA) ./root/www/be6500-oem/Native_CSS/system-theme.css $(1)/www/be6500-oem/Native_CSS/system-theme.css
-	$(INSTALL_DIR) $(1)/www/luci-static/resources/be6500
-	$(INSTALL_DATA) ./root/www/luci-static/resources/be6500/physicalports_v45.js $(1)/www/luci-static/resources/be6500/physicalports_v45.js
 	$(INSTALL_DIR) $(1)/usr/lib/lua/luci/controller
 	$(INSTALL_DATA) ./root/usr/lib/lua/luci/controller/be6500_oem_beta.lua $(1)/usr/lib/lua/luci/controller/be6500_oem_beta.lua
 	$(INSTALL_DIR) $(1)/usr/lib/lua/luci/view/be6500_oem_beta
@@ -111,7 +109,7 @@ define Package/luci-app-rejected-clients/postinst
 # Apply the generated LuCI assets while the image root is being assembled as
 # well as during a live package upgrade.  The boot service repeats this
 # operation idempotently, but the firmware itself must already contain the
-# physical-port widget and truthful storage view before its first boot.
+# cleaned native device view and truthful storage view before its first boot.
 root="$${IPKG_INSTROOT:-}"
 status_source="$$root/usr/share/be6500-luci-overrides/status/include"
 status_target="$$root/www/luci-static/resources/view/status/include"

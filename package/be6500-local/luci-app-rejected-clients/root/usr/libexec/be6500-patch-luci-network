@@ -1,19 +1,20 @@
 #!/bin/sh
 
-# QCA8386 exposes LAN1-LAN3 as switch ports behind eth1, not as independent
-# Linux netdevs. Show their live state above LuCI's real device table without
-# creating fake configurable netdevs. Use a new versioned module path because
-# browsers may still cache the old be6500.ports file that returned an invalid
-# factory and aborted the entire Network page.
+# Remove the retired BE6500 physical-port cards from LuCI's generic device
+# page. LAN1-LAN3 are QCA8386 switch ports, not independent Linux netdevs, so
+# presenting them as extra device-page objects is misleading. Port roles stay
+# in Router Settings and VLAN membership stays in the native Switch page.
 
 interfaces="${BE6500_LUCI_INTERFACES_VIEW:-/www/luci-static/resources/view/network/interfaces.js}"
 switch_view="${BE6500_LUCI_SWITCH_VIEW:-/www/luci-static/resources/view/network/switch.js}"
 old_menu="${BE6500_LUCI_OLD_PORT_MENU:-/usr/share/luci/menu.d/be6500-network-ports.json}"
+retired_module="${BE6500_LUCI_RETIRED_PORT_MODULE:-/www/luci-static/resources/be6500/physicalports_v45.js}"
 headers="${BE6500_LUCI_HEADERS:-/usr/share/ucode/luci/template/header.ut}"
 cache_root="${BE6500_LUCI_CACHE_ROOT:-/tmp}"
 
 # The temporary v38 menu duplicated the regular Switch editor.
 rm -f "$old_menu"
+rm -f "$retired_module"
 if [ -f "$switch_view" ] && grep -q 'be6500PhysicalPortTitle' "$switch_view"; then
 	tmp="${switch_view}.be6500.$$"
 	sed "s@'LAN 端口与 VLAN', /\\* be6500PhysicalPortTitle \\*/@_('Switch'),@" "$switch_view" >"$tmp" && mv "$tmp" "$switch_view"
@@ -23,9 +24,9 @@ if [ -f "$interfaces" ]; then
 	work="${interfaces}.be6500.work.$$"
 	cp "$interfaces" "$work" || exit 1
 
-	# First normalize any v41-v44 injection. This makes the operation
-	# idempotent and also repairs an installation that still has the cached old
-	# module wired into interfaces.js.
+	# Normalize every released card injection. This is intentionally
+	# idempotent and also repairs installations whose browser-visible LuCI
+	# asset still references an older versioned module.
 	tmp="${work}.tmp"
 	sed \
 		-e "s@'require be6500\.ports as be6500ports';@@g" \
@@ -41,45 +42,11 @@ if [ -f "$interfaces" ]; then
 		-e "s@m\.section(form\.GridSection, 'device', _('Devices'), be6500ports\.render(be6500SwitchPorts)); /\* be6500PhysicalPortCards \*/@m.section(form.GridSection, 'device', _('Devices'));@g" \
 		"$work" >"$tmp" && mv "$tmp" "$work" || exit 1
 
-	if grep -q 'be6500\.ports\|be6500PhysicalPortCards\|be6500SwitchPorts' "$work"; then
+	if grep -q 'be6500\.ports\|be6500\.physicalports_v45\|be6500PhysicalPortCards\|be6500SwitchPorts' "$work"; then
 		rm -f "$work"; exit 1
 	fi
 
-	tmp="${work}.tmp"
-	sed "s@'require network';@'require network';'require be6500.physicalports_v45 as be6500ports';@" "$work" >"$tmp" && mv "$tmp" "$work" || exit 1
-
-	# Unminified LuCI keeps uci.changes() on its own line. Release assets keep
-	# the whole load() function on one line, so support both layouts.
-	if ! grep -q 'be6500ports.load()' "$work"; then
-		tmp="${work}.tmp"
-		sed "s/^[[:space:]]*uci\.changes()$/\t\t\tuci.changes(),\\
-\t\t\tL.resolveDefault(be6500ports.load(), [])/" "$work" >"$tmp" && mv "$tmp" "$work" || exit 1
-	fi
-	if ! grep -q 'be6500ports.load()' "$work"; then
-		tmp="${work}.tmp"
-		sed 's@uci\.changes()]);}@uci.changes(),L.resolveDefault(be6500ports.load(),[])]);}@' "$work" >"$tmp" && mv "$tmp" "$work" || exit 1
-	fi
-
-	tmp="${work}.tmp"
-	sed \
-		-e 's/var dslModemType = data\[0\],/var be6500SwitchPorts = data[4] || [], dslModemType = data[0],/' \
-		-e 's/var dslModemType=data\[0\],/var be6500SwitchPorts=data[4]||[],dslModemType=data[0],/' \
-		"$work" >"$tmp" && mv "$tmp" "$work" || exit 1
-
-	tmp="${work}.tmp"
-	sed \
-		-e "s@s = m.section(form.GridSection, 'device', _('Devices'));@s = m.section(form.GridSection, 'device', _('Devices'), be6500ports.render(be6500SwitchPorts)); /* be6500PhysicalPortCards */@" \
-		-e "s@s=m.section(form.GridSection,'device',_('Devices'));@s=m.section(form.GridSection,'device',_('Devices'),be6500ports.render(be6500SwitchPorts));/* be6500PhysicalPortCards */@" \
-		"$work" >"$tmp" && mv "$tmp" "$work" || exit 1
-
-	if grep -q "require be6500.physicalports_v45 as be6500ports" "$work" &&
-	   grep -q 'be6500ports.load()' "$work" &&
-	   grep -q 'be6500SwitchPorts=data\[4\]\|be6500SwitchPorts = data\[4\]' "$work" &&
-	   grep -q 'be6500PhysicalPortCards' "$work"; then
-		mv "$work" "$interfaces"
-	else
-		rm -f "$work"; exit 1
-	fi
+	mv "$work" "$interfaces"
 fi
 
 # Bump the browser cache token and clear generated LuCI caches only. This does
@@ -89,7 +56,7 @@ for header in $headers; do
 		tmp="${header}.be6500.$$"
 		sed \
 			-e 's#luci\.js?v=26\.236\.50592~9b8ee64-{{ pkgs_update_time }}#luci.js?v=26.236.50592~9b8ee64-be6500v27-{{ pkgs_update_time }}#' \
-			-e 's#be6500v[0-9]*-{{ pkgs_update_time }}#be6500v27-{{ pkgs_update_time }}#' \
+			-e 's#be6500v[0-9]*-{{ pkgs_update_time }}#be6500v28-{{ pkgs_update_time }}#' \
 			"$header" >"$tmp" && mv "$tmp" "$header"
 	fi
 done
@@ -97,5 +64,7 @@ done
 rm -f "$cache_root/luci-indexcache"
 rm -f "$cache_root"/luci-modulecache/* 2>/dev/null
 
-grep -q 'be6500\.physicalports_v45 as be6500ports' "$interfaces" &&
-grep -q 'be6500PhysicalPortCards' "$interfaces" && [ ! -e "$old_menu" ]
+if [ -f "$interfaces" ]; then
+	! grep -q 'be6500\.ports\|be6500\.physicalports_v45\|be6500PhysicalPortCards\|be6500SwitchPorts' "$interfaces" || exit 1
+fi
+[ ! -e "$old_menu" ]
