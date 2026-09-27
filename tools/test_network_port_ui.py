@@ -317,7 +317,7 @@ class NetworkPortUiTests(unittest.TestCase):
 
     def test_package_installs_factory_port_helpers_and_network_patcher(self):
         makefile = MAKEFILE.read_text()
-        self.assertIn("PKG_RELEASE:=57", makefile)
+        self.assertIn("PKG_RELEASE:=58", makefile)
         self.assertIn("+coreutils-timeout", makefile)
         self.assertIn("be6500-luci-overrides/package-manager-call", makefile)
         self.assertIn("be6500-patch-luci-network", makefile)

@@ -23,17 +23,32 @@ class AccessListUiTests(unittest.TestCase):
         self.assertNotIn("name_manual: modalMode", source)
         self.assertIn("else draft[policy].push({ name: name, mac: mac });", source)
 
-    def test_access_page_uses_one_v55_style_snapshot(self):
+    def test_access_page_uses_one_quick_authoritative_snapshot(self):
         source = PAGES.read_text()
         start = source.index("  function accessPage() {")
         end = source.index("\n  function rejectedPage() {", start)
         access = source[start:end]
-        self.assertIn("rpc('get_macfilter_info', {})", access)
+        self.assertEqual(access.count("rpc('get_macfilter_info_fast', {})"), 1)
+        self.assertNotIn("rpc('get_macfilter_info', {})", access)
+        self.assertIn("rpc('web_get_device_list_fast', {})", access)
         self.assertIn("rpc('web_get_device_list', {})", access)
-        self.assertIn("rpc('web_get_rejected_list', {})", access)
-        self.assertNotIn("get_macfilter_info_fast", access)
-        self.assertNotIn("accessLoadGeneration", access)
+        self.assertIn("rpc('web_get_rejected_list_fast', {})", access)
+        self.assertNotIn("rpc('web_get_rejected_list', {})", access)
+        self.assertIn("accessLoadGeneration", access)
         self.assertNotIn("applyAccessData", access)
+        self.assertEqual(access.count("draft.deny = asArray(state.access.blacklist)"), 1)
+        self.assertLess(
+            access.index("render();", access.index("state.access = access;")),
+            access.index("rpc('web_get_device_list_fast', {})"),
+        )
+
+    def test_fast_snapshot_skips_duplicate_radio_inventory(self):
+        source = CONTROLLER.read_text()
+        start = source.index("local function request_client")
+        end = source.index("local function replace_access_entries", start)
+        request_client = source[start:end]
+        self.assertIn("if fast then return mac, true end", request_client)
+        self.assertNotIn("known_wireless_clients_fast", request_client)
 
 
 if __name__ == "__main__":

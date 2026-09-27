@@ -1786,7 +1786,10 @@ local function request_client(uci, fast)
     local mac = output:match("lladdr%s+(%x%x:%x%x:%x%x:%x%x:%x%x:%x%x)")
     if not mac then return "", false end
     mac = mac:upper()
-    if fast then return mac, known_wireless_clients_fast()[mac] ~= nil end
+    -- The quick ACL snapshot must not run another radio inventory before it
+    -- can display the saved list.  Treat the current browser conservatively
+    -- as wireless until the separate fast device inventory refines this flag.
+    if fast then return mac, true end
     return mac, known_wireless_clients(uci)[mac] ~= nil
 end
 

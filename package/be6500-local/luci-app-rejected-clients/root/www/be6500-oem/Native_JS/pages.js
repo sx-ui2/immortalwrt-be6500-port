@@ -1138,6 +1138,7 @@
     ;
     var draft = { deny: [], allow: [] };
     var dirty = false;
+    var accessLoadGeneration = 0;
     function activeList() { return draft[value('access-policy') === 'allow' ? 'allow' : 'deny']; }
     function deviceFor(mac) {
       mac = normalizeMac(mac);
@@ -1232,22 +1233,44 @@
         });
       });
     }
+    function updateDevices(result, generation) {
+      if (generation !== accessLoadGeneration) return;
+      state.devices = asArray(result.device_list);
+      var clientMac = normalizeMac(state.access && state.access.client_mac);
+      if (clientMac) {
+        state.access.client_wireless = state.devices.some(function (device) {
+          return normalizeMac(device.uid || device.id || device.mac) === clientMac &&
+            String(device.type || '').indexOf('Wi-Fi') >= 0;
+        }) ? 1 : 0;
+      }
+      render();
+    }
     function load() {
-      // Keep the v55 request lifecycle: one authoritative snapshot is loaded
-      // and the same snapshot is submitted after an edit.  The later fast/full
-      // dual refresh could replace the draft while a save was completing.
-      return Promise.all([
-        rpc('get_macfilter_info', {}),
-        rpc('web_get_device_list', {}),
-        rpc('web_get_rejected_list', {})
-      ]).then(function (items) {
-        state.access = items[0]; state.devices = asArray(items[1].device_list);
-        state.rejected = asArray(items[2].data || items[2].rejected_list);
+      var generation = ++accessLoadGeneration;
+      // Read one authoritative ACL snapshot only.  It contains the complete
+      // saved list but avoids radio/OUI enrichment, so the names and MACs can
+      // render immediately.  Later requests enrich device details only and
+      // never replace draft, policy, enabled state or the saved ACL snapshot.
+      return rpc('get_macfilter_info_fast', {}).then(function (access) {
+        if (generation !== accessLoadGeneration) return;
+        state.access = access;
         draft.deny = asArray(state.access.blacklist).map(function (item) { return Object.assign({}, item); });
         draft.allow = asArray(state.access.whitelist).map(function (item) { return Object.assign({}, item); });
         dirty = false;
         set('access-policy', state.access.macpolicy || 'deny'); check('access-enabled', state.access.enable);
         render();
+
+        rpc('web_get_device_list_fast', {}).then(function (result) {
+          updateDevices(result, generation);
+          rpc('web_get_device_list', {}).then(function (full) {
+            updateDevices(full, generation);
+          }).catch(function () {});
+        }).catch(function () {});
+        rpc('web_get_rejected_list_fast', {}).then(function (result) {
+          if (generation !== accessLoadGeneration) return;
+          state.rejected = asArray(result.data || result.rejected_list);
+          render();
+        }).catch(function () {});
       }).catch(function (error) { notify(error.message, false); });
     }
     document.querySelectorAll('[data-policy]').forEach(function (button) { bindClick(button, function () { set('access-policy', button.getAttribute('data-policy')); dirty = true; render(); }); });

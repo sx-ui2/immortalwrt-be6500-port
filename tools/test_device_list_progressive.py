@@ -42,7 +42,7 @@ class DeviceListProgressiveTests(unittest.TestCase):
         self.assertIn("rpc('web_get_device_rates', {})", source)
         self.assertIn("return load('web_get_device_list', false)", source)
 
-    def test_access_uses_v55_snapshot_while_rejected_keeps_progressive_read(self):
+    def test_access_renders_acl_before_device_enrichment(self):
         controller = CONTROLLER.read_text()
         page = PAGES.read_text()
         self.assertIn('method == "get_macfilter_info_fast"', controller)
@@ -52,9 +52,14 @@ class DeviceListProgressiveTests(unittest.TestCase):
         access_start = page.index("function accessPage()")
         access_end = page.index("function rejectedPage()", access_start)
         access = page[access_start:access_end]
-        self.assertIn("Promise.all([", access)
-        self.assertIn("rpc('get_macfilter_info', {})", access)
-        self.assertNotIn("get_macfilter_info_fast", access)
+        self.assertIn("rpc('get_macfilter_info_fast', {})", access)
+        self.assertNotIn("rpc('get_macfilter_info', {})", access)
+        self.assertIn("rpc('web_get_device_list_fast', {})", access)
+        self.assertIn("rpc('web_get_device_list', {})", access)
+        self.assertLess(
+            access.index("render();", access.index("state.access = access;")),
+            access.index("rpc('web_get_device_list_fast', {})"),
+        )
         rejected = page[access_end:page.index("function dhcpPage()", access_end)]
         self.assertIn("rpc('get_macfilter_info_fast', {})", rejected)
 
