@@ -1,7 +1,7 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=luci-app-rejected-clients
-PKG_RELEASE:=49
+PKG_RELEASE:=50
 PKG_MAINTAINER:=Codex
 
 include $(INCLUDE_DIR)/package.mk
@@ -48,6 +48,8 @@ define Package/luci-app-rejected-clients/install
 	$(INSTALL_DATA) ./htdocs/luci-static/resources/view/status/include/20_memory.js $(1)/usr/share/be6500-luci-overrides/status/include/20_memory.js
 	$(INSTALL_DATA) ./htdocs/luci-static/resources/view/status/include/25_storage.js $(1)/usr/share/be6500-luci-overrides/status/include/25_storage.js
 	$(INSTALL_DATA) ./htdocs/luci-static/resources/view/status/include/29_ports.js $(1)/usr/share/be6500-luci-overrides/status/include/29_ports.js
+	$(INSTALL_DIR) $(1)/usr/share/be6500-luci-overrides
+	$(INSTALL_BIN) ./root/usr/share/be6500-luci-overrides/package-manager-call $(1)/usr/share/be6500-luci-overrides/package-manager-call
 	$(INSTALL_DIR) $(1)/usr/libexec
 	$(INSTALL_BIN) ./root/usr/libexec/rejected-mac $(1)/usr/libexec/rejected-mac
 	$(INSTALL_BIN) ./root/usr/libexec/ddns-manager $(1)/usr/libexec/ddns-manager
@@ -120,6 +122,13 @@ if [ -d "$$status_source" ]; then
 		[ -f "$$source" ] || continue
 		cp -f "$$source" "$$status_target/" || exit 1
 	done
+fi
+
+package_manager_source="$$root/usr/share/be6500-luci-overrides/package-manager-call"
+package_manager_target="$$root/usr/libexec/package-manager-call"
+if [ -f "$$package_manager_source" ] && [ -d "$$root/usr/libexec" ]; then
+	cp -f "$$package_manager_source" "$$package_manager_target" || exit 1
+	chmod 0755 "$$package_manager_target" || exit 1
 fi
 
 interfaces="$$root/www/luci-static/resources/view/network/interfaces.js"

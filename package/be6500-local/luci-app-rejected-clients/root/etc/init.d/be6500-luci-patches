@@ -3,6 +3,27 @@
 START=19
 
 start() {
+	# The ipq53xx target feed is not published, while the architecture feeds
+	# are valid. Remove the permanent 404 and install a bounded JSON helper
+	# before uhttpd starts so LuCI package operations cannot return an empty
+	# CGI response when a mirror is slow.
+	if [ -f /etc/opkg/distfeeds.conf ]; then
+		sed -i '/^[[:space:]]*src\/gz[[:space:]]\+immortalwrt_core[[:space:]].*\/targets\/qualcommax\/ipq53xx\/packages/s/^/# unavailable custom ipq53xx feed: /' /etc/opkg/distfeeds.conf
+	fi
+	if [ -f /etc/opkg.conf ] && ! grep -q '^[[:space:]]*option[[:space:]]\+http_timeout[[:space:]]' /etc/opkg.conf; then
+		printf '\noption http_timeout 20\n' >> /etc/opkg.conf
+	fi
+	if [ -f /usr/share/be6500-luci-overrides/package-manager-call ]; then
+		cp -f /usr/share/be6500-luci-overrides/package-manager-call /usr/libexec/package-manager-call
+		chmod 0755 /usr/libexec/package-manager-call
+	fi
+	if [ "$(uci -q get uhttpd.main.script_timeout)" != "300" ] ||
+	   [ "$(uci -q get uhttpd.main.network_timeout)" != "300" ]; then
+		uci -q set uhttpd.main.script_timeout=300
+		uci -q set uhttpd.main.network_timeout=300
+		uci -q commit uhttpd
+	fi
+
 	# Preserved overlays can hide an already-consumed /etc/uci-defaults file.
 	# Re-run the idempotent legacy bridge/ifname migration before netifd starts
 	# so LuCI never needs to show its disruptive migration dialog.

@@ -19,8 +19,10 @@ GAME_PORT = PKG / "root/usr/libexec/be6500-game-port"
 IPTV_PRIORITY = PKG / "root/usr/libexec/be6500-iptv-priority"
 FULL_RADIO_DTS = ROOT / "target/linux/qualcommax/files/arch/arm64/boot/dts/qcom/ipq5332-jdcloud-be6500-full-radio-initramfs.dts"
 LUCI_PATCH_SERVICE = PKG / "root/etc/init.d/be6500-luci-patches"
+PACKAGE_MANAGER = PKG / "root/usr/share/be6500-luci-overrides/package-manager-call"
 STORAGE = PKG / "htdocs/luci-static/resources/view/status/include/25_storage.js"
 CURRENT_CONFIG = ROOT / "package/be6500-local/be6500-current-config"
+UHTTPD_CONFIG = CURRENT_CONFIG / "files/etc/config/uhttpd"
 IFNAME_MIGRATOR = CURRENT_CONFIG / "files/be6500-migrate-network-ifname"
 IFNAME_DEFAULT = CURRENT_CONFIG / "files/97-be6500-migrate-network-ifname"
 KERNEL_CONFIGS = [
@@ -75,8 +77,28 @@ class NetworkPortUiTests(unittest.TestCase):
         self.assertIn("ssdk qos ptpriprece set", source)
         self.assertIn("ssdk qos dscpmap set", source)
         self.assertIn("ssdk servcode config set", source)
+        self.assertIn("The factory game_accel.sh deliberately continues", source)
+        self.assertIn("ssdk_sh returned $rc", source)
+        self.assertNotIn('ssdk acl list create 1 0 || return 1', source)
+        self.assertNotIn('ssdk acl list bind 1 0 0 "$port" || return 1', source)
         self.assertNotIn("wifi", source)
         self.assertNotIn("network reload", source)
+
+    def test_package_manager_update_is_bounded_and_returns_json(self):
+        helper = PACKAGE_MANAGER.read_text()
+        service = LUCI_PATCH_SERVICE.read_text()
+        defaults = (PKG / "root/etc/uci-defaults/95-be6500-luci-wireless").read_text()
+        uhttpd = UHTTPD_CONFIG.read_text()
+
+        self.assertIn("/bin/busybox timeout 240", helper)
+        self.assertIn("json_dump", helper)
+        self.assertIn("软件源响应超时", helper)
+        self.assertIn("package-manager-call", service)
+        self.assertIn("option http_timeout 20", service)
+        self.assertIn("unavailable custom ipq53xx feed", service)
+        self.assertIn("package-manager-call", defaults)
+        self.assertIn("option script_timeout '300'", uhttpd)
+        self.assertIn("option network_timeout '300'", uhttpd)
 
     def test_frontend_selects_port_roles_inline_without_duplicate_panels(self):
         source = PAGES.read_text()
@@ -267,7 +289,7 @@ class NetworkPortUiTests(unittest.TestCase):
         default = IFNAME_DEFAULT.read_text()
         makefile = (CURRENT_CONFIG / "Makefile").read_text()
 
-        self.assertIn("PKG_RELEASE:=10", makefile)
+        self.assertIn("PKG_RELEASE:=11", makefile)
         self.assertIn("be6500-migrate-network-ifname", makefile)
         self.assertIn("Package/be6500-current-config/postinst", makefile)
         self.assertIn("migrate_bridge_interfaces", source)
@@ -294,7 +316,8 @@ class NetworkPortUiTests(unittest.TestCase):
 
     def test_package_installs_factory_port_helpers_and_network_patcher(self):
         makefile = MAKEFILE.read_text()
-        self.assertIn("PKG_RELEASE:=49", makefile)
+        self.assertIn("PKG_RELEASE:=50", makefile)
+        self.assertIn("be6500-luci-overrides/package-manager-call", makefile)
         self.assertIn("be6500-patch-luci-network", makefile)
         self.assertIn("be6500-luci-patches", makefile)
         self.assertIn("Package/luci-app-rejected-clients/postinst", makefile)

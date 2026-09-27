@@ -12,4 +12,14 @@ fi
 if [ -f /etc/opkg/distfeeds.conf ]; then
 	sed -i '/^[[:space:]]*src\/gz[[:space:]]\+immortalwrt_core[[:space:]].*\/targets\/qualcommax\/ipq53xx\/packages/s/^/# unavailable custom ipq53xx feed: /' /etc/opkg/distfeeds.conf
 fi
+if [ -f /etc/opkg.conf ] && ! grep -q '^[[:space:]]*option[[:space:]]\+http_timeout[[:space:]]' /etc/opkg.conf; then
+	printf '\noption http_timeout 20\n' >> /etc/opkg.conf
+fi
+if [ -f /usr/share/be6500-luci-overrides/package-manager-call ]; then
+	cp -f /usr/share/be6500-luci-overrides/package-manager-call /usr/libexec/package-manager-call
+	chmod 0755 /usr/libexec/package-manager-call
+fi
+uci -q set uhttpd.main.script_timeout=300
+uci -q set uhttpd.main.network_timeout=300
+uci -q commit uhttpd
 exit 0

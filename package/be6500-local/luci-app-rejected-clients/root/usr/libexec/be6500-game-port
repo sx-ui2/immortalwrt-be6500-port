@@ -9,7 +9,16 @@ mkdir "$LOCK" 2>/dev/null || exit 0
 trap 'rmdir "$LOCK" 2>/dev/null' EXIT INT TERM
 
 ssdk() {
-	ssdk_sh "$@" >/dev/null 2>&1
+	output="$(ssdk_sh "$@" 2>&1)"
+	rc=$?
+	if [ "$rc" -ne 0 ]; then
+		logger -t be6500-game-port -p warning "ssdk_sh returned $rc: $*${output:+: $output}"
+	fi
+	# The factory game_accel.sh deliberately continues through the complete
+	# programming sequence. Some QCA SSDK releases return a non-zero status
+	# for idempotent create/delete operations even though the hardware state is
+	# correct; treating that as fatal leaves the switch only half configured.
+	return 0
 }
 
 select_switch() {
@@ -83,17 +92,17 @@ apply_game_port() {
 
 	select_switch 1 || return 1
 	for current in 0 1 2 3; do
-		ssdk qos ptmode set "$current" dscp enable || return 1
+		ssdk qos ptmode set "$current" dscp enable
 	done
-	ssdk acl list create 1 0 || return 1
-	ssdk acl rule add 1 0 1 no 0x0 0x0 mac no no no no no no no no no no no no no no no no no no no no no no no no no no no yes no no no no no yes 48 0x3f no yes 7 no no 0 0 no no no no no no no no no no no no no no no no no no no no 0 || return 1
-	ssdk acl list bind 1 0 0 "$port" || return 1
-	ssdk acl status set enable || return 1
+	ssdk acl list create 1 0
+	ssdk acl rule add 1 0 1 no 0x0 0x0 mac no no no no no no no no no no no no no no no no no no no no no no no no no no no yes no no no no no yes 48 0x3f no yes 7 no no 0 0 no no no no no no no no no no no no no no no no no no no no 0
+	ssdk acl list bind 1 0 0 "$port"
+	ssdk acl status set enable
 
 	select_switch 0 || return 1
-	ssdk qos ptpriprece set "$port" 2 6 1 5 4 4 no no 3 3 || return 1
-	ssdk qos dscpmap set 0 0xc0 0x0 0x0 0x7 0x0 0x0 0x0 no no no yes no 0x0 || return 1
-	ssdk servcode config set 1 no 0 0xfffefcff 0xfbbfff 0 0 0 0 0 0 0 || return 1
+	ssdk qos ptpriprece set "$port" 2 6 1 5 4 4 no no 3 3
+	ssdk qos dscpmap set 0 0xc0 0x0 0x0 0x7 0x0 0x0 0x0 no no no yes no 0x0
+	ssdk servcode config set 1 no 0 0xfffefcff 0xfbbfff 0 0 0 0 0 0 0
 	logger -t be6500-game-port "enabled $logical (QCA8386 port $port)"
 }
 
