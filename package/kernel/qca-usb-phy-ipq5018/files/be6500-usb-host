@@ -1,10 +1,16 @@
 #!/bin/sh
 
-# QWRT registers DWC3 first (83/84) and the two PHY drivers afterwards (85).
-# Keep the same ordering, but require an explicit probe so a PHY lockup never
-# repeats automatically on the next boot.
+# QWRT registers DWC3 before its PHY drivers. Keep that relative order while
+# using the Linux 6.6 native qcom-m31usb-phy binding. The persistent profile
+# invokes guarded-probe late in boot; the RAM diagnostic invokes probe by hand.
 
 LOCK_DIR="/var/lock/be6500-usb-host.lock"
+# Keep the crash marker on the writable overlay, but outside /etc so a
+# sysupgrade does not carry an old hardware-probe failure into a new image.
+STATE_DIR="/overlay/be6500-usb-state"
+PENDING_FILE="$STATE_DIR/probe-in-progress"
+BLOCKED_FILE="$STATE_DIR/auto-disabled"
+HEALTHY_FILE="$STATE_DIR/last-probe-ok"
 
 log() {
 	logger -t be6500-usb-host -- "$*"
@@ -39,7 +45,7 @@ probe_qwrt_order() {
 	# modprobe is harmless and makes the intended QWRT order unambiguous.
 	modprobe dwc3-qcom || return 1
 	modprobe dwc3 || return 1
-	modprobe qca-m31-usb-phy || return 1
+	modprobe phy-qcom-m31 || return 1
 	modprobe phy-qca-uniphy || return 1
 	modprobe xhci-plat-hcd || return 1
 
@@ -69,19 +75,89 @@ run_locked() {
 	probe_qwrt_order
 }
 
+auto_enabled() {
+	[ "$(uci -q get be6500_usb.main.enabled 2>/dev/null || printf '1')" = "1" ]
+}
+
+set_enabled() {
+	uci -q batch <<-EOF
+		set be6500_usb.main=main
+		set be6500_usb.main.enabled='$1'
+		commit be6500_usb
+	EOF
+}
+
+guarded_probe() {
+	auto_enabled || {
+		log "automatic USB probe disabled by configuration"
+		return 0
+	}
+
+	mkdir -p "$STATE_DIR"
+
+	[ ! -e "$BLOCKED_FILE" ] || {
+		log "automatic USB probe held after an earlier incomplete attempt"
+		return 0
+	}
+
+	if [ -e "$PENDING_FILE" ]; then
+		mv "$PENDING_FILE" "$BLOCKED_FILE"
+		sync
+		log "previous USB probe did not finish; blocking automatic retries"
+		return 0
+	fi
+
+	date '+%Y-%m-%dT%H:%M:%S%z' > "$PENDING_FILE" 2>/dev/null || :
+	sync
+
+	if run_locked; then
+		rm -f "$PENDING_FILE" "$BLOCKED_FILE"
+		date '+%Y-%m-%dT%H:%M:%S%z' > "$HEALTHY_FILE" 2>/dev/null || :
+		sync
+		return 0
+	fi
+
+	mv "$PENDING_FILE" "$BLOCKED_FILE" 2>/dev/null || touch "$BLOCKED_FILE"
+	sync
+	log "USB host probe failed; automatic retries disabled"
+	return 1
+}
+
+print_status() {
+	host_ready && printf '%s\n' 'host=ready' || printf '%s\n' 'host=not-ready'
+	for module in dwc3_qcom dwc3 phy_qcom_m31 phy_qca_uniphy xhci_plat_hcd; do
+		module_loaded "$module" && state=loaded || state=not-loaded
+		printf '%s=%s\n' "$module" "$state"
+	done
+	auto_enabled && printf '%s\n' 'autostart=enabled' || printf '%s\n' 'autostart=disabled'
+	[ -e "$BLOCKED_FILE" ] && printf '%s\n' 'guard=blocked' || printf '%s\n' 'guard=clear'
+	[ -e "$HEALTHY_FILE" ] && printf '%s\n' 'last_probe=ok' || printf '%s\n' 'last_probe=unknown'
+}
+
 case "${1:-status}" in
 	probe)
 		run_locked
 		;;
+	guarded-probe)
+		guarded_probe
+		;;
+	enable|retry)
+		set_enabled 1
+		rm -f "$PENDING_FILE" "$BLOCKED_FILE" "$HEALTHY_FILE"
+		guarded_probe
+		;;
+	disable)
+		set_enabled 0
+		mkdir -p "$STATE_DIR"
+		touch "$BLOCKED_FILE"
+		sync
+		printf '%s\n' 'USB autostart disabled. Reboot to return to the safe path.'
+		;;
 	status)
-		host_ready && printf '%s\n' 'host=ready' || printf '%s\n' 'host=not-ready'
-		for module in dwc3_qcom dwc3 qca_m31_usb_phy phy_qca_uniphy xhci_plat_hcd; do
-			module_loaded "$module" && state=loaded || state=not-loaded
-			printf '%s=%s\n' "$module" "$state"
-		done
+		print_status
 		;;
 	*)
-		printf 'Usage: %s {status|probe}\n' "$0" >&2
+		printf 'Usage: %s {status|probe|guarded-probe|enable|retry|disable}\n' "$0" >&2
 		exit 2
 		;;
 esac

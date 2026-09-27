@@ -43,6 +43,40 @@ define Device/jdcloud_be6500
 endef
 TARGET_DEVICES += jdcloud_be6500
 
+# RAM-only native USB diagnostic. It deliberately emits no persistent image
+# and keeps both PHY modules outside /etc/modules.d. The operator must run
+# be6500-usb-host probe after the router and network have fully started.
+define Device/jdcloud_be6500_usb_native_initramfs
+	$(call Device/jdcloud_be6500)
+	IMAGES :=
+	DEVICE_VARIANT := 6.6 RAM-only native USB diagnostic
+	DEVICE_DTS := ipq5332-jdcloud-be6500-usb-native-initramfs
+	# The ipq53xx target defaults to ath11k-ahb, while BE6500 uses the QSDK
+	# ath12k stack.  Explicitly remove the unused default so the diagnostic
+	# image has the same radio driver selection as the persistent image.
+	# ECM is unrelated to host enumeration and its optional notifier feature
+	# set is intentionally absent from the small diagnostic seed. Keep it out
+	# of this RAM-only image instead of changing the production ECM build.
+	DEVICE_PACKAGES += \
+		-kmod-ath11k-ahb \
+		-kmod-qca-nss-ecm \
+		-kmod-qca-nss-ecm-wifi-plugin \
+		kmod-usb-phy-ipq5018
+endef
+TARGET_DEVICES += jdcloud_be6500_usb_native_initramfs
+
+# Persistent native USB image. The PHY modules still have no AUTOLOAD entry;
+# be6500-usb-autostart probes them after normal boot and records an in-progress
+# marker first. If probing interrupts the boot, the next boot skips USB.
+define Device/jdcloud_be6500_usb_native
+	$(call Device/jdcloud_be6500)
+	DEVICE_VARIANT := 6.6 v51 guarded native USB
+	DEVICE_DTS := ipq5332-jdcloud-be6500-usb-native
+	SUPPORTED_DEVICES := jdcloud,be6500
+	DEVICE_PACKAGES += kmod-usb-phy-ipq5018 be6500-usb-autostart
+endef
+TARGET_DEVICES += jdcloud_be6500_usb_native
+
 # RAM-only diagnostic profile.  It intentionally emits no factory or
 # sysupgrade image and keeps all unvalidated radio/PCIe/USB drivers out.
 define Device/jdcloud_be6500_wired_initramfs

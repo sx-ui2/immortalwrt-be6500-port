@@ -1,0 +1,38 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR BSD-3-Clause)
+/*
+ * Linux 6.6 native USB binding fixes shared by the RAM diagnostic and the
+ * guarded persistent image.  The including DTS supplies the boot-confirmed
+ * BE6500 board topology.
+ */
+
+/ {
+	/* The board's USB 5 V rail is always powered and has no enable GPIO. */
+	jd_usb_vdd: regulator-usb-vdd {
+		compatible = "regulator-fixed";
+		regulator-name = "be6500-usb-vdd-5v0";
+		regulator-min-microvolt = <5000000>;
+		regulator-max-microvolt = <5000000>;
+		regulator-boot-on;
+		regulator-always-on;
+	};
+};
+
+/* qcom-m31usb-phy asks for an unnamed clock and the "vdd" regulator. */
+&hs_m31phy_0 {
+	clock-names = "cfg_ahb";
+	vdd-supply = <&jd_usb_vdd>;
+	status = "okay";
+};
+
+/* PCIe0 is disabled in the boot-confirmed tree, so select the USB3 side of
+ * the IPQ5332 shared UniPHY in the same way as QWRT.
+ */
+&usb3 {
+	qcom,multiplexed-phy;
+	status = "okay";
+};
+
+/* Correct the QSDK dtsi typo so DWC3 can resolve both generic PHYs. */
+&dwc_0 {
+	phy-names = "usb2-phy", "usb3-phy";
+};

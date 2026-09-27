@@ -1,0 +1,9 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR BSD-3-Clause)
+/* RAM-only validation of the Linux 6.6 native USB PHY path. */
+#include "ipq5332-jdcloud-be6500-full-radio-mht-test-initramfs.dts"
+#include "ipq5332-jdcloud-be6500-usb-native.dtsi"
+
+/ {
+	model = "JDCloud ZhaoYun BE6500 (RAM-only native USB diagnostic)";
+	be6500,port-stage = "ram-only-native-usb-v51";
+};

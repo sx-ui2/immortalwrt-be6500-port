@@ -4,9 +4,13 @@ import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 DTS = ROOT / "target/linux/qualcommax/files/arch/arm64/boot/dts/qcom/ipq5332-jdcloud-be6500-full-radio-initramfs.dts"
+USB_DIAG_DTS = ROOT / "target/linux/qualcommax/files/arch/arm64/boot/dts/qcom/ipq5332-jdcloud-be6500-usb-native-initramfs.dts"
+USB_NATIVE_DTSI = ROOT / "target/linux/qualcommax/files/arch/arm64/boot/dts/qcom/ipq5332-jdcloud-be6500-usb-native.dtsi"
+USB_FINAL_DTS = ROOT / "target/linux/qualcommax/files/arch/arm64/boot/dts/qcom/ipq5332-jdcloud-be6500-usb-native.dts"
 CORE_DTS = ROOT / "target/linux/qualcommax/files/arch/arm64/boot/dts/qcom/ipq5332-jdcloud-be6500-core.dts"
 PROFILE = ROOT / "target/linux/qualcommax/image/ipq53xx.mk"
 PKG = ROOT / "package/kernel/qca-usb-phy-ipq5018"
+AUTOSTART_PKG = ROOT / "package/be6500-local/be6500-usb-autostart"
 LUCI_PKG = ROOT / "package/be6500-local/luci-app-rejected-clients"
 KERNEL_CONFIGS = [
     ROOT / "target/linux/qualcommax/ipq53xx/config-default",
@@ -27,22 +31,37 @@ class UsbPhySupportTests(unittest.TestCase):
         self.assertNotIn('usb-phy = <&hs_m31phy_0>;', overlay)
         self.assertNotIn('qcom,multiplexed-phy;', overlay)
 
-    def test_phy_modules_are_external_and_not_in_boot_critical_image(self):
+    def test_native_phy_modules_are_external(self):
         package = (PKG / "Makefile").read_text()
-        self.assertIn("+kmod-usb-phy-nop +kmod-usb3 +kmod-usb-dwc3-qcom", package)
-        self.assertIn("CONFIG_USB_PHY=y", package)
+        self.assertIn("+kmod-usb3 +kmod-usb-dwc3-qcom", package)
+        self.assertNotIn("+kmod-usb-phy-nop", package)
         self.assertIn("CONFIG_PHY_QCOM_M31_USB=n", package)
         self.assertIn("CONFIG_PHY_IPQ_UNIPHY_USB=n", package)
-        self.assertIn("$(PKG_BUILD_DIR)/qca-m31-usb-phy.ko", package)
+        self.assertIn("$(PKG_BUILD_DIR)/phy-qcom-m31.ko", package)
         self.assertIn("$(PKG_BUILD_DIR)/phy-qca-uniphy.ko", package)
-        self.assertIn("./src/qca-m31-usb-phy.c", package)
+        self.assertIn("$(LINUX_DIR)/drivers/phy/qualcomm/phy-qcom-m31.c", package)
         self.assertIn("$(LINUX_DIR)/drivers/phy/qualcomm/phy-qca-uniphy.c", package)
         self.assertNotIn("AUTOLOAD", package)
-        self.assertTrue((PKG / "src/qca-m31-usb-phy.c").exists())
+        self.assertFalse((PKG / "src/qca-m31-usb-phy.c").exists())
         for path in KERNEL_CONFIGS:
             source = path.read_text()
             self.assertIn("# CONFIG_PHY_QCOM_M31_USB is not set", source, path)
             self.assertIn("# CONFIG_PHY_IPQ_UNIPHY_USB is not set", source, path)
+
+    def test_ram_diagnostic_uses_linux_66_binding_only(self):
+        diagnostic = USB_DIAG_DTS.read_text()
+        common = USB_NATIVE_DTSI.read_text()
+        final = USB_FINAL_DTS.read_text()
+        self.assertIn('#include "ipq5332-jdcloud-be6500-full-radio-mht-test-initramfs.dts"', diagnostic)
+        self.assertIn('#include "ipq5332-jdcloud-be6500-usb-native.dtsi"', diagnostic)
+        self.assertIn('#include "ipq5332-jdcloud-be6500-full-radio-mht-test-initramfs.dts"', final)
+        self.assertIn('#include "ipq5332-jdcloud-be6500-usb-native.dtsi"', final)
+        self.assertIn('vdd-supply = <&jd_usb_vdd>;', common)
+        self.assertIn('clock-names = "cfg_ahb";', common)
+        self.assertIn('qcom,multiplexed-phy;', common)
+        self.assertIn('phy-names = "usb2-phy", "usb3-phy";', common)
+        self.assertNotIn('qca,ipq5332-m31-usb-hsphy', common)
+        self.assertNotIn('usb-phy = <&hs_m31phy_0>;', common)
 
     def test_usb_probe_is_explicit_and_matches_qwrt_module_order(self):
         helper = (PKG / "files/be6500-usb-host").read_text()
@@ -50,25 +69,44 @@ class UsbPhySupportTests(unittest.TestCase):
         self.assertFalse((PKG / "files/be6500_usb_guard").exists())
         self.assertIn("modprobe dwc3-qcom", helper)
         self.assertIn("modprobe dwc3", helper)
-        self.assertIn("modprobe qca-m31-usb-phy", helper)
+        self.assertIn("modprobe phy-qcom-m31", helper)
         self.assertIn("modprobe phy-qca-uniphy", helper)
-        self.assertLess(helper.index("modprobe dwc3-qcom"), helper.index("modprobe qca-m31-usb-phy"))
+        self.assertLess(helper.index("modprobe dwc3-qcom"), helper.index("modprobe phy-qcom-m31"))
         self.assertIn("probe)", helper)
         self.assertNotIn("boot)", helper)
 
-    def test_ipq5332_m31_tuning_keeps_qwrt_write_delay_order(self):
-        source = (PKG / "src/qca-m31-usb-phy.c").read_text()
-        tune_current = source.index("HSTX_CURRENT_17_1MA_385MV")
-        settle_delay = source.index("udelay(4)", tune_current)
-        clear_por = source.index("writel(0, qphy->base + USB_PHY_UTMI_CTRL5)", settle_delay)
-        self.assertLess(tune_current, settle_delay)
-        self.assertLess(settle_delay, clear_por)
+    def test_persistent_autostart_has_reboot_guard(self):
+        helper = (PKG / "files/be6500-usb-host").read_text()
+        init = (AUTOSTART_PKG / "files/be6500-usb.init").read_text()
+        makefile = (AUTOSTART_PKG / "Makefile").read_text()
+        self.assertIn('PENDING_FILE="$STATE_DIR/probe-in-progress"', helper)
+        self.assertIn('BLOCKED_FILE="$STATE_DIR/auto-disabled"', helper)
+        self.assertLess(helper.index('> "$PENDING_FILE"'), helper.index('if run_locked; then'))
+        self.assertIn("guarded-probe)", helper)
+        self.assertIn("enable|retry)", helper)
+        self.assertIn("disable)", helper)
+        self.assertIn("START=99", init)
+        self.assertIn("be6500-usb-host guarded-probe", init)
+        self.assertIn("+kmod-usb-phy-ipq5018", makefile)
 
-    def test_image_excludes_unbootable_phy_experiment_but_keeps_usb_stack(self):
+    def test_persistent_image_excludes_phy_experiment(self):
         profile = PROFILE.read_text()
-        self.assertNotIn("kmod-usb-phy-ipq5018", profile)
-        self.assertIn("kmod-usb3", profile)
-        self.assertIn("kmod-usb-dwc3-qcom", profile)
+        persistent = profile.split("endef", 1)[0]
+        diagnostic = profile.split("define Device/jdcloud_be6500_usb_native_initramfs", 1)[1].split("endef", 1)[0]
+        final = profile.split("define Device/jdcloud_be6500_usb_native\n", 1)[1].split("endef", 1)[0]
+        self.assertNotIn("kmod-usb-phy-ipq5018", persistent)
+        self.assertIn("kmod-usb3", persistent)
+        self.assertIn("kmod-usb-dwc3-qcom", persistent)
+        self.assertIn("IMAGES :=", diagnostic)
+        self.assertIn("-kmod-ath11k-ahb", diagnostic)
+        self.assertIn("-kmod-qca-nss-ecm", diagnostic)
+        self.assertIn("-kmod-qca-nss-ecm-wifi-plugin", diagnostic)
+        self.assertIn("kmod-usb-phy-ipq5018", diagnostic)
+        self.assertIn("ipq5332-jdcloud-be6500-usb-native-initramfs", diagnostic)
+        self.assertIn("ipq5332-jdcloud-be6500-usb-native", final)
+        self.assertIn("SUPPORTED_DEVICES := jdcloud,be6500", final)
+        self.assertIn("kmod-usb-phy-ipq5018", final)
+        self.assertIn("be6500-usb-autostart", final)
 
     def test_oem_usb_page_exposes_detection_and_full_management_links(self):
         controller = (LUCI_PKG / "root/usr/lib/lua/luci/controller/be6500_oem_beta.lua").read_text()

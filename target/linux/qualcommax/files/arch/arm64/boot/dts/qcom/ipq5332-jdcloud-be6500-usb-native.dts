@@ -1,0 +1,9 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR BSD-3-Clause)
+/* Persistent BE6500 image with late, self-disabling native USB probing. */
+#include "ipq5332-jdcloud-be6500-full-radio-mht-test-initramfs.dts"
+#include "ipq5332-jdcloud-be6500-usb-native.dtsi"
+
+/ {
+	model = "JDCloud ZhaoYun BE6500 (guarded native USB)";
+	be6500,port-stage = "persistent-native-usb-v51";
+};
