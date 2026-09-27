@@ -166,6 +166,11 @@
       clearInterval(window.__nativeDeviceTimer);
       window.__nativeDeviceTimer = null;
     }
+    if (window.__nativeDeviceRateTimer) {
+      clearTimeout(window.__nativeDeviceRateTimer);
+      clearInterval(window.__nativeDeviceRateTimer);
+      window.__nativeDeviceRateTimer = null;
+    }
     var advanced = /seniorManagement\//.test(path);
     var management = /management\//.test(path);
     var open = advanced ? '<div class="cbi-section seniorManagement_Box native-card native-advanced"><h3 class="cbi-section-title seniorManagement_top">' + esc(title) + '</h3>' :
@@ -934,28 +939,28 @@
     rpc('get_iptv_info', {}).then(render).catch(function (error) { notify(error.message, false); });
   }
 
+  function formatDeviceRate(bytes) {
+    bytes = Number(bytes) || 0;
+    if (bytes >= 1048576) return (bytes / 1048576).toFixed(bytes >= 10485760 ? 1 : 2) + ' MB/s';
+    if (bytes >= 1024) return (bytes / 1024).toFixed(bytes >= 10240 ? 1 : 2) + ' KB/s';
+    return Math.round(bytes) + ' B/s';
+  }
   function deviceRow(device, index) {
     var mac = device.uid || device.id || device.mac || '';
     var online = Number(device.online);
     var connection = device.type === 'wire' ? '有线连接' : (device.type === 'Wi-Fi' ?
       (String(device.ssid || '未知 SSID') + ' · ' + String(device.band || '未知频段')) : '正在识别连接');
-    function formatRate(bytes) {
-      bytes = Number(bytes) || 0;
-      if (bytes >= 1048576) return (bytes / 1048576).toFixed(bytes >= 10485760 ? 1 : 2) + ' MB/s';
-      if (bytes >= 1024) return (bytes / 1024).toFixed(bytes >= 10240 ? 1 : 2) + ' KB/s';
-      return Math.round(bytes) + ' B/s';
-    }
-    var upload = formatRate(device.upload_speed != null ? device.upload_speed : (device.uplink || device.up_speed || device.tx_rate || 0));
-    var download = formatRate(device.download_speed != null ? device.download_speed : (device.downlink || device.down_speed || device.rx_rate || 0));
+    var upload = formatDeviceRate(device.upload_speed != null ? device.upload_speed : (device.uplink || device.up_speed || device.tx_rate || 0));
+    var download = formatDeviceRate(device.download_speed != null ? device.download_speed : (device.downlink || device.down_speed || device.rx_rate || 0));
     var deviceType = device.device_type || '其他设备';
     var vendor = device.vendor || device.brand || '暂未识别';
-    return '<ul class="native-table-row data" data-index="' + index + '">' +
+    return '<ul class="native-table-row data" data-index="' + index + '" data-device-mac="' + esc(normalizeMac(mac)) + '">' +
       '<li class="name col-device-name"><b>' + esc(deviceDisplayName(device.name, device.uid || device.mac)) + '</b></li>' +
       '<li class="col-device-address"><code>' + esc(mac) + '</code><small>' + esc(device.ip || '未分配 IP') + '</small></li>' +
       '<li class="col-device-type" title="' + esc(deviceType) + '">' + esc(deviceType) + '</li>' +
       '<li class="col-device-vendor" title="' + esc(vendor) + '">' + esc(vendor) + '</li>' +
       '<li class="col-device-status"><i class="status-dot ' + (online ? 'online' : 'offline') + '"></i>' + (online ? '在线' : '离线') + '<small>' + esc(connection) + '</small></li>' +
-      '<li class="col-device-speed"><span>↑ ' + esc(upload) + '</span><small>↓ ' + esc(download) + '</small></li>' +
+      '<li class="col-device-speed"><span class="device-upload-rate">↑ ' + esc(upload) + '</span><small class="device-download-rate">↓ ' + esc(download) + '</small></li>' +
       '<li class="col-device-actions"><button type="button" class="edit device-edit">编辑</button></li></ul>';
   }
   function devicesPage() {
@@ -964,6 +969,7 @@
       '<div class="native-device-group"><h3>离线设备</h3><div class="native-table native-device-table"><ul class="native-table-head"><li class="col-device-name">设备名称</li><li class="col-device-address">MAC/IP</li><li class="col-device-type">设备类型</li><li class="col-device-vendor">品牌 / 厂商</li><li class="col-device-status">状态</li><li class="col-device-speed">实时速度</li><li class="col-device-actions">操作</li></ul><div id="device-offline"><div class="native-empty">正在读取设备…</div></div></div></div>');
     var editing = null;
     var deviceLoading = false;
+    var rateLoading = false;
     var deviceListReady = false;
     var deviceModalOpen = false;
     function setNetworkAccess(device, allowed) {
@@ -1032,7 +1038,20 @@
       }).catch(function (error) { deviceModalOpen = false; notify(error.message || '无法打开设备设置', false); });
     }
     function renderDevices(result) {
+        var previousRates = {};
+        asArray(state.devices).forEach(function (device) {
+          previousRates[normalizeMac(device.uid || device.id || device.mac)] = {
+            upload: Number(device.upload_speed != null ? device.upload_speed : device.uplink) || 0,
+            download: Number(device.download_speed != null ? device.download_speed : device.downlink) || 0
+          };
+        });
         state.devices = asArray(result.device_list);
+        state.devices.forEach(function (device) {
+          var rate = previousRates[normalizeMac(device.uid || device.id || device.mac)];
+          if (!rate) return;
+          device.uplink = rate.upload; device.upload_speed = rate.upload;
+          device.downlink = rate.download; device.download_speed = rate.download;
+        });
         var online = [], offline = [];
         state.devices.forEach(function (device, index) { (Number(device.online) ? online : offline).push(deviceRow(device, index)); });
         id('device-online').innerHTML = online.length ? online.join('') : '<div class="native-empty">暂无在线设备</div>';
@@ -1056,12 +1075,50 @@
     function refreshDetails() {
       return load('web_get_device_list', true).then(function () {
         clearTimeout(window.__nativeDeviceTimer);
-        window.__nativeDeviceTimer = setTimeout(refreshDetails, 5000);
+        if (id('device-online')) window.__nativeDeviceTimer = setTimeout(refreshDetails, 15000);
+      });
+    }
+    function applyRates(result) {
+      var rates = {};
+      asArray(result.device_list).forEach(function (item) {
+        rates[normalizeMac(item.uid || item.id || item.mac)] = item;
+      });
+      state.devices.forEach(function (device) {
+        var rate = rates[normalizeMac(device.uid || device.id || device.mac)];
+        if (!rate) return;
+        device.uplink = Number(rate.uplink || rate.upload_speed) || 0;
+        device.downlink = Number(rate.downlink || rate.download_speed) || 0;
+        device.upload_speed = device.uplink;
+        device.download_speed = device.downlink;
+      });
+      document.querySelectorAll('[data-device-mac]').forEach(function (row) {
+        var rate = rates[normalizeMac(row.getAttribute('data-device-mac'))];
+        if (!rate) return;
+        var upload = row.querySelector('.device-upload-rate');
+        var download = row.querySelector('.device-download-rate');
+        if (upload) upload.textContent = '↑ ' + formatDeviceRate(rate.upload_speed != null ? rate.upload_speed : rate.uplink);
+        if (download) download.textContent = '↓ ' + formatDeviceRate(rate.download_speed != null ? rate.download_speed : rate.downlink);
+      });
+    }
+    function refreshRates() {
+      if (rateLoading || deviceModalOpen || !id('device-online')) {
+        clearTimeout(window.__nativeDeviceRateTimer);
+        if (id('device-online')) window.__nativeDeviceRateTimer = setTimeout(refreshRates, 2000);
+        return Promise.resolve();
+      }
+      rateLoading = true;
+      return rpc('web_get_device_rates', {}).then(applyRates).catch(function () {}).then(function () {
+        rateLoading = false;
+        clearTimeout(window.__nativeDeviceRateTimer);
+        if (id('device-online')) window.__nativeDeviceRateTimer = setTimeout(refreshRates, 2000);
       });
     }
     // Render DHCP/neighbour data first.  Radio fingerprinting, OUI lookup and
     // traffic accounting then enrich the already visible rows in background.
-    load('web_get_device_list_fast', false).then(refreshDetails);
+    load('web_get_device_list_fast', false).then(function () {
+      refreshDetails();
+      refreshRates();
+    });
   }
 
   function accessPage() {
@@ -1082,6 +1139,7 @@
     var draft = { deny: [], allow: [] };
     var modalMode = 'manual';
     var dirty = false;
+    var accessLoadGeneration = 0;
     function activeList() { return draft[value('access-policy') === 'allow' ? 'allow' : 'deny']; }
     function deviceFor(mac) {
       mac = normalizeMac(mac);
@@ -1180,15 +1238,35 @@
         });
       });
     }
-    function load() {
-      return Promise.all([rpc('get_macfilter_info', {}), rpc('web_get_device_list', {}), rpc('web_get_rejected_list', {})]).then(function (items) {
+    function applyAccessData(items, resetDraft) {
         state.access = items[0]; state.devices = asArray(items[1].device_list);
         state.rejected = asArray(items[2].data || items[2].rejected_list);
-        draft.deny = asArray(state.access.blacklist).map(function (item) { return Object.assign({}, item); });
-        draft.allow = asArray(state.access.whitelist).map(function (item) { return Object.assign({}, item); });
-        dirty = false;
-        set('access-policy', state.access.macpolicy || 'deny'); check('access-enabled', state.access.enable);
+        if (resetDraft && !dirty) {
+          draft.deny = asArray(state.access.blacklist).map(function (item) { return Object.assign({}, item); });
+          draft.allow = asArray(state.access.whitelist).map(function (item) { return Object.assign({}, item); });
+          set('access-policy', state.access.macpolicy || 'deny'); check('access-enabled', state.access.enable);
+        }
         render();
+    }
+    function load() {
+      var generation = ++accessLoadGeneration;
+      var fast = Promise.all([
+        rpc('get_macfilter_info_fast', {}),
+        rpc('web_get_device_list_fast', {}),
+        rpc('web_get_rejected_list_fast', {})
+      ]);
+      return fast.then(function (items) {
+        if (generation !== accessLoadGeneration) return;
+        applyAccessData(items, true);
+        // Host hints, radio association data and OUI identification enrich
+        // the already visible rows without blocking the list itself.
+        Promise.all([
+          rpc('get_macfilter_info', {}),
+          rpc('web_get_device_list', {}),
+          rpc('web_get_rejected_list', {})
+        ]).then(function (fullItems) {
+          if (generation === accessLoadGeneration) applyAccessData(fullItems, true);
+        }).catch(function () {});
       }).catch(function (error) { notify(error.message, false); });
     }
     document.querySelectorAll('[data-policy]').forEach(function (button) { bindClick(button, function () { set('access-policy', button.getAttribute('data-policy')); dirty = true; render(); }); });
@@ -1230,8 +1308,8 @@
       '<div class="native-inline-actions native-rejected-actions"><button type="button" id="rejected-refresh">刷新记录</button><button type="button" id="rejected-clear-all">清除全部</button></div>' +
       '<div class="native-info">这里只记录被访问控制实际拒绝的认证或连接请求，不记录附近设备的 Wi-Fi 扫描。加入白名单或移出黑名单后，对应记录会自动清除。</div>' +
       '<div class="native-table native-rejected-table"><ul class="native-table-head"><li style="width:16%">设备名称</li><li style="width:18%">MAC / IP</li><li style="width:12%">设备类型</li><li style="width:15%">品牌 / 厂商</li><li style="width:11%">SSID / 频段</li><li style="width:16%">最后一次被拒时间</li><li style="width:12%">操作</li></ul><div id="rejected-list"><div class="native-empty">正在读取拒绝记录…</div></div></div>');
-    function load() {
-      return Promise.all([rpc('web_get_rejected_list', {}), rpc('get_macfilter_info', {})]).then(function (items) {
+    var rejectedLoadGeneration = 0;
+    function renderRejected(items) {
         state.rejected = asArray(items[0].data || items[0].rejected_list);
         state.rejectedAccess = items[1] || { enable: 0, macpolicy: 'deny' };
         var policy = state.rejectedAccess.macpolicy === 'allow' ? 'allow' : 'deny';
@@ -1263,6 +1341,21 @@
           });
         });
         if (window.parent && window.parent.setHeight) window.parent.setHeight(document.body.scrollHeight + 40, 850);
+    }
+    function load() {
+      var generation = ++rejectedLoadGeneration;
+      return Promise.all([
+        rpc('web_get_rejected_list_fast', {}),
+        rpc('get_macfilter_info_fast', {})
+      ]).then(function (items) {
+        if (generation !== rejectedLoadGeneration) return;
+        renderRejected(items);
+        Promise.all([
+          rpc('web_get_rejected_list', {}),
+          rpc('get_macfilter_info', {})
+        ]).then(function (fullItems) {
+          if (generation === rejectedLoadGeneration) renderRejected(fullItems);
+        }).catch(function () {});
       }).catch(function (error) { notify(error.message, false); });
     }
     bindClick('#rejected-refresh', load);

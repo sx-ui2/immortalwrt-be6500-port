@@ -7,7 +7,7 @@ attr - 2.5.2-r3
 automount - 10
 avahi-dbus-daemon - 0.9_rc5-r1
 base-files - 1~99ca940
-be6500-current-config - 10
+be6500-current-config - 11
 be6500-luci-zh-default - 1-r2
 be6500-nikki-feed - 1-r1
 be6500-oem-wifi-firmware - 10
@@ -278,7 +278,7 @@ luci-app-hd-idle - 26.236.50592~9b8ee64
 luci-app-nikki - 1.26.1-r1
 luci-app-nlbwmon - 26.236.50592~9b8ee64
 luci-app-package-manager - 26.236.50592~9b8ee64
-luci-app-rejected-clients - 52
+luci-app-rejected-clients - 53
 luci-app-samba4 - 26.236.50592~9b8ee64
 luci-app-sqm - 26.236.50592~9b8ee64
 luci-app-upnp - 26.236.50592~9b8ee64

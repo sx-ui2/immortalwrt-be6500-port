@@ -1678,7 +1678,7 @@ local function usable_device_name(name)
     return name:gsub("%.lan%.$", ""):gsub("%.lan$", "")
 end
 
-local function device_name_catalog(uci)
+local function device_name_catalog(uci, fast)
     local names = { saved = {}, lease = {}, static = {}, hint = {} }
     local leases = io.open("/tmp/dhcp.leases", "r")
     if leases then
@@ -1700,10 +1700,13 @@ local function device_name_catalog(uci)
         local mac = tostring(section.mac or ""):upper()
         if valid_mac(mac) and usable_device_name(section.name) then names.saved[mac] = usable_device_name(section.name) end
     end)
-    local hints = require("luci.jsonc").parse(luci.sys.exec("ubus call luci-rpc getHostHints 2>/dev/null") or "") or {}
-    for mac, hint in pairs(hints) do
-        local name = type(hint) == "table" and usable_device_name(hint.name) or nil
-        if valid_mac(mac) and name then names.hint[mac:upper()] = name end
+    if not fast then
+        local hints = require("luci.jsonc").parse(luci.sys.exec(
+            "/usr/bin/timeout 2 ubus call luci-rpc getHostHints 2>/dev/null") or "") or {}
+        for mac, hint in pairs(hints) do
+            local name = type(hint) == "table" and usable_device_name(hint.name) or nil
+            if valid_mac(mac) and name then names.hint[mac:upper()] = name end
+        end
     end
     return names
 end
@@ -1718,8 +1721,8 @@ local function resolved_device_name(uci, catalog, mac, preferred)
     return "设备-" .. mac:gsub(":", ""):sub(-4)
 end
 
-local function access_entries(uci, policy)
-    local result, catalog = {}, device_name_catalog(uci)
+local function access_entries(uci, policy, fast)
+    local result, catalog = {}, device_name_catalog(uci, fast)
     uci:foreach("be6500_oem", "access", function(section)
         if section.policy == policy and valid_mac(section.mac) then
             local mac = section.mac:upper()
@@ -1753,13 +1756,14 @@ local function find_access(uci, policy, mac)
     return found
 end
 
-local function request_client(uci)
+local function request_client(uci, fast)
     local ip = tostring(luci.http.getenv("REMOTE_ADDR") or "")
     if not ip:match("^[%x%.:]+$") then return "", false end
     local output = luci.sys.exec("ip neigh show " .. ip .. " 2>/dev/null") or ""
     local mac = output:match("lladdr%s+(%x%x:%x%x:%x%x:%x%x:%x%x:%x%x)")
     if not mac then return "", false end
     mac = mac:upper()
+    if fast then return mac, false end
     return mac, known_wireless_clients(uci)[mac] ~= nil
 end
 
@@ -1877,7 +1881,9 @@ local function access_policy_snapshot(uci)
 end
 
 local function apply_mac_policy(uci, policy, previous)
-    local list = access_entries(uci, policy)
+    -- Applying the ACL only needs ordered MAC membership.  Do not make a
+    -- host-hint lookup part of the save path.
+    local list = access_entries(uci, policy, true)
     local enabled = uci:get("be6500_oem", "access", "enabled") ~= "0"
     for index = 0, 2 do
         local device = radio_device(uci, index)
@@ -2102,7 +2108,7 @@ local function wifi_reject_band(uci, record, runtime_mode)
     return wifi_band_from_interface(uci, record.phy, record.ifname, record.freq, runtime_mode)
 end
 
-local function wifi_reject_rows(uci)
+local function wifi_reject_rows(uci, fast)
     local file = io.open(wifi_reject_file, "r")
     if not file then return {} end
     local raw = file:read("*a") or ""
@@ -2110,7 +2116,7 @@ local function wifi_reject_rows(uci)
     local records = require("luci.jsonc").parse(raw)
     if type(records) ~= "table" then return {} end
 
-    local catalog, leases, rows = device_name_catalog(uci), {}, {}
+    local catalog, leases, rows = device_name_catalog(uci, fast), {}, {}
     local runtime_mode = wifi_runtime_personality()
     local lease_file = io.open("/tmp/dhcp.leases", "r")
     if lease_file then
@@ -2135,8 +2141,11 @@ local function wifi_reject_rows(uci)
             local name = resolved_device_name(uci, catalog, mac, lease.name)
             local suffix = mac:gsub(":", ""):sub(-4)
             if name == "有线设备-" .. suffix then name = "无线设备-" .. suffix end
-            local device_type, vendor = device_identity(name, mac)
-            if vendor == "暂未识别" and mac_is_private(mac) then vendor = "私有 MAC（厂商隐藏）" end
+            local device_type, vendor = "其他设备", "正在识别"
+            if not fast then
+                device_type, vendor = device_identity(name, mac)
+                if vendor == "暂未识别" and mac_is_private(mac) then vendor = "私有 MAC（厂商隐藏）" end
+            end
             local ssid = clean(record.ssid, 64)
             local reason = tostring(record.reason or "")
             local reason_name = reason == "mac_whitelist" and "白名单拒绝"
@@ -2154,7 +2163,8 @@ local function wifi_reject_rows(uci)
                 network = ssid ~= "" and ssid or "未知 SSID",
                 band = wifi_reject_band(uci, record, runtime_mode),
                 scope = guest_ssids[ssid] and "guest" or "main",
-                device_type = device_type, vendor = vendor, brand = vendor
+                device_type = device_type, vendor = vendor, brand = vendor,
+                enriched = fast and 0 or 1
             }
         end
     end
@@ -2251,7 +2261,10 @@ local function device_traffic_rates(devices)
     for _, device in ipairs(devices or {}) do
         local mac = tostring(device.uid or device.id or ""):upper()
         local ip = tostring(device.ip or "")
-        if device.online == 1 and valid_mac(mac) and valid_ipv4(ip) then
+        -- The fast inventory deliberately avoids radio scans, so a wireless
+        -- DHCP lease may not yet be marked online.  A matching live conntrack
+        -- flow is sufficient evidence for rate accounting.
+        if valid_mac(mac) and valid_ipv4(ip) then
             ip_to_mac[ip] = mac
             rates[mac] = { upload = 0, download = 0 }
         end
@@ -2470,20 +2483,28 @@ local function build_device_list(uci, fast)
         if mac and not online_macs[tostring(mac):upper()] then add(mac, section.ip or "", section.name or "未知设备", false) end
     end)
 
-    if not fast then
-        local rates = device_traffic_rates(result)
-        for _, device in ipairs(result) do
-            local rate = rates[tostring(device.uid or ""):upper()] or { upload = 0, download = 0 }
-            device.uplink = rate.upload
-            device.downlink = rate.download
-            device.upload_speed = rate.upload
-            device.download_speed = rate.download
-        end
-    end
     table.sort(result, function(a, b)
         if a.online ~= b.online then return a.online > b.online end
         return (a.name or a.id) < (b.name or b.id)
     end)
+    return result
+end
+
+local function build_device_rate_list(uci)
+    local devices = build_device_list(uci, true)
+    local rates = device_traffic_rates(devices)
+    local result = {}
+    for _, device in ipairs(devices) do
+        local mac = tostring(device.uid or device.id or ""):upper()
+        if valid_mac(mac) then
+            local rate = rates[mac] or { upload = 0, download = 0 }
+            result[#result + 1] = {
+                uid = mac, id = mac,
+                uplink = rate.upload, downlink = rate.download,
+                upload_speed = rate.upload, download_speed = rate.download
+            }
+        end
+    end
     return result
 end
 
@@ -3222,6 +3243,8 @@ local function extended_jdcapi(method, args, uci)
         return true, { status = 0, device_list = build_device_list(uci, true), enriched = 0 }
     elseif method == "web_get_device_list" then
         return true, { status = 0, device_list = build_device_list(uci, false), enriched = 1 }
+    elseif method == "web_get_device_rates" then
+        return true, { status = 0, device_list = build_device_rate_list(uci) }
     elseif method == "web_set_station_name" then
         local mac = tostring(args.uid or args.mac or ""):upper(); if not valid_mac(mac) then return true, { status = 1 } end
         -- Saving QoS/access settings must not turn the displayed fallback name
@@ -3256,12 +3279,14 @@ local function extended_jdcapi(method, args, uci)
         local handle = io.popen(command); local output = handle and handle:read("*a") or ""; local ok = handle and handle:close()
         if not ok then return true, { status = 1, message = trim(output) ~= "" and trim(output) or "设备限速规则应用失败" } end
         return true, { status = 0, message = trim(output) }
-    elseif method == "get_macfilter_info" then
+    elseif method == "get_macfilter_info" or method == "get_macfilter_info_fast" then
+        local fast = method == "get_macfilter_info_fast"
         local policy = uci:get("be6500_oem", "access", "policy") or "deny"
-        local client_mac, client_wireless = request_client(uci)
+        local client_mac, client_wireless = request_client(uci, fast)
         return true, { status = 0, enable = uci:get("be6500_oem", "access", "enabled") == "0" and 0 or 1,
-            macpolicy = policy, blacklist = access_entries(uci, "deny"), whitelist = access_entries(uci, "allow"),
-            client_mac = client_mac, client_wireless = client_wireless and 1 or 0 }
+            macpolicy = policy, blacklist = access_entries(uci, "deny", fast), whitelist = access_entries(uci, "allow", fast),
+            client_mac = client_mac, client_wireless = client_wireless and 1 or 0,
+            enriched = fast and 0 or 1 }
     elseif method == "set_macfilter" then
         if not ensure_oem_config(uci) then
             return true, { status = 1, message = "访问控制配置文件创建失败" }
@@ -3295,7 +3320,7 @@ local function extended_jdcapi(method, args, uci)
             return true, { status = 1, message = "名单已生效，但拒绝记录同步清理失败" }
         end
         return true, { status = 0, message = apply_message }
-    elseif method == "web_get_rejected_list" or method == "get_rejected_devices" then
+    elseif method == "web_get_rejected_list_fast" or method == "web_get_rejected_list" or method == "get_rejected_devices" then
         -- The log file is intentionally persistent, but its rows must reflect
         -- the policy that is active now.  Reconcile on every read as well as
         -- after a save so an already-allowed client cannot remain displayed
@@ -3303,8 +3328,9 @@ local function extended_jdcapi(method, args, uci)
         if not reconcile_wifi_reject_rows(uci) then
             return true, { status = 1, message = "拒绝记录同步清理失败" }
         end
-        local rows = wifi_reject_rows(uci)
-        return true, { status = 0, data = rows, rejected_list = rows }
+        local fast = method == "web_get_rejected_list_fast"
+        local rows = wifi_reject_rows(uci, fast)
+        return true, { status = 0, data = rows, rejected_list = rows, enriched = fast and 0 or 1 }
     elseif method == "clear_rejected_devices" then
         if clear_wifi_reject_rows(args.mac, args.ssid) then
             return true, { status = 0, message = "拒绝记录已清除" }

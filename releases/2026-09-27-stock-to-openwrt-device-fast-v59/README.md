@@ -6,9 +6,10 @@ sysupgrade 后运行的是 eMMC 上的持久 ImmortalWrt，不是“临时系统
 
 ## v59 修复内容
 
-- 设备列表先读取 DHCP 租约、邻居表和已保存名称并立即显示；无线频段、SSID、
-  厂商、类型和实时流量在后台补全，不再让两张表长时间停在“正在读取设备”。
-- 去掉每 2 秒重入一次完整无线扫描的逻辑；完整信息改为上一轮结束后 5 秒再刷新。
+- 设备列表、黑白名单和拒绝记录先读取 DHCP 租约、邻居表、UCI 名单及已保存名称
+  并立即显示；无线频段、SSID、厂商和类型在后台补全，不再长时间停在“正在读取”。
+- 实时速率恢复约每 2 秒刷新，但改用独立轻量接口，只读取 conntrack 计数；完整
+  无线识别改为上一轮结束后 15 秒刷新，不会再用无线扫描阻塞速率显示。
 - `hostapd_cli`、`iwinfo` 和主机提示查询均有独立超时，且不会在 hostapd 已返回
   数据后重复扫描全部无线接口。
 - 修复软件包管理器 `timeout: applet not found`：镜像显式包含
@@ -153,21 +154,21 @@ ssh root@192.168.1.1 '/tmp/prepare_be6500_stock_layout.sh apply /tmp/be6500-gpt-
 直接在 LuCI 上传 v59 sysupgrade 即可。为避免历史错误配置干扰，出现过启动或
 网络迁移问题的设备建议取消保留配置；主路由升级前仍应下载配置备份。
 
-### 不重刷固件的 r52 临时更新
+### 不重刷固件的 r53 临时更新
 
 若当前系统能 SSH，只想立即修复截图中的 `timeout: applet not found` 和设备列表
 加载，可把下列 3 个 IPK 复制到 `/tmp`：
 
 - `coreutils_9.7-r1_aarch64_cortex-a53.ipk`
 - `coreutils-timeout_9.7-r1_aarch64_cortex-a53.ipk`
-- `luci-app-rejected-clients_52_all.ipk`
+- `luci-app-rejected-clients_53_all.ipk`
 
 然后按顺序安装并重启 Web 服务：
 
 ```sh
 opkg install /tmp/coreutils_9.7-r1_aarch64_cortex-a53.ipk
 opkg install /tmp/coreutils-timeout_9.7-r1_aarch64_cortex-a53.ipk
-opkg install /tmp/luci-app-rejected-clients_52_all.ipk
+opkg install /tmp/luci-app-rejected-clients_53_all.ipk
 /etc/init.d/be6500-luci-patches restart
 /etc/init.d/rpcd restart
 /etc/init.d/uhttpd restart

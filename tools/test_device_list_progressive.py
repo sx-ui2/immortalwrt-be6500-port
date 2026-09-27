@@ -13,7 +13,8 @@ class DeviceListProgressiveTests(unittest.TestCase):
         source = CONTROLLER.read_text()
         self.assertIn('method == "web_get_device_list_fast"', source)
         self.assertIn("local wireless = fast and {} or known_wireless_clients(uci)", source)
-        self.assertIn("if not fast then\n        local rates = device_traffic_rates(result)", source)
+        self.assertIn('method == "web_get_device_rates"', source)
+        self.assertIn("local rates = device_traffic_rates(devices)", source)
         self.assertIn("/usr/bin/timeout 2 ubus call luci-rpc getHostHints", source)
 
     def test_hostapd_inventory_avoids_duplicate_iwinfo_scan(self):
@@ -24,11 +25,25 @@ class DeviceListProgressiveTests(unittest.TestCase):
     def test_ui_renders_fast_list_before_full_details(self):
         source = PAGES.read_text()
         quick = source.index("load('web_get_device_list_fast', false)")
-        full = source.index(".then(refreshDetails)", quick)
+        full = source.index("refreshDetails();", quick)
         self.assertLess(quick, full)
-        self.assertIn("setTimeout(refreshDetails, 5000)", source)
-        self.assertNotIn("setInterval(load, 2000)", source)
+        self.assertIn("setTimeout(refreshDetails, 15000)", source)
+        self.assertIn("setTimeout(refreshRates, 2000)", source)
+        self.assertIn("rpc('web_get_device_rates', {})", source)
         self.assertIn("return load('web_get_device_list', false)", source)
+
+    def test_access_and_rejected_lists_render_before_enrichment(self):
+        controller = CONTROLLER.read_text()
+        page = PAGES.read_text()
+        self.assertIn('method == "get_macfilter_info_fast"', controller)
+        self.assertIn('method == "web_get_rejected_list_fast"', controller)
+        self.assertIn("device_name_catalog(uci, fast)", controller)
+        self.assertIn("rpc('get_macfilter_info_fast', {})", page)
+        self.assertIn("rpc('web_get_rejected_list_fast', {})", page)
+        self.assertLess(
+            page.index("rpc('get_macfilter_info_fast', {})"),
+            page.index("rpc('get_macfilter_info', {})", page.index("function accessPage()")),
+        )
 
 
 if __name__ == "__main__":
