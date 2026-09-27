@@ -2416,6 +2416,10 @@ end
 -- port 3, LAN2 is port 2 and LAN3 is port 1.
 local iptv_ports = { lan1 = "3", lan2 = "2", lan3 = "1" }
 
+local function valid_chassis_port(name)
+    return name == "wan" or iptv_ports[name] ~= nil
+end
+
 local function read_sysfs_value(path)
     local file = io.open(path, "r")
     if not file then return "" end
@@ -2470,7 +2474,7 @@ local function port_settings_payload(uci)
     local wan_port = selected_wan_port(uci)
     local ports = {
         {
-            id = "wan", name = "WAN", switch_port = "独立", role = wan_port == "wan" and "wan" or "lan",
+            id = "wan", name = "WAN", switch_port = "独立", role = configured_port_role(uci, "wan"),
             link = read_sysfs_value("/sys/class/net/eth0/carrier") == "1" and 1 or 0,
             speed = tonumber(read_sysfs_value("/sys/class/net/eth0/speed")) or 0,
             duplex = read_sysfs_value("/sys/class/net/eth0/duplex"):lower() == "full" and 1 or 0
@@ -2488,6 +2492,26 @@ local function port_settings_payload(uci)
         }
     end
     return { status = 0, ports = ports }
+end
+
+local function configure_lan_bridge_ports(uci, source_port, stb_port)
+    local ports
+    if selected_wan_port(uci) == "wan" then
+        ports = { "eth1" }
+    else
+        ports = { "eth1.1" }
+        -- eth0 is the dedicated chassis WAN socket. Once another socket owns
+        -- logical WAN it becomes a LAN member, unless IPTV has isolated it.
+        if source_port ~= "wan" and stb_port ~= "wan" then
+            ports[#ports + 1] = "eth0"
+        end
+    end
+    uci:foreach("network", "device", function(section)
+        if section.name == "br-lan" then
+            set_uci_list(uci, "network", section[".name"], "ports", ports)
+            return false
+        end
+    end)
 end
 
 local function configure_iptv_switch(uci, source_port, stb_port, uplink_vlan_id)
@@ -2531,6 +2555,7 @@ local function configure_iptv_switch(uci, source_port, stb_port, uplink_vlan_id)
             ports = iptv_ports[wan_port] .. "t 0t", be6500_role = "iptv_uplink"
         })
     end
+    configure_lan_bridge_ports(uci, source_port, stb_port)
 end
 
 local function configure_wan_switch(uci, port)
@@ -2541,13 +2566,6 @@ local function configure_wan_switch(uci, port)
     for _, section in ipairs(stale) do uci:delete("network", section) end
 
     uci:set("network", "wan", "be6500_physical_port", port)
-    uci:foreach("network", "device", function(section)
-        if section.name == "br-lan" then
-            set_uci_list(uci, "network", section[".name"], "ports", port == "wan" and { "eth1" } or { "eth1.1", "eth0" })
-            return false
-        end
-    end)
-
     local iptv_enabled = uci:get("network", "iptv", "be6500_enabled") == "1"
     local iptv_mode = uci:get("network", "iptv", "be6500_access_mode") or "vlan"
     local iptv_source = iptv_enabled and iptv_mode == "lan" and uci:get("network", "iptv", "be6500_source_port") or nil
@@ -2990,7 +3008,7 @@ local function extended_jdcapi(method, args, uci)
             return true, { status = 1, message = "请选择 WAN、LAN1、LAN2 或 LAN3" }
         end
         local old_port = selected_wan_port(uci)
-        if port ~= old_port and port ~= "wan" and configured_port_role(uci, port) ~= "lan" then
+        if port ~= old_port and configured_port_role(uci, port) ~= "lan" then
             return true, { status = 1, message = port:upper() .. " 正在用于 IPTV 或游戏口，请先改回局域网" }
         end
         if port ~= "wan" then
@@ -3041,8 +3059,8 @@ local function extended_jdcapi(method, args, uci)
         local access_mode = args.access_mode == "lan" and "lan" or "vlan"
         local vlan_id = tonumber(args.vlan_id) or 0
         local vlan_priority = tonumber(args.vlan_priority) or 0
-        local source_port = iptv_ports[args.source_port] and args.source_port or "lan1"
-        local stb_port = args.stb_port == "none" and "none" or (iptv_ports[args.stb_port] and args.stb_port or "none")
+        local source_port = valid_chassis_port(args.source_port) and args.source_port or "lan1"
+        local stb_port = args.stb_port == "none" and "none" or (valid_chassis_port(args.stb_port) and args.stb_port or "none")
         local auth_enable = tonumber(args.auth_enable) == 1
         local auth_mac = tostring(args.auth_mac or ""):upper()
         local option12 = clean(args.option12, 255)
@@ -3062,17 +3080,17 @@ local function extended_jdcapi(method, args, uci)
         if enabled and access_mode == "lan" and stb_port ~= "none" and source_port == stb_port then
             return true, { status = 1, message = "IPTV 上联口不能同时作为机顶盒输出口" }
         end
-        if enabled and stb_port ~= "none" and uci:get("be6500_oem", "game", "enable") == "1"
-            and uci:get("be6500_oem", "game", "port") == stb_port then
-            return true, { status = 1, message = stb_port:upper() .. " 已设为游戏口，请先关闭游戏口或选择其他 IPTV 端口" }
+        local game_port = uci:get("be6500_oem", "game", "port")
+        if enabled and uci:get("be6500_oem", "game", "enable") == "1"
+            and ((access_mode == "lan" and game_port == source_port) or game_port == stb_port) then
+            return true, { status = 1, message = tostring(game_port):upper() .. " 已设为游戏口，请先关闭游戏口或选择其他 IPTV 端口" }
         end
         if auth_enable and (not enabled or not valid_mac(auth_mac)) then return true, { status = 1, message = "请先开启 IPTV 并填写正确的机顶盒 MAC 地址" } end
         if auth_enable and stb_port ~= "none" then return true, { status = 1, message = "启用身份模拟时，机顶盒端口绑定必须设为不绑定" } end
         if option60 ~= "" and (not option60:match("^%x+$") or #option60 % 2 ~= 0) then return true, { status = 1, message = "Option 60 必须是偶数位十六进制字节" } end
         if udpxy_port < 1 or udpxy_port > 65535 then return true, { status = 1, message = "udpxy 监听端口无效" } end
         if not uci:get("be6500_oem", "iptv") then uci:section("be6500_oem", "settings", "iptv", {}) end
-        if enabled and iptv_ports[selected_wan_port(uci)]
-            and ((access_mode == "lan" and source_port == selected_wan_port(uci))
+        if enabled and ((access_mode == "lan" and source_port == selected_wan_port(uci))
                 or stb_port == selected_wan_port(uci)) then
             return true, { status = 1, message = "当前物理 WAN 端口不能同时用于 IPTV" }
         end
@@ -3095,9 +3113,11 @@ local function extended_jdcapi(method, args, uci)
             return true, { status = 0, message = "IPTV 已关闭，接口、组播与防火墙配置已撤销" }
         end
         if not uci:get("network", "iptv") then uci:section("network", "interface", "iptv", {}) end
-        local source_ifname = access_mode == "lan" and "eth1.4094" or selected_wan_vlan_device(uci, vlan_id)
+        local source_ifname = access_mode == "lan"
+            and (source_port == "wan" and "eth0" or "eth1.4094")
+            or selected_wan_vlan_device(uci, vlan_id)
         local ifnames = { source_ifname }
-        if stb_port ~= "none" then ifnames[#ifnames + 1] = "eth1.4093" end
+        if stb_port ~= "none" then ifnames[#ifnames + 1] = stb_port == "wan" and "eth0" or "eth1.4093" end
         uci:set("network", "iptv", "ifname", table.concat(ifnames, " "))
         if #ifnames > 1 then uci:set("network", "iptv", "type", "bridge") else uci:delete("network", "iptv", "type") end
         local wan_metric = tonumber(uci:get("network", "wan", "metric")) or 10
@@ -3130,7 +3150,7 @@ local function extended_jdcapi(method, args, uci)
         else uci:delete("network", "iptv_mcast") end
         uci:set("be6500_oem", "iptv", "auth_enable", auth_enable and "1" or "0")
         uci:set("be6500_oem", "iptv", "mac", auth_mac); uci:set("be6500_oem", "iptv", "option12", option12); uci:set("be6500_oem", "iptv", "option60", option60)
-        uci:set("be6500_oem", "iptv", "capture_port", iptv_ports[args.capture_port] and args.capture_port or source_port)
+        uci:set("be6500_oem", "iptv", "capture_port", valid_chassis_port(args.capture_port) and args.capture_port or source_port)
         if not uci:get("udpxy", "main") then uci:section("udpxy", "udpxy", "main", {}) end
         uci:set("udpxy", "main", "disabled", udpxy_enable and "0" or "1"); uci:set("udpxy", "main", "status", udpxy_enable and "1" or "0")
         uci:set("udpxy", "main", "respawn", "1"); uci:set("udpxy", "main", "port", tostring(udpxy_port)); uci:set("udpxy", "main", "bind", "br-lan")
@@ -3919,8 +3939,10 @@ function action_jdcapi()
     elseif method == "web_set_smart_gaming" or method == "set_game_info" then
         local enabled = tonumber(args.enable or args.enabled) == 1
         local port = tostring(args.port or "lan2"):lower()
-        if not iptv_ports[port] then
-            payload = { status = 1, message = "请选择 LAN1、LAN2 或 LAN3 作为游戏口" }
+        if not valid_chassis_port(port) then
+            payload = { status = 1, message = "请选择 WAN、LAN1、LAN2 或 LAN3 作为游戏口" }
+        elseif enabled and port == selected_wan_port(uci) then
+            payload = { status = 1, message = "当前互联网（WAN）端口不能同时作为游戏口" }
         else
             local iptv_enabled = uci:get("network", "iptv", "be6500_enabled") == "1"
             local conflicts = iptv_enabled and (

@@ -24,6 +24,7 @@ if [ -f "$switch_view" ]; then
 		-e "s@feat.vid_option||'vlan','VLAN ID'@feat.vid_option||'vlan',_('VLAN 编号')@g" \
 		-e "s@_('untagged')@_('未标记')@g" \
 		-e "s@_('tagged')@_('已标记')@g" \
+		-e "s@_('off')@_('关闭')@g" \
 		"$switch_view" >"$tmp" && mv "$tmp" "$switch_view"
 fi
 
@@ -63,7 +64,7 @@ for header in $headers; do
 		tmp="${header}.be6500.$$"
 		sed \
 			-e 's#luci\.js?v=26\.236\.50592~9b8ee64-{{ pkgs_update_time }}#luci.js?v=26.236.50592~9b8ee64-be6500v27-{{ pkgs_update_time }}#' \
-			-e 's#be6500v[0-9]*-{{ pkgs_update_time }}#be6500v28-{{ pkgs_update_time }}#' \
+			-e 's#be6500v[0-9]*-{{ pkgs_update_time }}#be6500v54-{{ pkgs_update_time }}#' \
 			"$header" >"$tmp" && mv "$tmp" "$header"
 	fi
 done

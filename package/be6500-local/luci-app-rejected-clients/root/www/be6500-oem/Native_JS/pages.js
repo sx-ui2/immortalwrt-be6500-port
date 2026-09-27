@@ -531,8 +531,17 @@
       return (speed >= 1000 ? (speed / 1000) + ' Gbps' : speed + ' Mbps') + (Number(port.duplex) ? ' · 全双工' : '');
     }
     function roleControl(port, role) {
-      var options = port.id === 'wan' ? roleOptions.slice(0, 2) : roleOptions;
-      return '<select class="cbi-input-select native-port-role-select" data-port="' + esc(port.id) + '" aria-label="' + esc((port.name || port.id.toUpperCase()) + ' 端口功能') + '">' +
+      var iptv = state.portIptv || {};
+      var iptvEnabled = Number(iptv.enable) === 1;
+      var lockedSource = iptvEnabled && String(iptv.access_mode) === 'lan' && String(iptv.source_port) === String(port.id);
+      var options = roleOptions.filter(function (option) {
+        if (lockedSource) return option[0] === 'iptv_source';
+        if (option[0] === 'iptv_source') return false;
+        if (option[0] === 'iptv_stb') return iptvEnabled;
+        return true;
+      });
+      return '<select class="cbi-input-select native-port-role-select" data-port="' + esc(port.id) + '" aria-label="' + esc((port.name || port.id.toUpperCase()) + ' 端口功能') + '"' +
+        (lockedSource ? ' disabled title="该端口由 IPTV 设置页面锁定为上联口"' : '') + '>' +
         options.map(function (option) {
           return '<option value="' + option[0] + '"' + (option[0] === role ? ' selected' : '') + '>' + esc(option[1]) + '</option>';
         }).join('') + '</select>';
@@ -620,15 +629,10 @@
         next(function () {
           return iptvRequest({
             enable: 1,
-            access_mode: iptv.access_mode === 'lan' && iptv.source_port === port ? 'vlan' : (iptv.access_mode || 'vlan'),
+            access_mode: iptv.access_mode || 'vlan',
             stb_port: port,
             auth_enable: 0
           });
-        });
-      }
-      else if (role === 'iptv_source') {
-        next(function () {
-          return iptvRequest({ enable: 1, access_mode: 'lan', source_port: port, stb_port: iptv.stb_port === port ? 'none' : (iptv.stb_port || 'none') });
         });
       }
       return sequence;
@@ -861,7 +865,7 @@
       '<div id="iptv-vlan-row">' + row('IPTV VLAN ID', input('iptv-vlan-id', 'number', '4000', 'min="1" max="4094"')) + '</div>' +
       '<div id="iptv-priority-row">' + row('IPTV VLAN 优先级', select('iptv-vlan-priority', [[0, '0'], [1, '1'], [2, '2'], [3, '3'], [4, '4'], [5, '5'], [6, '6'], [7, '7']])) + '</div>' +
       '<div id="iptv-source-row">' + row('IPTV 上联 LAN 口', select('iptv-source-port', [['lan1', 'LAN1'], ['lan2', 'LAN2'], ['lan3', 'LAN3']])) + '</div>' +
-      row('机顶盒端口绑定', select('iptv-stb-port', [['none', '不绑定（使用转播）'], ['lan1', 'LAN1'], ['lan2', 'LAN2'], ['lan3', 'LAN3']])) +
+      row('IPTV 专用口', select('iptv-stb-port', [['none', '不启用专用口（使用转播）'], ['lan1', 'LAN1'], ['lan2', 'LAN2'], ['lan3', 'LAN3']])) +
       '<p class="native-info">WAN VLAN 模式从连接光猫的 WAN 口获取服务；LAN 口模式用于连接光猫独立的 IPTV 口。只有实体机顶盒需要原始信号时才绑定输出 LAN 口。</p></div></section>' +
       '<section class="native-settings-panel"><h2>udpxy 组播转播</h2>' +
       row('开启转播', toggle('iptv-udpxy-enabled', '')) +
@@ -880,17 +884,28 @@
       '</div><p class="native-info">把机顶盒接到所选 LAN 口，点击“自动抓取”后立即重启机顶盒。若 Option 60 每次抓取都不同，说明运营商使用动态鉴权，静态值不能替代机顶盒。</p></div></section>' +
       '<p class="native-warning">更改 IPTV 接入方式、VLAN 或端口绑定会让对应网络接口短暂重载，但不会重启路由器。</p>' + buttons(['iptv-save', '保存 IPTV 设置']));
     function sync() {
-      show('#iptv-fields', checked('iptv-enabled'));
-      show('#iptv-vlan-row', value('iptv-access-mode') === 'vlan');
-      show('#iptv-priority-row', value('iptv-access-mode') === 'vlan');
-      show('#iptv-source-row', value('iptv-access-mode') === 'lan');
+      var enabled = checked('iptv-enabled');
+      var lanMode = value('iptv-access-mode') === 'lan';
+      var sourcePort = value('iptv-source-port');
+      var stbControl = id('iptv-stb-port');
+      show('#iptv-fields', enabled);
+      show('#iptv-vlan-row', !lanMode);
+      show('#iptv-priority-row', !lanMode);
+      show('#iptv-source-row', lanMode);
+      if (stbControl) {
+        Array.prototype.forEach.call(stbControl.options, function (option) {
+          option.disabled = enabled && lanMode && option.value === sourcePort;
+        });
+        if (enabled && lanMode && stbControl.value === sourcePort) stbControl.value = 'none';
+      }
       show('#iptv-auth-fields', checked('iptv-auth-enabled'));
       var port = number('iptv-udpxy-port', 4022) || 4022;
       if (id('iptv-relay-url')) id('iptv-relay-url').textContent = 'http://' + (state.iptvRelayHost || location.hostname) + ':' + port + '/udp/组播地址';
     }
-    ['iptv-enabled', 'iptv-access-mode', 'iptv-auth-enabled', 'iptv-udpxy-port'].forEach(function (name) { id(name).addEventListener('change', sync); id(name).addEventListener('input', sync); });
+    ['iptv-enabled', 'iptv-access-mode', 'iptv-source-port', 'iptv-auth-enabled', 'iptv-udpxy-port'].forEach(function (name) { id(name).addEventListener('change', sync); id(name).addEventListener('input', sync); });
     bindClick('#iptv-save', function () {
       if (checked('iptv-enabled') && value('iptv-access-mode') === 'vlan' && (number('iptv-vlan-id') < 1 || number('iptv-vlan-id') > 4094)) return notify('IPTV VLAN ID 必须为 1–4094', false);
+      if (checked('iptv-enabled') && value('iptv-access-mode') === 'lan' && value('iptv-source-port') === value('iptv-stb-port')) return notify('IPTV 上联口和专用口不能使用同一个 LAN 口', false);
       if (checked('iptv-auth-enabled') && !/^([0-9A-F]{2}:){5}[0-9A-F]{2}$/i.test(value('iptv-auth-mac'))) return notify('机顶盒 MAC 地址格式不正确', false);
       busy(this, rpc('set_iptv_info', {
         enable: checked('iptv-enabled') ? 1 : 0, access_mode: value('iptv-access-mode'), vlan_id: number('iptv-vlan-id'), vlan_priority: number('iptv-vlan-priority'),

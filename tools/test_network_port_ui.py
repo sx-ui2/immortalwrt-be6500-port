@@ -50,7 +50,10 @@ class NetworkPortUiTests(unittest.TestCase):
         self.assertIn('method == "set_wan_port"', source)
         self.assertIn('be6500_physical_port', source)
         self.assertIn('or "eth1.4092"', source)
-        self.assertIn('port == "wan" and { "eth1" } or { "eth1.1", "eth0" }', source)
+        self.assertIn('local function valid_chassis_port(name)', source)
+        self.assertIn('local function configure_lan_bridge_ports(uci, source_port, stb_port)', source)
+        self.assertIn('source_port ~= "wan" and stb_port ~= "wan"', source)
+        self.assertIn('role = configured_port_role(uci, "wan")', source)
         self.assertIn('iptv_ports[wan_port] and "0t" or "0"', source)
         self.assertIn('reserved_switch_uplink_vlan', source)
         self.assertIn('ports = external .. " 0t", be6500_role = "wan"', source)
@@ -64,6 +67,10 @@ class NetworkPortUiTests(unittest.TestCase):
         self.assertIn("lan1) port=3", source)
         self.assertIn("lan2) port=2", source)
         self.assertIn("lan3) port=1", source)
+        self.assertIn("wan) apply_software_game_port", source)
+        self.assertIn("tc qdisc add dev eth0 clsact", source)
+        self.assertIn("tc filter del dev eth0 ingress pref 65000", source)
+        self.assertIn("action skbedit priority 7", source)
         self.assertIn("ssdk acl list bind 1 0 0", source)
         self.assertIn("ssdk qos ptpriprece set", source)
         self.assertIn("ssdk qos dscpmap set", source)
@@ -81,10 +88,19 @@ class NetworkPortUiTests(unittest.TestCase):
         self.assertIn("['game', roleLabels.game]", source)
         self.assertIn("['iptv_stb', roleLabels.iptv_stb]", source)
         self.assertIn("['iptv_source', roleLabels.iptv_source]", source)
+        self.assertIn("var iptvEnabled = Number(iptv.enable) === 1", source)
+        self.assertIn("var lockedSource = iptvEnabled", source)
+        self.assertIn("if (lockedSource) return option[0] === 'iptv_source'", source)
+        self.assertIn("if (option[0] === 'iptv_source') return false", source)
+        self.assertIn("if (option[0] === 'iptv_stb') return iptvEnabled", source)
+        self.assertIn("该端口由 IPTV 设置页面锁定为上联口", source)
+        self.assertIn("IPTV 专用口", source)
+        self.assertIn("IPTV 上联口和专用口不能使用同一个 LAN 口", source)
         self.assertIn("applyPortRole(port, role)", source)
         self.assertIn("rpc('set_iptv_info'", source)
         self.assertIn("rpc('set_game_info'", source)
         self.assertIn("rpc('set_wan_port'", source)
+        self.assertNotIn("roleOptions.slice(0, 2)", source)
         self.assertNotIn("自定义 IPTV 口", source)
         self.assertNotIn("自定义游戏网口", source)
         self.assertNotIn("port-iptv-save", source)
@@ -92,6 +108,7 @@ class NetworkPortUiTests(unittest.TestCase):
         self.assertNotIn("native-port-services", source)
         self.assertNotIn("rpc('set_port_settings'", source)
         self.assertNotIn("eth1.<VLAN ID>", source)
+        self.assertNotIn("else if (role === 'iptv_source')", source)
 
     def test_iptv_vlan_priority_is_saved_and_applied(self):
         controller = CONTROLLER.read_text()
@@ -186,7 +203,7 @@ class NetworkPortUiTests(unittest.TestCase):
             self.assertNotIn("_('tagged')", switch_source)
             self.assertFalse(old_menu.exists())
             self.assertFalse(retired_module.exists())
-            self.assertIn("be6500v28", header.read_text())
+            self.assertIn("be6500v54", header.read_text())
 
     def test_patcher_replaces_old_physical_cards_in_minified_release_luci(self):
         with tempfile.TemporaryDirectory() as td:
@@ -271,7 +288,7 @@ class NetworkPortUiTests(unittest.TestCase):
 
     def test_package_installs_factory_port_helpers_and_network_patcher(self):
         makefile = MAKEFILE.read_text()
-        self.assertIn("PKG_RELEASE:=45", makefile)
+        self.assertIn("PKG_RELEASE:=46", makefile)
         self.assertIn("be6500-patch-luci-network", makefile)
         self.assertIn("be6500-luci-patches", makefile)
         self.assertIn("Package/luci-app-rejected-clients/postinst", makefile)

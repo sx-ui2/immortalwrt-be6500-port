@@ -8,15 +8,6 @@ LOCK=/var/run/be6500-game-port.lock
 mkdir "$LOCK" 2>/dev/null || exit 0
 trap 'rmdir "$LOCK" 2>/dev/null' EXIT INT TERM
 
-command -v ssdk_sh >/dev/null 2>&1 || {
-	logger -t be6500-game-port -p err "ssdk_sh is unavailable"
-	exit 1
-}
-[ -w /sys/ssdk/dev_id ] || {
-	logger -t be6500-game-port -p err "/sys/ssdk/dev_id is unavailable"
-	exit 1
-}
-
 ssdk() {
 	ssdk_sh "$@" >/dev/null 2>&1
 }
@@ -26,6 +17,17 @@ select_switch() {
 }
 
 flush_game_port() {
+	# Remove only our private filter priority. Keep a pre-existing clsact qdisc
+	# and all unrelated filters intact for SQM, flow offload or diagnostics.
+	if command -v tc >/dev/null 2>&1; then
+		tc filter del dev eth0 ingress pref 65000 >/dev/null 2>&1 || true
+		tc filter del dev eth0 egress pref 65000 >/dev/null 2>&1 || true
+	fi
+
+	# Hardware state only exists on the QCA8386 LAN switch. A missing SSDK must
+	# not prevent the independent eth0 software policy from being used.
+	command -v ssdk_sh >/dev/null 2>&1 || return 0
+	[ -w /sys/ssdk/dev_id ] || return 0
 	select_switch 1 || return 1
 	for port in 0 1 2 3 4 5; do
 		ssdk acl list unbind 1 0 0 "$port" || true
@@ -43,14 +45,41 @@ flush_game_port() {
 	ssdk servcode config set 1 no 0 0xfffefcff 0xffbfff 0 0 0 0 0 0 0 || true
 }
 
+apply_software_game_port() {
+	[ "$(uci -q get network.wan.be6500_physical_port)" != "wan" ] || {
+		logger -t be6500-game-port -p err "eth0 is still the logical WAN"
+		return 1
+	}
+	command -v tc >/dev/null 2>&1 || {
+		logger -t be6500-game-port -p err "tc is unavailable"
+		return 1
+	}
+	tc qdisc add dev eth0 clsact >/dev/null 2>&1 || true
+	tc filter replace dev eth0 ingress protocol all pref 65000 matchall \
+		action skbedit priority 7 >/dev/null 2>&1 || return 1
+	tc filter replace dev eth0 egress protocol all pref 65000 matchall \
+		action skbedit priority 7 >/dev/null 2>&1 || return 1
+	logger -t be6500-game-port "enabled wan (eth0 software priority 7)"
+}
+
 apply_game_port() {
 	logical="$(uci -q get be6500_oem.game.port)"
 	case "$logical" in
+		wan) apply_software_game_port; return $? ;;
 		lan1) port=3 ;;
 		lan2) port=2 ;;
 		lan3) port=1 ;;
 		*) logger -t be6500-game-port -p err "invalid logical port: $logical"; return 1 ;;
 	esac
+
+	command -v ssdk_sh >/dev/null 2>&1 || {
+		logger -t be6500-game-port -p err "ssdk_sh is unavailable"
+		return 1
+	}
+	[ -w /sys/ssdk/dev_id ] || {
+		logger -t be6500-game-port -p err "/sys/ssdk/dev_id is unavailable"
+		return 1
+	}
 
 	select_switch 1 || return 1
 	for current in 0 1 2 3; do
