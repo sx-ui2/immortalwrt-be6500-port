@@ -5,14 +5,15 @@ ZhaoYun BE6500. A successful build does not establish hardware bootability.
 
 ## Current installation and recovery release
 
-Use the v65 stock-to-ImmortalWrt bundle.  It includes the pinned JDCloud
+Use the v66 stock-to-ImmortalWrt bundle.  It includes the pinned JDCloud
 RE-CS-06 uBootKit binary, guarded APPSBL/GPT backup-and-install scripts, the RAM
-installer and the final persistent sysupgrade image. Its access-list first
-render now tolerates the pending device inventory, allowing saved entries and
-the fast device picker to appear before background enrichment. The v55
-save/apply contract and no-network-restart behavior remain unchanged.
+installer and the final persistent sysupgrade image. Device rows now use the
+current hostname by default and resolve local OUI manufacturer/type data on the
+first-paint path instead of waiting for the full hostapd scan. Manual aliases,
+the v55 access-list save/apply contract and no-network-restart behavior remain
+unchanged.
 See
-[`releases/2026-09-28-access-first-render-v65/README.md`](releases/2026-09-28-access-first-render-v65/README.md).
+[`releases/2026-09-28-device-identity-hostname-v66/README.md`](releases/2026-09-28-device-identity-hostname-v66/README.md).
 
 ## Current status (2026-09-12)
 

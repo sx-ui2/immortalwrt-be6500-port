@@ -1113,8 +1113,9 @@
         if (id('device-online')) window.__nativeDeviceRateTimer = setTimeout(refreshRates, 2000);
       });
     }
-    // Render DHCP/neighbour data first.  Radio fingerprinting, OUI lookup and
-    // traffic accounting then enrich the already visible rows in background.
+    // Render hostnames and local OUI identity with the quick radio inventory
+    // first.  Exact radio fingerprinting and traffic accounting then refine
+    // the already visible rows in background.
     load('web_get_device_list_fast', false).then(function () {
       refreshDetails();
       refreshRates();

@@ -1,0 +1,4 @@
+src-git packages https://github.com/immortalwrt/packages.git^0cb6db25afff9a17be88520bc3fdd8f4c79f80de
+src-git luci https://github.com/immortalwrt/luci.git^9b8ee6470c5eb1e5189f1a7f25bc8ee958e2a7c3
+src-git routing https://github.com/openwrt/routing.git^946e9ff93be935fce6c03f4c02124833c35c2f56
+src-git telephony https://github.com/openwrt/telephony.git^92892fa285360b8981f62bf4e0a097e6449e7e33

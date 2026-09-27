@@ -1710,6 +1710,16 @@ local function usable_device_name(name)
     return name:gsub("%.lan%.$", ""):gsub("%.lan$", "")
 end
 
+local function generated_device_name(name, mac)
+    name = trim(name or "")
+    local suffix = tostring(mac or ""):gsub(":", ""):sub(-4)
+    if name:sub(-(#suffix + 1)) ~= "-" .. suffix then return false end
+    local prefix = name:sub(1, #name - #suffix - 1)
+    return prefix == "Apple 设备" or prefix == "小米设备"
+        or prefix == "设备" or prefix == "无线设备" or prefix == "有线设备"
+        or prefix:find("无线设备", 1, true) ~= nil
+end
+
 local function device_name_catalog(uci, fast)
     local names = { saved = {}, lease = {}, static = {}, hint = {} }
     local leases = io.open("/tmp/dhcp.leases", "r")
@@ -2380,17 +2390,18 @@ local function build_device_list(uci, fast)
         if section.policy == active_policy and valid_mac(mac) then active_set[mac] = true end
     end)
 
-    -- LuCI host hints merge DHCP, static-host and resolver information.  Keep
-    -- this as a fallback behind the live DHCP lease hostname, and strip the
-    -- local DNS suffix before presenting it as a device name.
-    if not fast then
-        local hints = require("luci.jsonc").parse(luci.sys.exec(
-            "ubus -t 2 call luci-rpc getHostHints 2>/dev/null") or "") or {}
-        for mac, hint in pairs(hints) do
-            local name = type(hint) == "table" and trim(hint.name or "") or ""
-            name = name:gsub("%.lan%.$", ""):gsub("%.lan$", "")
-            if valid_mac(mac) and name ~= "" then hinted_names[mac:upper()] = name end
-        end
+    -- Host hints are a local ubus lookup, not radio fingerprinting.  Resolve
+    -- them on the first-paint path as well so clients whose DHCP lease contains
+    -- "*" still appear under their hostname instead of a generated band/MAC
+    -- label.  Keep the fast request bounded to one second; exact wireless
+    -- details remain the responsibility of the background full request.
+    local hints = require("luci.jsonc").parse(luci.sys.exec(
+        fast and "ubus -t 1 call luci-rpc getHostHints 2>/dev/null"
+            or "ubus -t 2 call luci-rpc getHostHints 2>/dev/null") or "") or {}
+    for mac, hint in pairs(hints) do
+        local name = type(hint) == "table" and trim(hint.name or "") or ""
+        name = name:gsub("%.lan%.$", ""):gsub("%.lan$", "")
+        if valid_mac(mac) and name ~= "" then hinted_names[mac:upper()] = name end
     end
     uci:foreach("dhcp", "host", function(section)
         local mac = type(section.mac) == "table" and section.mac[1] or section.mac
@@ -2404,26 +2415,29 @@ local function build_device_list(uci, fast)
         return name:gsub("%.lan%.$", ""):gsub("%.lan$", "")
     end
 
-    local function generated_device_name(name, mac)
-        name = trim(name or "")
-        local suffix = tostring(mac or ""):gsub(":", ""):sub(-4)
-        return name == "Apple 设备-" .. suffix
-            or name == "小米设备-" .. suffix
-            or name == "有线设备-" .. suffix
-            or name:match("^.+ 无线设备%-" .. suffix .. "$") ~= nil
-    end
-
     local function add(mac, ip, lease_name, online)
         mac = tostring(mac or ""):upper()
         if not valid_mac(mac) or online_macs[mac] then return end
         online_macs[mac] = true
         local section = oem_device_section(mac)
         local raw_saved_name = uci:get("be6500_oem", section, "name")
-        local saved_name = generated_device_name(raw_saved_name, mac) and nil or usable_hostname(raw_saved_name)
-        local display_name = saved_name or usable_hostname(lease_name)
-            or usable_hostname(configured_names[mac]) or usable_hostname(hinted_names[mac]) or ""
-        local device_type, vendor = "其他设备", "正在识别"
-        if not fast then device_type, vendor = device_identity(display_name, mac) end
+        local saved_name = usable_hostname(raw_saved_name)
+        -- Do not use the `condition and nil or value` idiom here: nil is
+        -- falsey in Lua, so that expression would select value again and make
+        -- an old generated label permanently override the real hostname.
+        if generated_device_name(raw_saved_name, mac) then saved_name = nil end
+        -- Every non-generated saved name is treated as a user alias.  Older
+        -- releases did not persist name_manual, so requiring that marker would
+        -- silently overwrite existing aliases.  Without an alias the current
+        -- hostname is always the default.
+        local manual_name = saved_name
+        local display_name = manual_name or usable_hostname(lease_name)
+            or usable_hostname(configured_names[mac]) or usable_hostname(hinted_names[mac])
+            or ""
+        -- OUI and hostname classification are local operations and must not
+        -- wait for the slow hostapd fingerprint scan.  The latter may refine
+        -- these values when the full endpoint completes.
+        local device_type, vendor = device_identity(display_name, mac)
         local wifi = wireless[mac]
         if wifi then
             local fingerprint_type, fingerprint_vendor = fingerprint_identity(wifi.signature)

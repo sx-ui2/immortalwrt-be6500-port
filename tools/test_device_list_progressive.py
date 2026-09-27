@@ -22,9 +22,21 @@ class DeviceListProgressiveTests(unittest.TestCase):
         self.assertIn('method == "web_get_device_rates"', source)
         self.assertIn("local rates = device_traffic_rates(devices)", source)
         self.assertIn("ubus -t 2 call luci-rpc getHostHints", source)
+        self.assertIn("ubus -t 1 call luci-rpc getHostHints", source)
+        self.assertIn("local device_type, vendor = device_identity(display_name, mac)", source)
+        self.assertNotIn("if not fast then device_type, vendor = device_identity(display_name, mac) end", source)
         rate_start = source.index("local function build_device_rate_list(uci)")
         rate_end = source.index("local function firewall_reload()", rate_start)
         self.assertNotIn("build_device_list", source[rate_start:rate_end])
+
+    def test_first_paint_prefers_hostname_unless_name_is_manual(self):
+        source = CONTROLLER.read_text()
+        self.assertIn("local manual_name = saved_name", source)
+        self.assertIn("local display_name = manual_name or usable_hostname(lease_name)", source)
+        self.assertIn("or usable_hostname(configured_names[mac]) or usable_hostname(hinted_names[mac])", source)
+        self.assertIn('prefix == "设备" or prefix == "无线设备" or prefix == "有线设备"', source)
+        self.assertIn('prefix:find("无线设备", 1, true)', source)
+        self.assertIn("if generated_device_name(raw_saved_name, mac) then saved_name = nil end", source)
 
     def test_hostapd_inventory_avoids_duplicate_iwinfo_scan(self):
         source = CONTROLLER.read_text()
