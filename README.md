@@ -5,12 +5,13 @@ ZhaoYun BE6500. A successful build does not establish hardware bootability.
 
 ## Current installation and recovery release
 
-Use the v59 stock-to-ImmortalWrt bundle.  It includes the pinned JDCloud
+Use the v60 stock-to-ImmortalWrt bundle.  It includes the pinned JDCloud
 RE-CS-06 uBootKit binary, guarded APPSBL/GPT backup-and-install scripts, the RAM
-installer and the final persistent sysupgrade image.  It also fixes progressive
-device-list loading and the package manager's missing BusyBox timeout applet.
+installer and the final persistent sysupgrade image.  It also makes associated
+Wi-Fi clients immediately selectable in access control without waiting for
+SSID, frequency-band, fingerprint or vendor enrichment.
 See
-[`releases/2026-09-27-stock-to-openwrt-device-fast-v59/README.md`](releases/2026-09-27-stock-to-openwrt-device-fast-v59/README.md).
+[`releases/2026-09-27-access-instant-v60/README.md`](releases/2026-09-27-access-instant-v60/README.md).
 
 ## Current status (2026-09-12)
 

@@ -1672,6 +1672,34 @@ local function known_wireless_clients(uci)
     return result
 end
 
+-- Access-control device selection only needs to know whether a MAC is an
+-- associated Wi-Fi station.  The full inventory above also resolves the
+-- exact BSS/band and station fingerprints, which can take several seconds on
+-- QSDK when every hostapd control socket has to be queried.  Keep this small
+-- ubus-only inventory on the first-paint path so an associated client is
+-- selectable immediately; the full endpoint enriches the row afterwards.
+local function known_wireless_clients_fast()
+    local result = {}
+    local loaded, ubus = pcall(require, "ubus")
+    local connection = loaded and ubus and ubus.connect() or nil
+    if not connection then return result end
+
+    local objects = luci.sys.exec("ubus -S list 'hostapd.*' 2>/dev/null") or ""
+    for object in objects:gmatch("[^%s]+") do
+        local ok, status = pcall(connection.call, connection, object, "get_clients", {})
+        if ok and type(status) == "table" then
+            for mac, client in pairs(type(status.clients) == "table" and status.clients or {}) do
+                mac = tostring(mac or ""):upper()
+                if valid_mac(mac) and (type(client) ~= "table" or client.authorized ~= false) then
+                    result[mac] = { ssid = "", signature = "", band = "未知频段" }
+                end
+            end
+        end
+    end
+    connection:close()
+    return result
+end
+
 local function usable_device_name(name)
     name = trim(name or "")
     if name == "" or name == "*" or name == "-" or name == "未知设备" or name == "Unknown" then return nil end
@@ -1763,7 +1791,7 @@ local function request_client(uci, fast)
     local mac = output:match("lladdr%s+(%x%x:%x%x:%x%x:%x%x:%x%x:%x%x)")
     if not mac then return "", false end
     mac = mac:upper()
-    if fast then return mac, false end
+    if fast then return mac, known_wireless_clients_fast()[mac] ~= nil end
     return mac, known_wireless_clients(uci)[mac] ~= nil
 end
 
@@ -2342,7 +2370,7 @@ end
 
 local function build_device_list(uci, fast)
     fast = fast == true
-    local wireless = fast and {} or known_wireless_clients(uci)
+    local wireless = fast and known_wireless_clients_fast() or known_wireless_clients(uci)
     local online_macs, result, leases_by_mac, configured_names, hinted_names = {}, {}, {}, {}, {}
     local guest_ip = uci:get("network", "guest", "ipaddr") or "192.168.4.1"
     local guest_prefix = guest_ip:match("^(%d+%.%d+%.%d+)%.") or "192.168.4"

@@ -12,7 +12,9 @@ class DeviceListProgressiveTests(unittest.TestCase):
     def test_fast_endpoint_skips_expensive_enrichment(self):
         source = CONTROLLER.read_text()
         self.assertIn('method == "web_get_device_list_fast"', source)
-        self.assertIn("local wireless = fast and {} or known_wireless_clients(uci)", source)
+        self.assertIn("local wireless = fast and known_wireless_clients_fast() or known_wireless_clients(uci)", source)
+        self.assertIn("local function known_wireless_clients_fast()", source)
+        self.assertIn('object, "get_clients", {}', source)
         self.assertIn('method == "web_get_device_rates"', source)
         self.assertIn("local rates = device_traffic_rates(devices)", source)
         self.assertIn("/usr/bin/timeout 2 ubus call luci-rpc getHostHints", source)
@@ -40,6 +42,10 @@ class DeviceListProgressiveTests(unittest.TestCase):
         self.assertIn("device_name_catalog(uci, fast)", controller)
         self.assertIn("rpc('get_macfilter_info_fast', {})", page)
         self.assertIn("rpc('web_get_rejected_list_fast', {})", page)
+        fast_access = page.index("var fast = Promise.all([", page.index("function accessPage()"))
+        first_access_render = page.index("applyAccessData(items, true);", fast_access)
+        rejected_history = page.index("rpc('web_get_rejected_list_fast', {})", fast_access)
+        self.assertLess(first_access_render, rejected_history)
         self.assertLess(
             page.index("rpc('get_macfilter_info_fast', {})"),
             page.index("rpc('get_macfilter_info', {})", page.index("function accessPage()")),

@@ -1240,7 +1240,7 @@
     }
     function applyAccessData(items, resetDraft) {
         state.access = items[0]; state.devices = asArray(items[1].device_list);
-        state.rejected = asArray(items[2].data || items[2].rejected_list);
+        if (items[2]) state.rejected = asArray(items[2].data || items[2].rejected_list);
         if (resetDraft && !dirty) {
           draft.deny = asArray(state.access.blacklist).map(function (item) { return Object.assign({}, item); });
           draft.allow = asArray(state.access.whitelist).map(function (item) { return Object.assign({}, item); });
@@ -1250,22 +1250,33 @@
     }
     function load() {
       var generation = ++accessLoadGeneration;
+      // The access list and live station inventory are sufficient for the
+      // first render.  Rejected-history reconciliation is independent and
+      // must never hold the add-device selector on “正在读取”.
       var fast = Promise.all([
         rpc('get_macfilter_info_fast', {}),
-        rpc('web_get_device_list_fast', {}),
-        rpc('web_get_rejected_list_fast', {})
+        rpc('web_get_device_list_fast', {})
       ]);
       return fast.then(function (items) {
         if (generation !== accessLoadGeneration) return;
         applyAccessData(items, true);
+        rpc('web_get_rejected_list_fast', {}).then(function (rejected) {
+          if (generation !== accessLoadGeneration) return;
+          state.rejected = asArray(rejected.data || rejected.rejected_list);
+          render();
+        }).catch(function () {});
         // Host hints, radio association data and OUI identification enrich
         // the already visible rows without blocking the list itself.
         Promise.all([
           rpc('get_macfilter_info', {}),
-          rpc('web_get_device_list', {}),
-          rpc('web_get_rejected_list', {})
+          rpc('web_get_device_list', {})
         ]).then(function (fullItems) {
           if (generation === accessLoadGeneration) applyAccessData(fullItems, true);
+        }).catch(function () {});
+        rpc('web_get_rejected_list', {}).then(function (rejected) {
+          if (generation !== accessLoadGeneration) return;
+          state.rejected = asArray(rejected.data || rejected.rejected_list);
+          render();
         }).catch(function () {});
       }).catch(function (error) { notify(error.message, false); });
     }
