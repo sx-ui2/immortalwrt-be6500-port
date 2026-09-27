@@ -12,17 +12,25 @@ class DeviceListProgressiveTests(unittest.TestCase):
     def test_fast_endpoint_skips_expensive_enrichment(self):
         source = CONTROLLER.read_text()
         self.assertIn('method == "web_get_device_list_fast"', source)
-        self.assertIn("local wireless = fast and known_wireless_clients_fast() or known_wireless_clients(uci)", source)
-        self.assertIn("local function known_wireless_clients_fast()", source)
-        self.assertIn('object, "get_clients", {}', source)
+        self.assertIn("local wireless = fast and known_wireless_clients_fast(uci) or known_wireless_clients(uci)", source)
+        self.assertIn("local function known_wireless_clients_fast(uci)", source)
+        fast_start = source.index("local function known_wireless_clients_fast(uci)")
+        fast_end = source.index("local function usable_device_name", fast_start)
+        fast_source = source[fast_start:fast_end]
+        self.assertIn('iw dev " .. iface .. " station dump', fast_source)
+        self.assertNotIn('"get_clients"', fast_source)
         self.assertIn('method == "web_get_device_rates"', source)
         self.assertIn("local rates = device_traffic_rates(devices)", source)
-        self.assertIn("/usr/bin/timeout 2 ubus call luci-rpc getHostHints", source)
+        self.assertIn("ubus -t 2 call luci-rpc getHostHints", source)
+        rate_start = source.index("local function build_device_rate_list(uci)")
+        rate_end = source.index("local function firewall_reload()", rate_start)
+        self.assertNotIn("build_device_list", source[rate_start:rate_end])
 
     def test_hostapd_inventory_avoids_duplicate_iwinfo_scan(self):
         source = CONTROLLER.read_text()
         self.assertIn("if not saw_control_socket and not saw_ubus_object then", source)
-        self.assertIn("/usr/bin/timeout 1 hostapd_cli", source)
+        self.assertIn('luci.sys.exec("hostapd_cli -p /var/run/hostapd', source)
+        self.assertNotIn("/usr/bin/timeout 1 hostapd_cli", source)
 
     def test_ui_renders_fast_list_before_full_details(self):
         source = PAGES.read_text()

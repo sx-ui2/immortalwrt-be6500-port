@@ -62,16 +62,23 @@ local function run_case(policy, previous, desired, present, stations)
         end
         return { read = function() return output end, close = function() return true end }
     end
+    local wireless_commits = 0
+    local wireless_writes = 0
     local uci = {
         get = function(_, config, section, option)
             if config == "be6500_oem" and section == "access" and option == "enabled" then return "1" end
         end,
-        set = function() end, delete = function() end, commit = function() return true end
+        set = function(_, config) if config == "wireless" then wireless_writes = wireless_writes + 1 end end,
+        delete = function(_, config) if config == "wireless" then wireless_writes = wireless_writes + 1 end end,
+        commit = function(_, config)
+            if config == "wireless" then wireless_commits = wireless_commits + 1 end
+            return true
+        end
     }
     local ok, message = apply(uci, policy, previous)
     io.popen = original_popen
     assert(ok, message)
-    return calls
+    return calls, wireless_commits, wireless_writes
 end
 
 local function count(calls, pattern)
@@ -84,7 +91,16 @@ local function count(calls, pattern)
     return found
 end
 
-local calls = run_case("allow", { enabled = true, policy = "allow", listed = { [A] = true, [B] = true } },
+-- Renaming, syncing, or reordering unchanged members must not even query
+-- hostapd or rewrite wireless UCI.  QSDK can otherwise re-evaluate live MLO
+-- stations and momentarily disconnect the whole client.
+local calls, commits, writes = run_case("allow",
+    { enabled = true, policy = "allow", listed = { [A] = true, [B] = true } },
+    { B, A }, { accept_acl = { A, B } }, { A, B })
+assert(#calls == 0, "metadata-only save queried hostapd")
+assert(commits == 0 and writes == 0, "metadata-only save rewrote wireless UCI")
+
+calls = run_case("allow", { enabled = true, policy = "allow", listed = { [A] = true, [B] = true } },
     { A, B, C }, { accept_acl = { A, B } }, { A, B })
 assert(count(calls, "accept_acl ADD_MAC " .. C) == 1)
 assert(count(calls, "accept_acl DEL_MAC") == 0)

@@ -280,6 +280,18 @@ local function wifi_band_from_interface(uci, phy, ifname, frequency, runtime_mod
     local mode = runtime_mode
     if mode == nil then mode = wifi_runtime_personality() end
     local tri = tonumber(mode) == 1
+    -- MLO partner control sockets are named after the first link (for
+    -- example phy00.0-ap0_link1).  Their name therefore still contains
+    -- ".0" even when STATUS reports a live 5 GHz link.  A real operating
+    -- frequency is authoritative and must be evaluated before the socket
+    -- name, otherwise every partner is mislabeled as 2.4G.
+    frequency = tonumber(frequency) or 0
+    if frequency >= 2400 and frequency < 3000 then return "2.4G" end
+    if frequency >= 5000 and frequency < 5925 then
+        if tri then return frequency < 5500 and "5.2G" or "5.8G" end
+        return "5G"
+    end
+    if frequency >= 5925 then return "6G" end
     local index = tonumber(phy:match("^phy%d+%.(%d+)$")
         or ifname:match("^phy%d+%.(%d+)%-"))
     if index ~= nil and index <= 2 then
@@ -291,17 +303,6 @@ local function wifi_band_from_interface(uci, phy, ifname, frequency, runtime_mod
             return index == 2 and "5.8G" or "5.2G"
         end
     end
-    -- A few hostapd control sockets expose an MLD name instead of the link
-    -- name.  Live stations still have an actual operating frequency.
-    frequency = tonumber(frequency) or 0
-    if frequency >= 2400 and frequency < 3000 then return "2.4G" end
-    if frequency >= 5000 and frequency < 5925 then
-        if tri then
-            return frequency < 5500 and "5.2G" or "5.8G"
-        end
-        return "5G"
-    end
-    if frequency >= 5925 then return "6G" end
     return "未知频段"
 end
 
@@ -1591,7 +1592,7 @@ local function known_wireless_clients(uci)
     for iface in sockets:gmatch("[^%s]+") do
         if iface ~= "global" and iface:match("^[%w_.%-]+$") then
             saw_control_socket = true
-            local status = luci.sys.exec("/usr/bin/timeout 1 hostapd_cli -p /var/run/hostapd -i " .. iface
+            local status = luci.sys.exec("hostapd_cli -p /var/run/hostapd -i " .. iface
                 .. " status 2>/dev/null") or ""
             local prefixed = "\n" .. status
             local frequency = tonumber(prefixed:match("\nfreq=(%d+)")) or 0
@@ -1601,7 +1602,7 @@ local function known_wireless_clients(uci)
                 or prefixed:match("\nssid=([^\r\n]*)")
             local ssid = live_ssid(iface, reported_ssid, phy, frequency)
             local band = wifi_band_from_interface(uci, phy, iface, frequency, runtime_mode)
-            local stations = luci.sys.exec("/usr/bin/timeout 1 hostapd_cli -p /var/run/hostapd -i " .. iface
+            local stations = luci.sys.exec("hostapd_cli -p /var/run/hostapd -i " .. iface
                 .. " all_sta 2>/dev/null") or ""
             for line in stations:gmatch("[^\r\n]+") do
                 local mac = line:match("^(%x%x:%x%x:%x%x:%x%x:%x%x:%x%x)$")
@@ -1650,11 +1651,11 @@ local function known_wireless_clients(uci)
     if not saw_control_socket and not saw_ubus_object then
         local interfaces = luci.sys.exec("iw dev 2>/dev/null | awk '/Interface/{print $2}'") or ""
         for iface in interfaces:gmatch("[^%s]+") do
-            local info = luci.sys.exec("/usr/bin/timeout 1 iw dev " .. iface .. " info 2>/dev/null") or ""
+            local info = luci.sys.exec("iw dev " .. iface .. " info 2>/dev/null") or ""
             local frequency = tonumber(info:match("channel%s+%d+%s+%((%d+)%s+MHz%)")) or 0
             local band = wifi_band_from_interface(uci, "", iface, frequency, runtime_mode)
             local ssid = clean(info:match("[\r\n]%s*ssid%s+([^\r\n]+)") or "", 64)
-            local output = luci.sys.exec("/usr/bin/timeout 1 iwinfo " .. iface .. " assoclist 2>/dev/null") or ""
+            local output = luci.sys.exec("iwinfo " .. iface .. " assoclist 2>/dev/null") or ""
             for mac in output:gmatch("(%x%x:%x%x:%x%x:%x%x:%x%x:%x%x)") do
                 if not control_seen[mac:upper()] then add(mac, ssid, band, "") end
             end
@@ -1674,29 +1675,32 @@ end
 
 -- Access-control device selection only needs to know whether a MAC is an
 -- associated Wi-Fi station.  The full inventory above also resolves the
--- exact BSS/band and station fingerprints, which can take several seconds on
--- QSDK when every hostapd control socket has to be queried.  Keep this small
--- ubus-only inventory on the first-paint path so an associated client is
--- selectable immediately; the full endpoint enriches the row afterwards.
-local function known_wireless_clients_fast()
+-- exact BSS/band and station fingerprints.  Keep a driver-counter-free
+-- kernel inventory on the first-paint path so rows are selectable
+-- immediately; the full endpoint enriches them afterwards.
+local function known_wireless_clients_fast(uci)
     local result = {}
-    local loaded, ubus = pcall(require, "ubus")
-    local connection = loaded and ubus and ubus.connect() or nil
-    if not connection then return result end
-
-    local objects = luci.sys.exec("ubus -S list 'hostapd.*' 2>/dev/null") or ""
-    for object in objects:gmatch("[^%s]+") do
-        local ok, status = pcall(connection.call, connection, object, "get_clients", {})
-        if ok and type(status) == "table" then
-            for mac, client in pairs(type(status.clients) == "table" and status.clients or {}) do
-                mac = tostring(mac or ""):upper()
-                if valid_mac(mac) and (type(client) ~= "table" or client.authorized ~= false) then
-                    result[mac] = { ssid = "", signature = "", band = "未知频段" }
-                end
+    -- Do not use hostapd.get_clients() on the first-paint path.  On this
+    -- Qualcomm build that method asks the driver for counters for every STA
+    -- and the primary MLO object also aggregates partner-link clients.  That
+    -- both delays the whole page and labels the aggregate as 2.4G.  The
+    -- kernel station dump is local, inexpensive and scoped to the real
+    -- netdev, which is enough for the initial online/offline classification.
+    local interfaces = luci.sys.exec("iw dev 2>/dev/null | awk '/Interface/{print $2}'") or ""
+    local runtime_mode = wifi_runtime_personality()
+    for iface in interfaces:gmatch("[^%s]+") do
+        if iface:match("^[%w_.%-]+$") then
+            local info = luci.sys.exec("iw dev " .. iface .. " info 2>/dev/null") or ""
+            local frequency = tonumber(info:match("channel%s+%d+%s+%((%d+)%s+MHz%)")) or 0
+            local ssid = clean(info:match("[\r\n]%s*ssid%s+([^\r\n]+)") or "", 64)
+            local band = wifi_band_from_interface(uci, "", iface, frequency, runtime_mode)
+            local stations = luci.sys.exec("iw dev " .. iface .. " station dump 2>/dev/null") or ""
+            for mac in stations:gmatch("Station%s+(%x%x:%x%x:%x%x:%x%x:%x%x:%x%x)") do
+                mac = mac:upper()
+                result[mac] = { ssid = ssid, signature = "", band = band }
             end
         end
     end
-    connection:close()
     return result
 end
 
@@ -1730,7 +1734,7 @@ local function device_name_catalog(uci, fast)
     end)
     if not fast then
         local hints = require("luci.jsonc").parse(luci.sys.exec(
-            "/usr/bin/timeout 2 ubus call luci-rpc getHostHints 2>/dev/null") or "") or {}
+            "ubus -t 2 call luci-rpc getHostHints 2>/dev/null") or "") or {}
         for mac, hint in pairs(hints) do
             local name = type(hint) == "table" and usable_device_name(hint.name) or nil
             if valid_mac(mac) and name then names.hint[mac:upper()] = name end
@@ -1913,6 +1917,29 @@ local function apply_mac_policy(uci, policy, previous)
     -- host-hint lookup part of the save path.
     local list = access_entries(uci, policy, true)
     local enabled = uci:get("be6500_oem", "access", "enabled") ~= "0"
+    -- A name sync, manual rename, or list reorder does not change the radio
+    -- policy.  Returning before *any* wireless UCI write or hostapd query is
+    -- important on QSDK: even rewriting an identical live ACL can make the
+    -- MLO authenticator re-evaluate an associated station and briefly drop
+    -- its links.  Only membership, enable-state, or mode changes belong on
+    -- the runtime ACL path.
+    local desired = {}
+    for _, item in ipairs(list) do desired[item.mac] = true end
+    local runtime_unchanged = previous ~= nil
+        and previous.enabled == enabled and previous.policy == policy
+    if runtime_unchanged then
+        for mac in pairs(desired) do
+            if not previous.listed[mac] then runtime_unchanged = false; break end
+        end
+    end
+    if runtime_unchanged then
+        for mac in pairs(previous.listed) do
+            if not desired[mac] then runtime_unchanged = false; break end
+        end
+    end
+    if runtime_unchanged then
+        return true, "名单信息已保存，运行中的 Wi-Fi 未改动"
+    end
     for index = 0, 2 do
         local device = radio_device(uci, index)
         local iface = device and oem_iface(uci, device, "main") or {}
@@ -2370,7 +2397,7 @@ end
 
 local function build_device_list(uci, fast)
     fast = fast == true
-    local wireless = fast and known_wireless_clients_fast() or known_wireless_clients(uci)
+    local wireless = fast and known_wireless_clients_fast(uci) or known_wireless_clients(uci)
     local online_macs, result, leases_by_mac, configured_names, hinted_names = {}, {}, {}, {}, {}
     local guest_ip = uci:get("network", "guest", "ipaddr") or "192.168.4.1"
     local guest_prefix = guest_ip:match("^(%d+%.%d+%.%d+)%.") or "192.168.4"
@@ -2390,7 +2417,7 @@ local function build_device_list(uci, fast)
     -- local DNS suffix before presenting it as a device name.
     if not fast then
         local hints = require("luci.jsonc").parse(luci.sys.exec(
-            "/usr/bin/timeout 2 ubus call luci-rpc getHostHints 2>/dev/null") or "") or {}
+            "ubus -t 2 call luci-rpc getHostHints 2>/dev/null") or "") or {}
         for mac, hint in pairs(hints) do
             local name = type(hint) == "table" and trim(hint.name or "") or ""
             name = name:gsub("%.lan%.$", ""):gsub("%.lan$", "")
@@ -2519,7 +2546,36 @@ local function build_device_list(uci, fast)
 end
 
 local function build_device_rate_list(uci)
-    local devices = build_device_list(uci, true)
+    -- The two-second rate poll only needs MAC-to-IP mappings.  Rebuilding the
+    -- wireless association inventory here made every refresh rescan all
+    -- radios and compete with the detail request, which is visible as a long
+    -- "正在读取设备" state.  DHCP and neighbour tables already provide the
+    -- complete mapping needed for conntrack accounting.
+    local devices, seen = {}, {}
+    local function add(mac, ip)
+        mac = tostring(mac or ""):upper()
+        if valid_mac(mac) and valid_ipv4(ip) and not seen[mac] then
+            seen[mac] = true
+            devices[#devices + 1] = { uid = mac, id = mac, ip = ip }
+        end
+    end
+    local leases = io.open("/tmp/dhcp.leases", "r")
+    if leases then
+        for line in leases:lines() do
+            local mac, ip = line:match("^%d+%s+(%S+)%s+(%S+)")
+            add(mac, ip)
+        end
+        leases:close()
+    end
+    local neighbours = luci.sys.exec("ip neigh show 2>/dev/null") or ""
+    for line in neighbours:gmatch("[^\n]+") do
+        local ip, mac = line:match("^(%d+%.%d+%.%d+%.%d+).-lladdr%s+(%x%x:%x%x:%x%x:%x%x:%x%x:%x%x)")
+        add(mac, ip)
+    end
+    uci:foreach("dhcp", "host", function(section)
+        local mac = type(section.mac) == "table" and section.mac[1] or section.mac
+        add(mac, section.ip)
+    end)
     local rates = device_traffic_rates(devices)
     local result = {}
     for _, device in ipairs(devices) do
