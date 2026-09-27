@@ -115,6 +115,10 @@ class NetworkPortUiTests(unittest.TestCase):
         frontend = PAGES.read_text()
         helper = IPTV_PRIORITY.read_text()
         self.assertIn("be6500_vlan_priority", controller)
+        self.assertIn("local function configure_iptv_interface_device(uci, members)", controller)
+        self.assertIn('uci:set("network", "iptv", "device", "br-iptv")', controller)
+        self.assertIn('uci:delete("network", "iptv", "ifname")', controller)
+        self.assertNotIn('uci:set("network", "iptv", "ifname"', controller)
         self.assertIn("vlan_priority", frontend)
         self.assertIn("egress-qos-map", helper)
 
@@ -203,7 +207,7 @@ class NetworkPortUiTests(unittest.TestCase):
             self.assertNotIn("_('tagged')", switch_source)
             self.assertFalse(old_menu.exists())
             self.assertFalse(retired_module.exists())
-            self.assertIn("be6500v54", header.read_text())
+            self.assertIn("be6500v55", header.read_text())
 
     def test_patcher_replaces_old_physical_cards_in_minified_release_luci(self):
         with tempfile.TemporaryDirectory() as td:
@@ -288,7 +292,7 @@ class NetworkPortUiTests(unittest.TestCase):
 
     def test_package_installs_factory_port_helpers_and_network_patcher(self):
         makefile = MAKEFILE.read_text()
-        self.assertIn("PKG_RELEASE:=46", makefile)
+        self.assertIn("PKG_RELEASE:=47", makefile)
         self.assertIn("be6500-patch-luci-network", makefile)
         self.assertIn("be6500-luci-patches", makefile)
         self.assertIn("Package/luci-app-rejected-clients/postinst", makefile)

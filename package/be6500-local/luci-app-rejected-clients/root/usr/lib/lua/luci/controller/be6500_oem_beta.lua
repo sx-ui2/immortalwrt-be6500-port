@@ -508,6 +508,32 @@ local function selected_wan_device(uci)
     return selected_wan_port(uci) == "wan" and "eth0" or "eth1.4092"
 end
 
+local function remove_iptv_bridge_device(uci)
+    if uci:get("network", "be6500_iptv_bridge", "be6500_role") == "iptv_bridge" then
+        uci:delete("network", "be6500_iptv_bridge")
+    end
+end
+
+local function configure_iptv_interface_device(uci, members)
+    uci:delete("network", "iptv", "ifname")
+    uci:delete("network", "iptv", "type")
+    if #members > 1 then
+        if not uci:get("network", "be6500_iptv_bridge") then
+            uci:section("network", "device", "be6500_iptv_bridge", {})
+        end
+        uci:set("network", "be6500_iptv_bridge", "name", "br-iptv")
+        uci:set("network", "be6500_iptv_bridge", "type", "bridge")
+        uci:set("network", "be6500_iptv_bridge", "be6500_role", "iptv_bridge")
+        uci:delete("network", "be6500_iptv_bridge", "ifname")
+        set_uci_list(uci, "network", "be6500_iptv_bridge", "ports", members)
+        uci:set("network", "iptv", "device", "br-iptv")
+        return "br-iptv"
+    end
+    remove_iptv_bridge_device(uci)
+    uci:set("network", "iptv", "device", members[1])
+    return members[1]
+end
+
 local function reserved_switch_uplink_vlan(vlan_id)
     vlan_id = tonumber(vlan_id) or 0
     return vlan_id == 1 or vlan_id == 4092 or vlan_id == 4093 or vlan_id == 4094
@@ -594,7 +620,10 @@ local function save_iptv(uci)
         uci:section("network", "interface", "iptv", {})
     end
     uci:set("network", "iptv", "proto", "dhcp")
-    uci:set("network", "iptv", "ifname", vlan_mode == "tagged" and selected_wan_vlan_device(uci, vlan_id) or selected_wan_device(uci))
+    remove_iptv_bridge_device(uci)
+    uci:set("network", "iptv", "device", vlan_mode == "tagged" and selected_wan_vlan_device(uci, vlan_id) or selected_wan_device(uci))
+    uci:delete("network", "iptv", "ifname")
+    uci:delete("network", "iptv", "type")
     uci:set("network", "iptv", "defaultroute", "0")
     uci:set("network", "iptv", "peerdns", "0")
     uci:set("network", "iptv", "auto", enabled and "1" or "0")
@@ -2722,62 +2751,9 @@ local function physical_wan_has_carrier(uci)
     return carrier == "1"
 end
 
-local function sysfs_text(path)
-    local file = io.open(path, "r")
-    if not file then return "" end
-    local value = trim(file:read("*l") or "")
-    file:close()
-    return value
-end
-
-local function usb_overview()
-    local devices, mounts = {}, {}
-    local ok, fs = pcall(require, "nixio.fs")
-    if ok and fs and fs.dir then
-        local iterator = fs.dir("/sys/bus/usb/devices")
-        if iterator then
-            for name in iterator do
-                -- Root hubs describe the controller itself.  Only list real
-                -- downstream devices so an empty socket remains visibly empty.
-                if tostring(name):match("^%d+%-%d+") and not tostring(name):find(":", 1, true) then
-                    local base = "/sys/bus/usb/devices/" .. name .. "/"
-                    local vendor = sysfs_text(base .. "manufacturer")
-                    local product = sysfs_text(base .. "product")
-                    local vid = sysfs_text(base .. "idVendor")
-                    local pid = sysfs_text(base .. "idProduct")
-                    devices[#devices + 1] = {
-                        path = name,
-                        name = product ~= "" and product or (vendor ~= "" and vendor or "USB 设备"),
-                        vendor = vendor,
-                        id = (vid ~= "" and pid ~= "") and (vid .. ":" .. pid) or "",
-                        serial = sysfs_text(base .. "serial"),
-                        speed = sysfs_text(base .. "speed")
-                    }
-                end
-            end
-        end
-    end
-    table.sort(devices, function(first, second) return tostring(first.path) < tostring(second.path) end)
-
-    local file = io.open("/proc/mounts", "r")
-    if file then
-        for line in file:lines() do
-            local device, mountpoint, fstype = line:match("^(%S+)%s+(%S+)%s+(%S+)")
-            if device and (device:match("^/dev/sd") or device:match("^/dev/mmcblk") or device:match("^/dev/nvme")) then
-                mountpoint = tostring(mountpoint):gsub("\\040", " "):gsub("\\011", "\t")
-                mounts[#mounts + 1] = { device = device, mountpoint = mountpoint, fstype = fstype or "" }
-            end
-        end
-        file:close()
-    end
-    return { status = 0, devices = devices, mounts = mounts }
-end
-
 local function extended_jdcapi(method, args, uci)
     local status = { status = 0 }
-    if method == "get_usb_info" then
-        return true, usb_overview()
-    elseif method == "get_wan_info" then
+    if method == "get_wan_info" then
         local active_wds = active_wds_iface(uci)
         local runtime_name = active_wds and "wwan" or "wan"
         local runtime = ubus_interface(runtime_name)
@@ -3049,7 +3025,7 @@ local function extended_jdcapi(method, args, uci)
             udpxy_port = listen,
             udpxy_installed = (file_exists("/usr/bin/udpxy") or file_exists("/usr/sbin/udpxy")) and 1 or 0,
             relay_url = "http://" .. (uci:get("network", "lan", "ipaddr") or "192.168.1.1") .. ":" .. tostring(listen) .. "/udp/组播地址",
-            ifname = uci:get("network", "iptv", "ifname") or "",
+            ifname = uci:get("network", "iptv", "device") or "",
             up = runtime.up and 1 or 0,
             ipaddr = first_ipv4(runtime)
             ,metric = tonumber(uci:get("network", "iptv", "metric")) or ((tonumber(uci:get("network", "wan", "metric")) or 10) + 10)
@@ -3101,6 +3077,7 @@ local function extended_jdcapi(method, args, uci)
         if not enabled then
             uci:delete("network", "iptv")
             uci:delete("network", "iptv_mcast")
+            remove_iptv_bridge_device(uci)
             if not uci:get("udpxy", "main") then uci:section("udpxy", "udpxy", "main", {}) end
             uci:set("udpxy", "main", "disabled", "1")
             uci:set("udpxy", "main", "status", "0")
@@ -3118,8 +3095,7 @@ local function extended_jdcapi(method, args, uci)
             or selected_wan_vlan_device(uci, vlan_id)
         local ifnames = { source_ifname }
         if stb_port ~= "none" then ifnames[#ifnames + 1] = stb_port == "wan" and "eth0" or "eth1.4093" end
-        uci:set("network", "iptv", "ifname", table.concat(ifnames, " "))
-        if #ifnames > 1 then uci:set("network", "iptv", "type", "bridge") else uci:delete("network", "iptv", "type") end
+        local iptv_device = configure_iptv_interface_device(uci, ifnames)
         local wan_metric = tonumber(uci:get("network", "wan", "metric")) or 10
         local iptv_metric = wan_metric + 10
         uci:set("network", "iptv", "defaultroute", "0"); uci:set("network", "iptv", "peerdns", "0")
@@ -3154,7 +3130,7 @@ local function extended_jdcapi(method, args, uci)
         if not uci:get("udpxy", "main") then uci:section("udpxy", "udpxy", "main", {}) end
         uci:set("udpxy", "main", "disabled", udpxy_enable and "0" or "1"); uci:set("udpxy", "main", "status", udpxy_enable and "1" or "0")
         uci:set("udpxy", "main", "respawn", "1"); uci:set("udpxy", "main", "port", tostring(udpxy_port)); uci:set("udpxy", "main", "bind", "br-lan")
-        uci:set("udpxy", "main", "source", #ifnames > 1 and "br-iptv" or source_ifname)
+        uci:set("udpxy", "main", "source", iptv_device)
         -- IPTV multicast must be constrained at the LAN bridge.  Locate the
         -- bridge by name instead of assuming a generated UCI section id.
         uci:foreach("network", "device", function(section)

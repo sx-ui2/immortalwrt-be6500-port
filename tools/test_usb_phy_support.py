@@ -109,17 +109,15 @@ class UsbPhySupportTests(unittest.TestCase):
         self.assertIn("kmod-usb-phy-ipq5018", final)
         self.assertIn("be6500-usb-autostart", final)
 
-    def test_oem_usb_page_exposes_detection_and_full_management_links(self):
+    def test_redundant_oem_usb_settings_page_is_absent(self):
         controller = (LUCI_PKG / "root/usr/lib/lua/luci/controller/be6500_oem_beta.lua").read_text()
         pages = (LUCI_PKG / "root/www/be6500-oem/Native_JS/pages.js").read_text()
         menu = (LUCI_PKG / "root/usr/share/luci/menu.d/luci-app-rejected-clients.json").read_text()
-        self.assertIn('method == "get_usb_info"', controller)
-        self.assertIn('/sys/bus/usb/devices', controller)
-        self.assertIn('function usbPage()', pages)
-        self.assertIn('/cgi-bin/luci/admin/system/diskman/disks', pages)
-        self.assertIn('/cgi-bin/luci/admin/nas/samba4', pages)
-        self.assertIn('/cgi-bin/luci/admin/nas/usb_printer', pages)
-        self.assertIn('"admin/router_settings/usb"', menu)
+        template = (LUCI_PKG / "root/usr/lib/lua/luci/view/be6500_oem_beta/index.htm").read_text()
+        self.assertNotIn('method == "get_usb_info"', controller)
+        self.assertNotIn('function usbPage()', pages)
+        self.assertNotIn('seniorManagement/USB.html', template)
+        self.assertNotIn('"admin/router_settings/usb"', menu)
 
 
 if __name__ == "__main__":
