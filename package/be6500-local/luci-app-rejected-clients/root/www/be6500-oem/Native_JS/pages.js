@@ -959,14 +959,14 @@
       '<li class="col-device-address"><code>' + esc(mac) + '</code><small>' + esc(device.ip || '未分配 IP') + '</small></li>' +
       '<li class="col-device-type" title="' + esc(deviceType) + '">' + esc(deviceType) + '</li>' +
       '<li class="col-device-vendor" title="' + esc(vendor) + '">' + esc(vendor) + '</li>' +
-      '<li class="col-device-status"><i class="status-dot ' + (online ? 'online' : 'offline') + '"></i>' + (online ? '在线' : '离线') + '<small>' + esc(connection) + '</small></li>' +
-      '<li class="col-device-speed"><span class="device-upload-rate">↑ ' + esc(upload) + '</span><small class="device-download-rate">↓ ' + esc(download) + '</small></li>' +
+      '<li class="col-device-status"><i class="status-dot ' + (online ? 'online' : 'offline') + '"></i>' + (online ? '在线<small>' + esc(connection) + '</small>' : '离线') + '</li>' +
+      (online ? '<li class="col-device-speed"><span class="device-upload-rate">↑ ' + esc(upload) + '</span><small class="device-download-rate">↓ ' + esc(download) + '</small></li>' : '') +
       '<li class="col-device-actions"><button type="button" class="edit device-edit">编辑</button></li></ul>';
   }
   function devicesPage() {
     page('设备列表',
       '<div class="native-device-group"><h3>在线设备</h3><div class="native-table native-device-table"><ul class="native-table-head"><li class="col-device-name">设备名称</li><li class="col-device-address">MAC/IP</li><li class="col-device-type">设备类型</li><li class="col-device-vendor">品牌 / 厂商</li><li class="col-device-status">状态</li><li class="col-device-speed">实时速度</li><li class="col-device-actions">操作</li></ul><div id="device-online"><div class="native-empty">正在读取设备…</div></div></div></div>' +
-      '<div class="native-device-group"><h3>离线设备</h3><div class="native-table native-device-table"><ul class="native-table-head"><li class="col-device-name">设备名称</li><li class="col-device-address">MAC/IP</li><li class="col-device-type">设备类型</li><li class="col-device-vendor">品牌 / 厂商</li><li class="col-device-status">状态</li><li class="col-device-speed">实时速度</li><li class="col-device-actions">操作</li></ul><div id="device-offline"><div class="native-empty">正在读取设备…</div></div></div></div>');
+      '<div class="native-device-group"><h3>离线设备</h3><div class="native-table native-device-table offline-device-table"><ul class="native-table-head"><li class="col-device-name">设备名称</li><li class="col-device-address">MAC/IP</li><li class="col-device-type">设备类型</li><li class="col-device-vendor">品牌 / 厂商</li><li class="col-device-status">状态</li><li class="col-device-actions">操作</li></ul><div id="device-offline"><div class="native-empty">正在读取设备…</div></div></div></div>');
     var editing = null;
     var deviceLoading = false;
     var rateLoading = false;
@@ -1784,7 +1784,7 @@
 
   var oemDeviceIdentityStyle = document.createElement('style');
   oemDeviceIdentityStyle.textContent = '\
-    .native-device-table{overflow-x:auto}.native-device-table ul{min-width:1120px}.native-device-table .col-device-name{width:18%!important}.native-device-table .col-device-address{width:18%!important}.native-device-table .col-device-type{width:14%!important}.native-device-table .col-device-vendor{width:17%!important}.native-device-table .col-device-status{width:13%!important}.native-device-table .col-device-speed{width:12%!important}.native-device-table .col-device-actions{width:8%!important;padding-right:0}.native-device-table .col-device-type,.native-device-table .col-device-vendor{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.native-device-table .native-table-row .name{width:18%!important}.native-device-table .native-table-row li:nth-child(4){width:17%!important}';
+    .native-device-table{overflow-x:auto}.native-device-table ul{min-width:1120px}.native-device-table .col-device-name{width:18%!important}.native-device-table .col-device-address{width:18%!important}.native-device-table .col-device-type{width:14%!important}.native-device-table .col-device-vendor{width:17%!important}.native-device-table .col-device-status{width:13%!important}.native-device-table .col-device-speed{width:12%!important}.native-device-table .col-device-actions{width:8%!important;padding-right:0}.native-device-table .col-device-type,.native-device-table .col-device-vendor{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.native-device-table .native-table-row .name{width:18%!important}.native-device-table .native-table-row li:nth-child(4){width:17%!important}.native-device-table.offline-device-table ul{min-width:960px}.native-device-table.offline-device-table .col-device-status{width:20%!important}.native-device-table.offline-device-table .col-device-actions{width:13%!important}';
   document.head.appendChild(oemDeviceIdentityStyle);
 
   var oemAccessStyle = document.createElement('style');

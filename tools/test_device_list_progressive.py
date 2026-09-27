@@ -42,6 +42,21 @@ class DeviceListProgressiveTests(unittest.TestCase):
         self.assertIn("rpc('web_get_device_rates', {})", source)
         self.assertIn("return load('web_get_device_list', false)", source)
 
+    def test_offline_rows_show_only_offline_without_rates(self):
+        source = PAGES.read_text()
+        row_start = source.index("function deviceRow(device, index)")
+        row_end = source.index("function devicesPage()", row_start)
+        row = source[row_start:row_end]
+        self.assertIn("online ? '在线<small>'", row)
+        self.assertIn(": '离线'", row)
+        self.assertIn("online ? '<li class=\"col-device-speed\">", row)
+        page_start = row_end
+        page_end = source.index("function accessPage()", page_start)
+        page = source[page_start:page_end]
+        offline_header = page[page.index("<h3>离线设备</h3>"):page.index("var editing", page.index("<h3>离线设备</h3>"))]
+        self.assertIn("offline-device-table", offline_header)
+        self.assertNotIn("实时速度", offline_header)
+
     def test_access_renders_acl_before_device_enrichment(self):
         controller = CONTROLLER.read_text()
         page = PAGES.read_text()

@@ -9,13 +9,14 @@ ImmortalWrt 所需的 U-BootKit、RAM 安装镜像、最终持久 sysupgrade 镜
 - 首次名单渲染时设备和拒绝记录尚未返回，现在统一按空数组处理，不会中断后续请求。
 - 已保存的黑白名单会先显示；快速设备接口随后立即填充“选择设备添加”下拉框。
 - 完整设备识别仅在后台更新名称、类型、厂商、SSID 和频段，不会覆盖名单草稿。
+- 离线设备表移除实时速率列，状态只显示“离线”，不再显示历史连接类型、SSID 或频段。
 - 保持 v55 的名单保存及 hostapd 增量应用方式，不执行 `wifi reload`、`network reload`
   或网络重启。
 - 保留名单添加顺序、名称同步、手动修改、实时速率、USB、端口、IPTV 和 U-BootKit
   安装修复。
 
-构建结果通过 **164 项 Python 测试**、Lua 测试、JavaScript 语法检查及完整固件构建。
-拆包确认最终 rootfs 内为 `luci-app-rejected-clients - 59`，页面文件哈希与源码一致。
+构建结果通过 **165 项 Python 测试**、Lua 测试、JavaScript 语法检查及完整固件构建。
+拆包确认最终 rootfs 内为 `luci-app-rejected-clients - 60`，页面文件哈希与源码一致。
 
 ## 文件说明
 
@@ -25,7 +26,7 @@ ImmortalWrt 所需的 U-BootKit、RAM 安装镜像、最终持久 sysupgrade 镜
 - `prepare_be6500_stock_layout.sh`：备份 GPT 并建立持久 overlay。
 - `immortalwrt-qualcommax-ipq53xx-jdcloud_be6500_usb_native-squashfs-sysupgrade.bin`：
   最终持久系统。
-- `luci-app-rejected-clients_59_all.ipk`：仅更新管理页面和后端时使用。
+- `luci-app-rejected-clients_60_all.ipk`：仅更新管理页面和后端时使用。
 - `SHA256SUMS`：可刷写文件、脚本和安装包的 SHA256。
 
 ## 现有本项目 ImmortalWrt 升级
@@ -37,10 +38,10 @@ ImmortalWrt 所需的 U-BootKit、RAM 安装镜像、最终持久 sysupgrade 镜
 建议取消“保留设置并继续使用当前配置”，不要勾选“强制更新”。主路由需要保留配置时，
 请先下载配置备份。
 
-只更新访问控制页面时，可通过 SSH 安装 r59：
+只更新访问控制和设备列表页面时，可通过 SSH 安装 r60：
 
 ```sh
-opkg install /tmp/luci-app-rejected-clients_59_all.ipk
+opkg install /tmp/luci-app-rejected-clients_60_all.ipk
 /etc/init.d/rpcd restart
 /etc/init.d/uhttpd restart
 ```
