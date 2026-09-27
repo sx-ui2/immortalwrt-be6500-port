@@ -104,6 +104,7 @@ class UsbPhySupportTests(unittest.TestCase):
         self.assertIn("kmod-usb-phy-ipq5018", diagnostic)
         self.assertIn("ipq5332-jdcloud-be6500-usb-native-initramfs", diagnostic)
         self.assertIn("ipq5332-jdcloud-be6500-usb-native", final)
+        self.assertIn("BOARD_NAME := jdcloud_be6500", final)
         self.assertIn("SUPPORTED_DEVICES := jdcloud,be6500", final)
         self.assertIn("kmod-usb-phy-ipq5018", final)
         self.assertIn("be6500-usb-autostart", final)

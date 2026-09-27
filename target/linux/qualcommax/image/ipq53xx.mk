@@ -70,8 +70,12 @@ TARGET_DEVICES += jdcloud_be6500_usb_native_initramfs
 # marker first. If probing interrupts the boot, the next boot skips USB.
 define Device/jdcloud_be6500_usb_native
 	$(call Device/jdcloud_be6500)
-	DEVICE_VARIANT := 6.6 v51 guarded native USB
+	DEVICE_VARIANT := 6.6 v52 guarded native USB
 	DEVICE_DTS := ipq5332-jdcloud-be6500-usb-native
+	# Keep the sysupgrade archive path and CONTROL board identical to the
+	# running jdcloud_be6500 profile. platform_check_image checks this before
+	# it considers supported_devices metadata.
+	BOARD_NAME := jdcloud_be6500
 	SUPPORTED_DEVICES := jdcloud,be6500
 	DEVICE_PACKAGES += kmod-usb-phy-ipq5018 be6500-usb-autostart
 endef
