@@ -47,6 +47,13 @@ class NetworkPortUiTests(unittest.TestCase):
         source = CONTROLLER.read_text()
         self.assertIn('local iptv_ports = { lan1 = "3", lan2 = "2", lan3 = "1" }', source)
         self.assertIn('method == "get_port_settings"', source)
+        self.assertIn('method == "set_wan_port"', source)
+        self.assertIn('be6500_physical_port', source)
+        self.assertIn('or "eth1.4092"', source)
+        self.assertIn('port == "wan" and { "eth1" } or { "eth1.1", "eth0" }', source)
+        self.assertIn('iptv_ports[wan_port] and "0t" or "0"', source)
+        self.assertIn('reserved_switch_uplink_vlan', source)
+        self.assertIn('ports = external .. " 0t", be6500_role = "wan"', source)
         self.assertIn('method == "get_game_info"', source)
         self.assertIn('method == "set_game_info"', source)
         self.assertNotIn('method == "set_port_settings"', source)
@@ -64,15 +71,25 @@ class NetworkPortUiTests(unittest.TestCase):
         self.assertNotIn("wifi", source)
         self.assertNotIn("network reload", source)
 
-    def test_frontend_exposes_factory_port_status_iptv_and_game_controls(self):
+    def test_frontend_selects_port_roles_inline_without_duplicate_panels(self):
         source = PAGES.read_text()
         self.assertIn("function portsPage()", source)
         self.assertIn("网口信息", source)
-        self.assertIn("自定义 IPTV 口", source)
-        self.assertIn("自定义游戏网口", source)
-        self.assertIn("游戏口传输的数据会被优先转发，延迟更低，适用于游戏和语音场景", source)
+        self.assertIn("native-port-role-select", source)
+        self.assertIn("['wan', roleLabels.wan]", source)
+        self.assertIn("['lan', roleLabels.lan]", source)
+        self.assertIn("['game', roleLabels.game]", source)
+        self.assertIn("['iptv_stb', roleLabels.iptv_stb]", source)
+        self.assertIn("['iptv_source', roleLabels.iptv_source]", source)
+        self.assertIn("applyPortRole(port, role)", source)
         self.assertIn("rpc('set_iptv_info'", source)
         self.assertIn("rpc('set_game_info'", source)
+        self.assertIn("rpc('set_wan_port'", source)
+        self.assertNotIn("自定义 IPTV 口", source)
+        self.assertNotIn("自定义游戏网口", source)
+        self.assertNotIn("port-iptv-save", source)
+        self.assertNotIn("port-game-save", source)
+        self.assertNotIn("native-port-services", source)
         self.assertNotIn("rpc('set_port_settings'", source)
         self.assertNotIn("eth1.<VLAN ID>", source)
 
@@ -133,6 +150,8 @@ class NetworkPortUiTests(unittest.TestCase):
             )
             switch_view.write_text(
                 "m = new form.Map('network', 'LAN 端口与 VLAN', /* be6500PhysicalPortTitle */ _('description'));\n"
+                "o = s.option(form.Value, feat.vid_option || 'vlan', 'VLAN ID');\n"
+                "o.value('u', _('untagged')); o.value('t', _('tagged'));\n"
             )
             old_menu.write_text("{}\n")
             retired_module.write_text("retired\n")
@@ -160,6 +179,11 @@ class NetworkPortUiTests(unittest.TestCase):
             self.assertNotIn("be6500SwitchPorts", interface_source)
             self.assertIn("m.section(form.GridSection, 'device', _('Devices'));", interface_source)
             self.assertIn("new form.Map('network', _('Switch'), _('description'))", switch_source)
+            self.assertIn("feat.vid_option || 'vlan', _('VLAN 编号')", switch_source)
+            self.assertIn("o.value('u', _('未标记'))", switch_source)
+            self.assertIn("o.value('t', _('已标记'))", switch_source)
+            self.assertNotIn("_('untagged')", switch_source)
+            self.assertNotIn("_('tagged')", switch_source)
             self.assertFalse(old_menu.exists())
             self.assertFalse(retired_module.exists())
             self.assertIn("be6500v28", header.read_text())
@@ -168,6 +192,7 @@ class NetworkPortUiTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             temp = pathlib.Path(td)
             interfaces = temp / "interfaces.js"
+            switch_view = temp / "switch.js"
             interfaces.write_text(
                 "'use strict';'require network';'require be6500.ports as be6500ports';var isReadonlyView=null;"
                 "return view.extend({load:function(){return Promise.all(["
@@ -175,10 +200,14 @@ class NetworkPortUiTests(unittest.TestCase):
                 "render:function(data){var be6500SwitchPorts=data[4]||[],dslModemType=data[0],netDevs=data[1],m,s,o;"
                 "s=m.section(form.GridSection,'device',_('Devices'),be6500ports.render(be6500SwitchPorts));/* be6500PhysicalPortCards */return m.render();}});"
             )
+            switch_view.write_text(
+                "o=s.option(form.Value,feat.vid_option||'vlan','VLAN ID');"
+                "o.value('u',_('untagged'));o.value('t',_('tagged'));"
+            )
             env = os.environ.copy()
             env.update({
                 "BE6500_LUCI_INTERFACES_VIEW": str(interfaces),
-                "BE6500_LUCI_SWITCH_VIEW": str(temp / "missing-switch.js"),
+                "BE6500_LUCI_SWITCH_VIEW": str(switch_view),
                 "BE6500_LUCI_OLD_PORT_MENU": str(temp / "old-menu.json"),
                 "BE6500_LUCI_RETIRED_PORT_MODULE": str(temp / "physicalports_v45.js"),
                 "BE6500_LUCI_HEADERS": str(temp / "missing-header.ut"),
@@ -194,6 +223,10 @@ class NetworkPortUiTests(unittest.TestCase):
             self.assertNotIn("be6500PhysicalPortCards", source)
             self.assertNotIn("be6500SwitchPorts", source)
             self.assertIn("m.section(form.GridSection,'device',_('Devices'));", source)
+            switch_source = switch_view.read_text()
+            self.assertIn("feat.vid_option||'vlan',_('VLAN 编号')", switch_source)
+            self.assertIn("o.value('u',_('未标记'))", switch_source)
+            self.assertIn("o.value('t',_('已标记'))", switch_source)
 
     def test_storage_uses_emmc_mounts_and_detects_ram_root(self):
         source = STORAGE.read_text()
@@ -203,6 +236,8 @@ class NetworkPortUiTests(unittest.TestCase):
         self.assertIn("物理 eMMC 容量", source)
         self.assertIn("mounts[i].mount == '/overlay'", source)
         self.assertIn("根目录（RAM，持久化存储未挂载）", source)
+        self.assertIn("/^\\/dev\\/mmcblk/.test(entry.device)", source)
+        self.assertIn("/^\\/dev\\/(sd|nvme)/.test(entry.device)", source)
 
     def test_preserved_ifname_is_migrated_without_network_restart(self):
         source = IFNAME_MIGRATOR.read_text()
@@ -226,6 +261,9 @@ class NetworkPortUiTests(unittest.TestCase):
 
     def test_luci_patch_service_rechecks_assets_without_network_reload(self):
         source = LUCI_PATCH_SERVICE.read_text()
+        self.assertIn("be6500-migrate-network-ifname", source)
+        self.assertLess(source.index("be6500-migrate-network-ifname"),
+                        source.index("be6500-patch-luci-network"))
         self.assertIn("be6500-patch-luci-network", source)
         self.assertIn("be6500-luci-overrides/status/include", source)
         self.assertNotIn("wifi reload", source)
@@ -233,7 +271,7 @@ class NetworkPortUiTests(unittest.TestCase):
 
     def test_package_installs_factory_port_helpers_and_network_patcher(self):
         makefile = MAKEFILE.read_text()
-        self.assertIn("PKG_RELEASE:=44", makefile)
+        self.assertIn("PKG_RELEASE:=45", makefile)
         self.assertIn("be6500-patch-luci-network", makefile)
         self.assertIn("be6500-luci-patches", makefile)
         self.assertIn("Package/luci-app-rejected-clients/postinst", makefile)

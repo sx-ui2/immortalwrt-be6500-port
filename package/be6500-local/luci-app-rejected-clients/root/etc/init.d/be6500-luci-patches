@@ -3,6 +3,14 @@
 START=19
 
 start() {
+	# Preserved overlays can hide an already-consumed /etc/uci-defaults file.
+	# Re-run the idempotent legacy bridge/ifname migration before netifd starts
+	# so LuCI never needs to show its disruptive migration dialog.
+	if [ -x /usr/libexec/be6500-migrate-network-ifname ]; then
+		/usr/libexec/be6500-migrate-network-ifname >/dev/null 2>&1 ||
+			logger -t be6500-luci-patches "network bridge migration failed"
+	fi
+
 	# These patchers only update LuCI assets and caches. They deliberately do
 	# not reload networking or Wi-Fi, so running this check at boot is safe.
 	if [ -d /usr/share/be6500-luci-overrides/status/include ]; then

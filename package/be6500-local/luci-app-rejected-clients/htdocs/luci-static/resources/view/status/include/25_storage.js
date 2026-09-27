@@ -107,10 +107,12 @@ return baseclass.extend({
 		rows.push(row(_('Temp space'),
 			progressbar((+tmp.used || 0) * 1024, (+tmp.total || 0) * 1024)));
 
-		/* Show actually mounted external filesystems separately. */
+		/* Show actually mounted external filesystems separately. Internal eMMC
+		 * partitions are implementation details already summarized above. */
 		mounts.forEach(function(entry) {
 			if ([ '/', '/rom', '/overlay', '/tmp', '/dev' ].indexOf(entry.mount) >= 0 ||
-			    !entry.device || !/^\/dev\/(sd|nvme|mmcblk)/.test(entry.device) ||
+			    !entry.device || /^\/dev\/mmcblk/.test(entry.device) ||
+			    !/^\/dev\/(sd|nvme)/.test(entry.device) ||
 			    +entry.size <= 0)
 				return;
 

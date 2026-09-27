@@ -15,9 +15,16 @@ cache_root="${BE6500_LUCI_CACHE_ROOT:-/tmp}"
 # The temporary v38 menu duplicated the regular Switch editor.
 rm -f "$old_menu"
 rm -f "$retired_module"
-if [ -f "$switch_view" ] && grep -q 'be6500PhysicalPortTitle' "$switch_view"; then
+if [ -f "$switch_view" ]; then
 	tmp="${switch_view}.be6500.$$"
 	sed "s@'LAN 端口与 VLAN', /\\* be6500PhysicalPortTitle \\*/@_('Switch'),@" "$switch_view" >"$tmp" && mv "$tmp" "$switch_view"
+	tmp="${switch_view}.be6500.$$"
+	sed \
+		-e "s@feat.vid_option || 'vlan', 'VLAN ID'@feat.vid_option || 'vlan', _('VLAN 编号')@g" \
+		-e "s@feat.vid_option||'vlan','VLAN ID'@feat.vid_option||'vlan',_('VLAN 编号')@g" \
+		-e "s@_('untagged')@_('未标记')@g" \
+		-e "s@_('tagged')@_('已标记')@g" \
+		"$switch_view" >"$tmp" && mv "$tmp" "$switch_view"
 fi
 
 if [ -f "$interfaces" ]; then

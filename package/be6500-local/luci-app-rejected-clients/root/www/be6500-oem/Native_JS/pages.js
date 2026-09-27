@@ -521,10 +521,21 @@
       wan: '互联网（WAN）', lan: '局域网（LAN）', game: '游戏口',
       iptv_source: 'IPTV 上联口', iptv_stb: 'IPTV 专用口'
     };
+    var roleOptions = [
+      ['wan', roleLabels.wan], ['lan', roleLabels.lan], ['game', roleLabels.game],
+      ['iptv_stb', roleLabels.iptv_stb], ['iptv_source', roleLabels.iptv_source]
+    ];
     function linkText(port) {
       if (!Number(port.link)) return '未连接';
       var speed = Number(port.speed) || 0;
       return (speed >= 1000 ? (speed / 1000) + ' Gbps' : speed + ' Mbps') + (Number(port.duplex) ? ' · 全双工' : '');
+    }
+    function roleControl(port, role) {
+      var options = port.id === 'wan' ? roleOptions.slice(0, 2) : roleOptions;
+      return '<select class="cbi-input-select native-port-role-select" data-port="' + esc(port.id) + '" aria-label="' + esc((port.name || port.id.toUpperCase()) + ' 端口功能') + '">' +
+        options.map(function (option) {
+          return '<option value="' + option[0] + '"' + (option[0] === role ? ' selected' : '') + '>' + esc(option[1]) + '</option>';
+        }).join('') + '</select>';
     }
     function renderPorts(result) {
       var ports = asArray(result.ports);
@@ -535,23 +546,98 @@
         return '<div class="native-port-row" data-port="' + esc(port.id) + '">' +
           '<div class="native-port-name"><strong>' + esc(port.name || String(port.id).toUpperCase()) + '</strong><small>物理端口 ' + esc(port.switch_port || '') + '</small></div>' +
           '<div class="native-port-link"><i class="' + (Number(port.link) ? 'up' : '') + '"></i><span>' + esc(linkText(port)) + '</span>' + warning + '</div>' +
-          '<div class="native-port-role"><span class="native-value">' + esc(roleLabels[role] || roleLabels.lan) + '</span></div></div>';
+          '<div class="native-port-role">' + roleControl(port, role) + '</div></div>';
       }).join('');
       state.physicalPorts = ports;
+      document.querySelectorAll('.native-port-role-select').forEach(function (control) {
+        control.addEventListener('change', function () {
+          var port = control.getAttribute('data-port');
+          var role = control.value;
+          var modal;
+          control.disabled = true;
+          modal = applyingModal('正在应用 ' + port.toUpperCase() + ' 端口功能…');
+          applyPortRole(port, role).then(load).then(function () {
+            modal.then(function (ui) { if (ui) ui.hideModal(); });
+          }).catch(function (error) {
+            modal.then(function (ui) { if (ui) ui.hideModal(); });
+            notify(error.message || '端口功能应用失败', false);
+            load();
+          });
+        });
+      });
     }
-    function sync() {
-      show('#port-iptv-fields', checked('port-iptv-enabled'));
-      show('#port-game-fields', checked('port-game-enabled'));
+    function iptvRequest(overrides) {
+      var current = state.portIptv || {};
+      var values = {
+        enable: Number(current.enable) || 0,
+        access_mode: current.access_mode || 'vlan',
+        vlan_id: Number(current.vlan_id) || 4000,
+        vlan_priority: Number(current.vlan_priority) || 0,
+        source_port: current.source_port || 'lan1',
+        stb_port: current.stb_port || 'none',
+        udpxy_enable: Number(current.udpxy_enable) || 0,
+        udpxy_port: Number(current.udpxy_port) || 4022,
+        auth_enable: Number(current.auth_enable) || 0,
+        auth_mac: current.auth_mac || '', option12: current.option12 || '', option60: current.option60 || '',
+        capture_port: current.capture_port || current.source_port || 'lan1'
+      };
+      Object.keys(overrides || {}).forEach(function (key) { values[key] = overrides[key]; });
+      return rpc('set_iptv_info', values);
+    }
+    function applyPortRole(port, role) {
+      var iptv = state.portIptv || {};
+      var game = state.portGame || {};
+      var iptvEnabled = Number(iptv.enable) === 1;
+      var gameOnPort = Number(game.enable) === 1 && String(game.port || '') === port;
+      var sourceOnPort = iptvEnabled && iptv.access_mode === 'lan' && iptv.source_port === port;
+      var stbOnPort = iptvEnabled && iptv.stb_port === port;
+      var currentPort = (state.physicalPorts || []).filter(function (item) { return item.id === port; })[0] || {};
+      var currentRole = String(currentPort.role || (port === 'wan' ? 'wan' : 'lan'));
+      var sequence = Promise.resolve();
+      function next(factory) { sequence = sequence.then(factory); }
+
+      if (currentRole === 'wan' && role !== 'wan')
+        return Promise.reject(new Error('请先把另一个端口设为互联网（WAN），原 WAN 口会自动改为局域网'));
+
+      if (role !== 'game' && gameOnPort)
+        next(function () { return rpc('set_game_info', { enable: 0, port: port }); });
+
+      if (role === 'wan') {
+        if (sourceOnPort) next(function () { return iptvRequest({ enable: 0, stb_port: 'none' }); });
+        else if (stbOnPort) next(function () { return iptvRequest({ stb_port: 'none' }); });
+        next(function () { return rpc('set_wan_port', { port: port }); });
+      }
+      else if (role === 'lan') {
+        if (sourceOnPort) next(function () { return iptvRequest({ enable: 0, stb_port: 'none' }); });
+        else if (stbOnPort) next(function () { return iptvRequest({ stb_port: 'none' }); });
+      }
+      else if (role === 'game') {
+        if (sourceOnPort) next(function () { return iptvRequest({ enable: 0, stb_port: 'none' }); });
+        else if (stbOnPort) next(function () { return iptvRequest({ stb_port: 'none' }); });
+        next(function () { return rpc('set_game_info', { enable: 1, port: port }); });
+      }
+      else if (role === 'iptv_stb') {
+        next(function () {
+          return iptvRequest({
+            enable: 1,
+            access_mode: iptv.access_mode === 'lan' && iptv.source_port === port ? 'vlan' : (iptv.access_mode || 'vlan'),
+            stb_port: port,
+            auth_enable: 0
+          });
+        });
+      }
+      else if (role === 'iptv_source') {
+        next(function () {
+          return iptvRequest({ enable: 1, access_mode: 'lan', source_port: port, stb_port: iptv.stb_port === port ? 'none' : (iptv.stb_port || 'none') });
+        });
+      }
+      return sequence;
     }
     function render(items) {
       var portInfo = items[0] || {}, iptv = items[1] || {}, game = items[2] || {};
       state.portIptv = iptv;
+      state.portGame = game;
       renderPorts(portInfo);
-      check('port-iptv-enabled', iptv.enable); set('port-iptv-vlan-id', iptv.vlan_id || 4000);
-      set('port-iptv-priority', iptv.vlan_priority == null ? 0 : iptv.vlan_priority);
-      set('port-iptv-lan', iptv.stb_port && iptv.stb_port !== 'none' ? iptv.stb_port : 'lan3');
-      check('port-game-enabled', game.enable); set('port-game-lan', game.port || 'lan2');
-      sync();
     }
     function load() {
       return Promise.all([rpc('get_port_settings', {}), rpc('get_iptv_info', {}), rpc('get_game_info', {})])
@@ -559,42 +645,9 @@
     }
     page('端口设置',
       section('网口信息',
-        '<p class="native-info">显示 WAN 与 LAN1–LAN3 的真实连接状态和协商速率。LAN 口属于 QCA8386 交换机，不会伪装成独立 Linux 网卡。</p>' +
+        '<p class="native-info">显示 WAN 与 LAN1–LAN3 的真实连接状态和协商速率。请直接在“端口功能”中选择用途；LAN 口属于 QCA8386 交换机，不会伪装成独立 Linux 网卡。</p>' +
         '<div class="native-port-head"><span>端口</span><span>连接状态</span><span>端口功能</span></div>' +
-        '<div id="physical-port-list"><div class="native-empty">正在读取端口状态…</div></div>') +
-      '<div class="native-settings-grid native-port-services">' +
-      '<section class="native-settings-panel"><h2>IPTV</h2>' +
-      row('开启 IPTV', toggle('port-iptv-enabled', '')) +
-      '<div id="port-iptv-fields">' +
-      row('VLAN ID', input('port-iptv-vlan-id', 'number', '4000', 'min="1" max="4094"')) +
-      row('VLAN 优先级', select('port-iptv-priority', [[0, '0'], [1, '1'], [2, '2'], [3, '3'], [4, '4'], [5, '5'], [6, '6'], [7, '7']])) +
-      row('自定义 IPTV 口', select('port-iptv-lan', [['lan1', 'LAN1'], ['lan2', 'LAN2'], ['lan3', 'LAN3']])) +
-      '</div><p class="native-info">打开 IPTV 后可以使用数字电视服务；选中的 IPTV 口不再提供普通上网。VLAN 参数由运营商提供。</p>' +
-      buttons(['port-iptv-save', '保存 IPTV 设置']) +
-      '<p class="native-info"><a href="/cgi-bin/luci/admin/router_settings/iptv">打开高级 IPTV、组播转播与机顶盒鉴权设置</a></p></section>' +
-      '<section class="native-settings-panel"><h2>游戏网口</h2>' +
-      row('开启游戏网口', toggle('port-game-enabled', '')) +
-      '<div id="port-game-fields">' + row('自定义游戏网口', select('port-game-lan', [['lan1', 'LAN1'], ['lan2', 'LAN2'], ['lan3', 'LAN3']])) + '</div>' +
-      '<p class="native-info">游戏口传输的数据会被优先转发，延迟更低，适用于游戏和语音场景。</p>' +
-      buttons(['port-game-save', '保存游戏口设置']) + '</section></div>' +
-      '<p class="native-warning">IPTV 端口切换会让对应有线接口短暂重载；游戏口优先级即时生效。两者都不会重启 Wi-Fi。</p>');
-    ['port-iptv-enabled', 'port-game-enabled'].forEach(function (name) { id(name).addEventListener('change', sync); });
-    bindClick('#port-iptv-save', function () {
-      var current = state.portIptv || {};
-      var enabled = checked('port-iptv-enabled');
-      if (enabled && (number('port-iptv-vlan-id') < 1 || number('port-iptv-vlan-id') > 4094)) return notify('IPTV VLAN ID 必须为 1–4094', false);
-      busy(this, rpc('set_iptv_info', {
-        enable: enabled ? 1 : 0, access_mode: current.access_mode || 'vlan', vlan_id: number('port-iptv-vlan-id', 4000),
-        vlan_priority: number('port-iptv-priority', 0), source_port: current.source_port || 'lan1',
-        stb_port: enabled ? value('port-iptv-lan') : 'none', udpxy_enable: Number(current.udpxy_enable) || 0,
-        udpxy_port: Number(current.udpxy_port) || 4022, auth_enable: Number(current.auth_enable) || 0,
-        auth_mac: current.auth_mac || '', option12: current.option12 || '', option60: current.option60 || '',
-        capture_port: current.capture_port || current.source_port || 'lan1'
-      }), 'IPTV 设置已保存').then(load);
-    });
-    bindClick('#port-game-save', function () {
-      busy(this, rpc('set_game_info', { enable: checked('port-game-enabled') ? 1 : 0, port: value('port-game-lan') }), '游戏口设置已应用').then(load);
-    });
+        '<div id="physical-port-list"><div class="native-empty">正在读取端口状态…</div></div>'));
     load();
   }
 

@@ -488,6 +488,31 @@ local function ensure_wifi_profile(uci, role)
     end
 end
 
+local function selected_wan_port(uci)
+    local port = uci:get("network", "wan", "be6500_physical_port") or "wan"
+    if port ~= "wan" and port ~= "lan1" and port ~= "lan2" and port ~= "lan3" then return "wan" end
+    return port
+end
+
+local function selected_wan_vlan_device(uci, vlan_id)
+    local base = selected_wan_port(uci) == "wan" and "eth0" or "eth1"
+    return base .. "." .. tostring(vlan_id)
+end
+
+local function selected_wan_device(uci)
+    local vlan_mode = uci:get("network", "wan", "be6500_vlan_mode") or "untagged"
+    local vlan_id = tonumber((uci:get("network", "wan", "be6500_vlan_id"))) or 0
+    if vlan_mode == "tagged" and vlan_id >= 1 and vlan_id <= 4094 then
+        return selected_wan_vlan_device(uci, vlan_id)
+    end
+    return selected_wan_port(uci) == "wan" and "eth0" or "eth1.4092"
+end
+
+local function reserved_switch_uplink_vlan(vlan_id)
+    vlan_id = tonumber(vlan_id) or 0
+    return vlan_id == 1 or vlan_id == 4092 or vlan_id == 4093 or vlan_id == 4094
+end
+
 local function save_wan(uci)
     local mode = clean(luci.http.formvalue("wan_proto"), 16)
     if mode ~= "dhcp" and mode ~= "pppoe" and mode ~= "static" then
@@ -502,6 +527,9 @@ local function save_wan(uci)
     if vlan_mode == "tagged" and not valid_vlan(vlan_id) then
         return nil, "WAN VLAN ID 必须为 1–4094"
     end
+    if selected_wan_port(uci) ~= "wan" and vlan_mode == "tagged" and reserved_switch_uplink_vlan(vlan_id) then
+        return nil, "LAN 口作为 WAN 时，VLAN 1、4092–4094 由交换机内部保留"
+    end
     if vlan_mode == "tagged"
         and uci:get("network", "iptv", "be6500_enabled") == "1"
         and uci:get("network", "iptv", "be6500_vlan_mode") == "tagged"
@@ -514,7 +542,7 @@ local function save_wan(uci)
     else
         uci:delete("network", "wan", "be6500_vlan_id")
     end
-    uci:set("network", "wan", "device", vlan_mode == "tagged" and ("eth0." .. vlan_id) or "eth0")
+    uci:set("network", "wan", "device", selected_wan_device(uci))
     uci:delete("network", "wan", "ifname")
     if mode == "pppoe" then
         local username = clean(luci.http.formvalue("pppoe_user"), 128)
@@ -553,6 +581,9 @@ local function save_iptv(uci)
     if enabled and vlan_mode == "tagged" and not valid_vlan(vlan_id) then
         return nil, "IPTV VLAN ID 必须为 1–4094"
     end
+    if enabled and selected_wan_port(uci) ~= "wan" and vlan_mode == "tagged" and reserved_switch_uplink_vlan(vlan_id) then
+        return nil, "LAN 口作为 WAN 时，IPTV VLAN 不能使用交换机保留的 1、4092–4094"
+    end
     if enabled and vlan_mode == "tagged"
         and uci:get("network", "wan", "be6500_vlan_mode") == "tagged"
         and uci:get("network", "wan", "be6500_vlan_id") == vlan_id then
@@ -563,7 +594,7 @@ local function save_iptv(uci)
         uci:section("network", "interface", "iptv", {})
     end
     uci:set("network", "iptv", "proto", "dhcp")
-    uci:set("network", "iptv", "ifname", vlan_mode == "tagged" and ("eth0." .. vlan_id) or "eth0")
+    uci:set("network", "iptv", "ifname", vlan_mode == "tagged" and selected_wan_vlan_device(uci, vlan_id) or selected_wan_device(uci))
     uci:set("network", "iptv", "defaultroute", "0")
     uci:set("network", "iptv", "peerdns", "0")
     uci:set("network", "iptv", "auto", enabled and "1" or "0")
@@ -2418,6 +2449,7 @@ local function switch_port_states()
 end
 
 local function configured_port_role(uci, name)
+    if selected_wan_port(uci) == name then return "wan" end
     local enabled = uci:get("network", "iptv", "be6500_enabled") == "1"
     if enabled and uci:get("network", "iptv", "be6500_access_mode") == "lan"
         and uci:get("network", "iptv", "be6500_source_port") == name then
@@ -2435,9 +2467,10 @@ end
 
 local function port_settings_payload(uci)
     local switch_states = switch_port_states()
+    local wan_port = selected_wan_port(uci)
     local ports = {
         {
-            id = "wan", name = "WAN", switch_port = "独立", role = "wan",
+            id = "wan", name = "WAN", switch_port = "独立", role = wan_port == "wan" and "wan" or "lan",
             link = read_sysfs_value("/sys/class/net/eth0/carrier") == "1" and 1 or 0,
             speed = tonumber(read_sysfs_value("/sys/class/net/eth0/speed")) or 0,
             duplex = read_sysfs_value("/sys/class/net/eth0/duplex"):lower() == "full" and 1 or 0
@@ -2457,24 +2490,28 @@ local function port_settings_payload(uci)
     return { status = 0, ports = ports }
 end
 
-local function configure_iptv_switch(uci, source_port, stb_port)
+local function configure_iptv_switch(uci, source_port, stb_port, uplink_vlan_id)
     local stale, lan_vlan = {}, nil
     uci:foreach("network", "switch_vlan", function(section)
         if section.device == "switch1" and section.vlan == "1" then lan_vlan = section[".name"] end
-        if section.be6500_role == "iptv_source" or section.be6500_role == "iptv_stb" then
+        if section.be6500_role == "iptv_source" or section.be6500_role == "iptv_stb"
+            or section.be6500_role == "iptv_uplink" then
             stale[#stale + 1] = section[".name"]
         end
     end)
     for _, section in ipairs(stale) do uci:delete("network", section) end
     local excluded = {}
+    local wan_port = selected_wan_port(uci)
+    if iptv_ports[wan_port] then excluded[iptv_ports[wan_port]] = true end
     if iptv_ports[source_port] then excluded[iptv_ports[source_port]] = true end
     if iptv_ports[stb_port] then excluded[iptv_ports[stb_port]] = true end
     if lan_vlan then
         local ports = {}
         for _, port in ipairs({ "1", "2", "3" }) do if not excluded[port] then ports[#ports + 1] = port end end
-        -- The working LAN datapath bridges raw eth1, so VLAN 1 uses an
-        -- untagged CPU member. IPTV-only VLANs below remain tagged on CPU 0.
-        ports[#ports + 1] = "0"
+        -- Raw eth1 remains the LAN parent with the dedicated WAN socket.  If
+        -- a switch socket becomes WAN, tag LAN VLAN 1 on the CPU and bridge
+        -- eth1.1 instead, keeping its WAN/ IPTV VLANs out of br-lan.
+        ports[#ports + 1] = iptv_ports[wan_port] and "0t" or "0"
         uci:set("network", lan_vlan, "ports", table.concat(ports, " "))
     end
     if iptv_ports[source_port] then
@@ -2487,6 +2524,49 @@ local function configure_iptv_switch(uci, source_port, stb_port)
             device = "switch1", vlan = "4093", ports = iptv_ports[stb_port] .. " 0t", be6500_role = "iptv_stb"
         })
     end
+    if iptv_ports[wan_port] and tonumber(uplink_vlan_id) then
+        local vlan = tostring(tonumber(uplink_vlan_id))
+        uci:section("network", "switch_vlan", nil, {
+            device = "switch1", vlan = vlan, vid = vlan,
+            ports = iptv_ports[wan_port] .. "t 0t", be6500_role = "iptv_uplink"
+        })
+    end
+end
+
+local function configure_wan_switch(uci, port)
+    local stale = {}
+    uci:foreach("network", "switch_vlan", function(section)
+        if section.be6500_role == "wan" then stale[#stale + 1] = section[".name"] end
+    end)
+    for _, section in ipairs(stale) do uci:delete("network", section) end
+
+    uci:set("network", "wan", "be6500_physical_port", port)
+    uci:foreach("network", "device", function(section)
+        if section.name == "br-lan" then
+            set_uci_list(uci, "network", section[".name"], "ports", port == "wan" and { "eth1" } or { "eth1.1", "eth0" })
+            return false
+        end
+    end)
+
+    local iptv_enabled = uci:get("network", "iptv", "be6500_enabled") == "1"
+    local iptv_mode = uci:get("network", "iptv", "be6500_access_mode") or "vlan"
+    local iptv_source = iptv_enabled and iptv_mode == "lan" and uci:get("network", "iptv", "be6500_source_port") or nil
+    local iptv_stb = iptv_enabled and uci:get("network", "iptv", "be6500_stb_port") or nil
+    local iptv_uplink = iptv_enabled and iptv_mode == "vlan" and tonumber((uci:get("network", "iptv", "be6500_vlan_id"))) or nil
+    configure_iptv_switch(uci, iptv_source, iptv_stb ~= "none" and iptv_stb or nil, iptv_uplink)
+
+    if iptv_ports[port] then
+        local vlan_mode = uci:get("network", "wan", "be6500_vlan_mode") or "untagged"
+        local configured_vlan = tonumber((uci:get("network", "wan", "be6500_vlan_id"))) or 0
+        local vlan = vlan_mode == "tagged" and configured_vlan or 4092
+        local external = iptv_ports[port] .. (vlan_mode == "tagged" and "t" or "")
+        uci:section("network", "switch_vlan", nil, {
+            device = "switch1", vlan = tostring(vlan), vid = tostring(vlan),
+            ports = external .. " 0t", be6500_role = "wan"
+        })
+    end
+    uci:set("network", "wan", "device", selected_wan_device(uci))
+    uci:delete("network", "wan", "ifname")
 end
 
 local function ensure_iptv_firewall(uci, enabled)
@@ -2523,12 +2603,7 @@ local function active_wds_iface(uci)
 end
 
 local function wan_link_ifname(uci)
-    local vlan_mode = uci:get("network", "wan", "be6500_vlan_mode") or "untagged"
-    local vlan_id = tonumber((uci:get("network", "wan", "be6500_vlan_id"))) or 0
-    if vlan_mode == "tagged" and vlan_id >= 1 and vlan_id <= 4094 then
-        return "eth0." .. tostring(vlan_id)
-    end
-    return "eth0"
+    return selected_wan_device(uci)
 end
 
 local function ensure_wan_firewall_members(uci)
@@ -2616,7 +2691,12 @@ local function ensure_wwan_interfaces(uci)
     if uci:get("network", "wwan6", "peerdns") == nil then uci:set("network", "wwan6", "peerdns", "1") end
 end
 
-local function physical_wan_has_carrier()
+local function physical_wan_has_carrier(uci)
+    local port = selected_wan_port(uci)
+    if iptv_ports[port] then
+        local state = switch_port_states()[tonumber(iptv_ports[port])] or {}
+        return tonumber(state.link) == 1
+    end
     local file = io.open("/sys/class/net/eth0/carrier", "r")
     if not file then return true end
     local carrier = trim(file:read("*l") or "")
@@ -2691,7 +2771,7 @@ local function extended_jdcapi(method, args, uci)
         local display_dns = runtime_dns
         if #display_dns == 0 and custom_dns then display_dns = configured_dns end
         local proto = active_wds and "wds" or (uci:get("network", "wan", "proto") or "dhcp")
-        local link_up = runtime.up and (active_wds ~= nil or physical_wan_has_carrier())
+        local link_up = runtime.up and (active_wds ~= nil or physical_wan_has_carrier(uci))
         local gateway = first_gateway(runtime, 4)
         local mtu = tonumber((uci:get("network", active_wds and "wwan" or "wan", "mtu"))) or (proto == "pppoe" and 1492 or 1500)
         if proto == "pppoe" and mtu > 1492 then mtu = 1492 end
@@ -2745,6 +2825,9 @@ local function extended_jdcapi(method, args, uci)
             local vlan_id = tonumber(vlan_text) or 0
             local vlan_mode = vlan_text ~= "" and "tagged" or "untagged"
             if vlan_mode == "tagged" and (vlan_id < 1 or vlan_id > 4094 or vlan_id ~= math.floor(vlan_id)) then return true, { status = 1, message = "WAN VLAN ID 必须为 1–4094" } end
+            if selected_wan_port(uci) ~= "wan" and vlan_mode == "tagged" and reserved_switch_uplink_vlan(vlan_id) then
+                return true, { status = 1, message = "LAN 口作为 WAN 时，VLAN 1、4092–4094 由交换机内部保留" }
+            end
             if vlan_mode == "tagged" and uci:get("network", "iptv", "be6500_enabled") == "1"
                 and uci:get("network", "iptv", "be6500_vlan_mode") == "tagged"
                 and tonumber((uci:get("network", "iptv", "be6500_vlan_id"))) == vlan_id then
@@ -2796,6 +2879,9 @@ local function extended_jdcapi(method, args, uci)
         end
         set_uci_list(uci, "network", "wan", "dns", dns)
         if custom_dns then uci:set("network", "wan", "peerdns", "0") else uci:delete("network", "wan", "peerdns") end
+        -- Rebuild the QCA8386 uplink VLAN as well when the selected physical
+        -- WAN socket is one of LAN1-LAN3 and Internet VLAN settings change.
+        configure_wan_switch(uci, selected_wan_port(uci))
         sync_wan6_parent(uci, proto)
         uci:set("network", "wan6", "auto", uci:get("network", "wan6", "disabled") == "1" and "0" or "1")
         ensure_wan_firewall_members(uci)
@@ -2890,14 +2976,40 @@ local function extended_jdcapi(method, args, uci)
     elseif method == "get_pppd_error_code" then return true, { status = 0, error_code = 0 }
     elseif method == "get_wire_dhcp_status" or method == "get_wan_connection_status" then
         local runtime = ubus_interface("wan")
-        return true, { status = 0, connected = runtime.up and physical_wan_has_carrier() and 1 or 0 }
-    elseif method == "get_router_wan_ifname" then return true, { status = 0, ifname = uci:get("network", "wan", "device") or "eth0" }
+        return true, { status = 0, connected = runtime.up and physical_wan_has_carrier(uci) and 1 or 0 }
+    elseif method == "get_router_wan_ifname" then return true, { status = 0, ifname = wan_link_ifname(uci) }
     elseif method == "set_router_wan_ifname" then
         local ifname = clean(args.ifname, 16)
-        if ifname ~= "eth0" then return true, { status = 1, message = "当前交换机布局仅支持 eth0 作为 WAN" } end
+        if ifname ~= wan_link_ifname(uci) then return true, { status = 1, message = "请在端口设置中切换物理 WAN 端口" } end
         uci:set("network", "wan", "device", ifname); uci:delete("network", "wan", "ifname"); uci:commit("network"); return true, status
     elseif method == "get_port_settings" then
         return true, port_settings_payload(uci)
+    elseif method == "set_wan_port" then
+        local port = tostring(args.port or ""):lower()
+        if port ~= "wan" and not iptv_ports[port] then
+            return true, { status = 1, message = "请选择 WAN、LAN1、LAN2 或 LAN3" }
+        end
+        local old_port = selected_wan_port(uci)
+        if port ~= old_port and port ~= "wan" and configured_port_role(uci, port) ~= "lan" then
+            return true, { status = 1, message = port:upper() .. " 正在用于 IPTV 或游戏口，请先改回局域网" }
+        end
+        if port ~= "wan" then
+            local wan_mode = uci:get("network", "wan", "be6500_vlan_mode") or "untagged"
+            local wan_vlan = tonumber((uci:get("network", "wan", "be6500_vlan_id"))) or 0
+            local iptv_enabled = uci:get("network", "iptv", "be6500_enabled") == "1"
+            local iptv_mode = uci:get("network", "iptv", "be6500_access_mode") or "vlan"
+            local iptv_vlan = tonumber((uci:get("network", "iptv", "be6500_vlan_id"))) or 0
+            if wan_mode == "tagged" and reserved_switch_uplink_vlan(wan_vlan) then
+                return true, { status = 1, message = "当前 WAN VLAN 使用交换机保留编号，请先切回原 WAN 口或修改 VLAN" }
+            end
+            if iptv_enabled and iptv_mode == "vlan" and reserved_switch_uplink_vlan(iptv_vlan) then
+                return true, { status = 1, message = "当前 IPTV VLAN 使用交换机保留编号，请先修改 IPTV VLAN" }
+            end
+        end
+        configure_wan_switch(uci, port)
+        if not uci:commit("network") then return true, { status = 1, message = "WAN 端口设置保存失败" } end
+        luci.sys.call("(ubus call network reload >/dev/null 2>&1; sleep 1; ifup wan >/dev/null 2>&1; ifup wan6 >/dev/null 2>&1) >/tmp/be6500-wan-port.log 2>&1 &")
+        return true, { status = 0, port = port, previous_port = old_port, message = "WAN 与 LAN 端口功能已互换" }
     elseif method == "get_iptv_info" then
         local runtime = ubus_interface("iptv")
         local source_port = uci:get("network", "iptv", "be6500_source_port") or "lan1"
@@ -2938,6 +3050,10 @@ local function extended_jdcapi(method, args, uci)
         local udpxy_enable = tonumber(args.udpxy_enable) == 1
         local udpxy_port = tonumber(args.udpxy_port) or 4022
         if enabled and access_mode == "vlan" and (vlan_id < 1 or vlan_id > 4094) then return true, { status = 1, message = "IPTV VLAN ID 必须为 1–4094" } end
+        if enabled and access_mode == "vlan" and selected_wan_port(uci) ~= "wan"
+            and reserved_switch_uplink_vlan(vlan_id) then
+            return true, { status = 1, message = "LAN 口作为 WAN 时，IPTV VLAN 不能使用交换机保留的 1、4092–4094" }
+        end
         if vlan_priority < 0 or vlan_priority > 7 or vlan_priority % 1 ~= 0 then return true, { status = 1, message = "IPTV VLAN 优先级必须为 0–7" } end
         if enabled and access_mode == "vlan" and uci:get("network", "wan", "be6500_vlan_mode") == "tagged"
             and tonumber((uci:get("network", "wan", "be6500_vlan_id"))) == vlan_id then
@@ -2955,7 +3071,15 @@ local function extended_jdcapi(method, args, uci)
         if option60 ~= "" and (not option60:match("^%x+$") or #option60 % 2 ~= 0) then return true, { status = 1, message = "Option 60 必须是偶数位十六进制字节" } end
         if udpxy_port < 1 or udpxy_port > 65535 then return true, { status = 1, message = "udpxy 监听端口无效" } end
         if not uci:get("be6500_oem", "iptv") then uci:section("be6500_oem", "settings", "iptv", {}) end
-        configure_iptv_switch(uci, enabled and access_mode == "lan" and source_port or nil, enabled and stb_port ~= "none" and stb_port or nil)
+        if enabled and iptv_ports[selected_wan_port(uci)]
+            and ((access_mode == "lan" and source_port == selected_wan_port(uci))
+                or stb_port == selected_wan_port(uci)) then
+            return true, { status = 1, message = "当前物理 WAN 端口不能同时用于 IPTV" }
+        end
+        configure_iptv_switch(uci,
+            enabled and access_mode == "lan" and source_port or nil,
+            enabled and stb_port ~= "none" and stb_port or nil,
+            enabled and access_mode == "vlan" and vlan_id or nil)
         if not enabled then
             uci:delete("network", "iptv")
             uci:delete("network", "iptv_mcast")
@@ -2971,7 +3095,7 @@ local function extended_jdcapi(method, args, uci)
             return true, { status = 0, message = "IPTV 已关闭，接口、组播与防火墙配置已撤销" }
         end
         if not uci:get("network", "iptv") then uci:section("network", "interface", "iptv", {}) end
-        local source_ifname = access_mode == "lan" and "eth1.4094" or ("eth0." .. tostring(vlan_id))
+        local source_ifname = access_mode == "lan" and "eth1.4094" or selected_wan_vlan_device(uci, vlan_id)
         local ifnames = { source_ifname }
         if stb_port ~= "none" then ifnames[#ifnames + 1] = "eth1.4093" end
         uci:set("network", "iptv", "ifname", table.concat(ifnames, " "))
