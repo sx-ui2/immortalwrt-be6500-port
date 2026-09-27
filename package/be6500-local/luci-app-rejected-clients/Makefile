@@ -1,7 +1,7 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=luci-app-rejected-clients
-PKG_RELEASE:=64
+PKG_RELEASE:=65
 PKG_MAINTAINER:=Codex
 
 include $(INCLUDE_DIR)/package.mk
@@ -129,6 +129,18 @@ package_manager_target="$$root/usr/libexec/package-manager-call"
 if [ -f "$$package_manager_source" ] && [ -d "$$root/usr/libexec" ]; then
 	cp -f "$$package_manager_source" "$$package_manager_target" || exit 1
 	chmod 0755 "$$package_manager_target" || exit 1
+fi
+
+wireless="$$root/www/luci-static/resources/view/network/wireless.js"
+wireless_patcher="$$root/usr/libexec/be6500-patch-luci-wireless"
+if [ -f "$$wireless" ] && [ -x "$$wireless_patcher" ]; then
+	BE6500_SKIP_WIFI_PERSONALITY_SYNC=1 \
+	BE6500_LUCI_WIRELESS_VIEW="$$wireless" \
+	BE6500_NETIFD_WIFI_SCRIPT="$$root/lib/netifd/wireless/mac80211.sh" \
+	BE6500_LUCI_CHANNEL_VIEW="$$root/www/luci-static/resources/view/status/channel_analysis.js" \
+	BE6500_LUCI_HEADERS="$$root/usr/share/ucode/luci/template/header.ut" \
+	BE6500_RPCD_LUCI="$$root/usr/share/rpcd/ucode/luci" \
+		"$$wireless_patcher" || exit 1
 fi
 
 interfaces="$$root/www/luci-static/resources/view/network/interfaces.js"

@@ -5,15 +5,15 @@ ZhaoYun BE6500. A successful build does not establish hardware bootability.
 
 ## Current installation and recovery release
 
-Use the v67 stock-to-ImmortalWrt bundle.  It includes the pinned JDCloud
+Use the v70 stock-to-ImmortalWrt bundle.  It includes the pinned JDCloud
 RE-CS-06 uBootKit binary, guarded APPSBL/GPT backup-and-install scripts, the RAM
-installer and the final persistent sysupgrade image. Device edits now submit
-only fields that actually changed, and unchanged QoS settings cannot reload the
-acceleration engine. MLO clients no longer show the unreliable aggregate 2.4G
-label; their band is hidden while non-MLO clients keep normal band reporting.
-The v66 hostname and first-paint identity fixes remain included.
+installer and the final persistent sysupgrade image. The LuCI wireless overview
+now treats the three MLO links as one logical main network: duplicate SSID/BSSID
+rows are removed and a single link's channel and bitrate are no longer repeated
+as the status of all three radios. The v69 access-control and certificate fixes,
+the safe device editor and the fast hostname/identity pipeline remain included.
 See
-[`releases/2026-09-28-safe-device-save-mlo-v67/README.md`](releases/2026-09-28-safe-device-save-mlo-v67/README.md).
+[`releases/2026-09-28-mlo-wireless-overview-v70/README.md`](releases/2026-09-28-mlo-wireless-overview-v70/README.md).
 
 ## Current status (2026-09-12)
 

@@ -31,6 +31,22 @@ if ! grep -q 'be6500DfsCac' "$view"; then
 	sed -i "s#_('Device is not active')#(\/\*be6500DfsCac\*\/radioDev.ubus('dev','pending')\&\&radioDev.get('band')==='5g'\&\&\/160\$\/.test(String(radioDev.get('htmode')||''))?'DFS 信道检测中（约 60 秒）':_('Device is not active'))#" "$view"
 fi
 
+# netifd exposes one shared MLD through every participating wifi-device.  The
+# stock LuCI overview consequently repeats the same logical AP/BSSID below all
+# three MLO links and copies one link's channel, frequency and bitrate into
+# every radio header.  Keep the physical radio rows (so their configuration
+# remains reachable), but show each active logical BSSID only once.  For an MLO
+# radio, do not claim that one link's live frequency is the state of all links.
+if ! grep -q 'be6500MloOverview' "$view"; then
+	sed -i "s#s.cfgsections=function(){const rv=\[\];#s.cfgsections=function(){const rv=[],be6500MloOverview=String(uci.get('wireless','main','mlo'))==='1',be6500SeenLogical={},be6500MloKey=function(wifi){const bssid=String(wifi.getActiveBSSID()||'').toUpperCase(),role=uci.get('wireless',wifi.getName(),'be6500_role');return role==='main'?'main:'+String(wifi.getSSID()||''):(bssid\&\&bssid!='00:00:00:00:00:00'?'bssid:'+bssid:wifi.getName());};#" "$view"
+fi
+if ! grep -q 'be6500MloLogicalRow' "$view"; then
+	sed -i "s#if(wifi.getWifiDeviceName()==radio.getName())#if(\/\*be6500MloLogicalRow\*\/wifi.getWifiDeviceName()==radio.getName()\&\&(!be6500MloOverview||!be6500SeenLogical[be6500MloKey(wifi)]\&\&(be6500SeenLogical[be6500MloKey(wifi)]=true)))#" "$view"
+fi
+if ! grep -q 'be6500MloRadioStatus' "$view"; then
+	sed -i "s#]);let channel,frequency,bitrate;#]);if(String(uci.get('wireless','main','mlo'))==='1'){dom.content(node,[E('big',{},E('strong',{},name+' · MLO')),E('div',{},\/\*be6500MloRadioStatus\*\/'多链路状态由驱动统一管理')]);return node;}let channel,frequency,bitrate;#" "$view"
+fi
+
 if grep -q 'be6500SplitMode' "$view"; then
 	# Upgrade the first split-range hotfix (which started the high path at 149).
 	sed -i "s/section_id==='radio2'\&\&freq.channel<149/section_id==='radio2'\&\&freq.channel<100/" "$view"
@@ -75,11 +91,15 @@ fi
 headers="${BE6500_LUCI_HEADERS:-/usr/share/ucode/luci/template/header.ut}"
 for header in $headers; do
 	[ ! -f "$header" ] || sed -i \
-		-e 's#luci\.js?v=26\.236\.50592~9b8ee64-{{ pkgs_update_time }}#luci.js?v=26.236.50592~9b8ee64-be6500v21-{{ pkgs_update_time }}#' \
-		-e 's#be6500v[0-9]*-{{ pkgs_update_time }}#be6500v21-{{ pkgs_update_time }}#' "$header"
+		-e 's#luci\.js?v=26\.236\.50592~9b8ee64-{{ pkgs_update_time }}#luci.js?v=26.236.50592~9b8ee64-be6500v22-{{ pkgs_update_time }}#' \
+		-e 's#be6500v[0-9]*-{{ pkgs_update_time }}#be6500v22-{{ pkgs_update_time }}#' "$header"
 done
 
-grep -q 'be6500SplitMode' "$view" && grep -q 'be6500-width-selectable' "$view"
+grep -q 'be6500SplitMode' "$view" &&
+	grep -q 'be6500-width-selectable' "$view" &&
+	grep -q 'be6500MloOverview' "$view" &&
+	grep -q 'be6500MloLogicalRow' "$view" &&
+	grep -q 'be6500MloRadioStatus' "$view" || exit 1
 
 # LuCI's stock swconfig RPC only exposes link state and speed.  Export the
 # QCA8386 per-port MIB byte counters as well so the overview does not show
