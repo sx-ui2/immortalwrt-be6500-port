@@ -62,7 +62,7 @@ Token，然后点击“更新”。Token 只保存在路由器本机，不要放
 只给 v67 做热更新时，把两个 IPK 复制到 `/tmp` 后执行：
 
 ```sh
-opkg install --force-reinstall /tmp/wpad-openssl_2025.11.11~8990591d-r2_aarch64_cortex-a53.ipk
+opkg install --force-reinstall /tmp/wpad-openssl_2025.11.11.8990591d-r2_aarch64_cortex-a53.ipk
 opkg install /tmp/luci-app-rejected-clients_64_all.ipk
 /etc/init.d/wpad restart
 /etc/init.d/rpcd restart
