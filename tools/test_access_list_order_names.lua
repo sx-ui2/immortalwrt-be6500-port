@@ -1,6 +1,6 @@
 -- Run with: luajit tools/test_access_list_order_names.lua
--- Access rows must retain insertion order and distinguish synced names from
--- user-maintained aliases.
+-- Access rows must retain insertion order while using the v55 name/MAC save
+-- contract (no extra per-entry metadata is written during an ACL update).
 dofile("package/be6500-local/luci-app-rejected-clients/root/usr/lib/lua/luci/controller/be6500_oem_beta.lua")
 
 local function upvalue(fn, wanted)
@@ -41,9 +41,9 @@ local uci = {
 
 local deny = access_entries(uci, "deny")
 assert(#deny == 3)
-assert(deny[1].mac == B and deny[1].name == "在线设备-B" and deny[1].name_manual == 0)
-assert(deny[2].mac == A and deny[2].name == "手动-A" and deny[2].name_manual == 1)
-assert(deny[3].mac == C and deny[3].name == "离线旧名称-C" and deny[3].name_manual == 0)
+assert(deny[1].mac == B and deny[1].name == "设备-BBBB" and deny[1].name_manual == nil)
+assert(deny[2].mac == A and deny[2].name == "手动-A" and deny[2].name_manual == nil)
+assert(deny[3].mac == C and deny[3].name == "离线旧名称-C" and deny[3].name_manual == nil)
 
 local deleted, inserted = {}, {}
 local replace_uci = {
@@ -66,8 +66,8 @@ replace_access_entries(replace_uci, "deny", {
 })
 assert(#deleted == 3 and deleted[1] == "deny_b" and deleted[2] == "deny_a" and deleted[3] == "deny_c")
 assert(#inserted == 3)
-assert(inserted[1].mac == C and inserted[1].name_manual == "0")
-assert(inserted[2].mac == B and inserted[2].name_manual == "1")
-assert(inserted[3].mac == A and inserted[3].name_manual == "0")
+assert(inserted[1].mac == C and inserted[1].name_manual == nil)
+assert(inserted[2].mac == B and inserted[2].name_manual == nil)
+assert(inserted[3].mac == A and inserted[3].name_manual == nil)
 
 print("access-list order and name-sync checks passed")

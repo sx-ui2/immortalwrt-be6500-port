@@ -1137,9 +1137,7 @@
       row('设备名', input('access-name', 'text', '请输入设备名')) + row('MAC 地址', input('access-mac', 'text', 'AA:BB:CC:DD:EE:FF')) + buttons(['access-add', '加入待保存名单']) + '</div></div>')
     ;
     var draft = { deny: [], allow: [] };
-    var modalMode = 'manual';
     var dirty = false;
-    var accessLoadGeneration = 0;
     function activeList() { return draft[value('access-policy') === 'allow' ? 'allow' : 'deny']; }
     function deviceFor(mac) {
       mac = normalizeMac(mac);
@@ -1187,7 +1185,6 @@
       mode = mode || 'manual';
       document.querySelector('.native-modal-mask').classList.toggle('open', open); id('access-modal').classList.toggle('open', open);
       if (!open) return;
-      modalMode = mode;
       var connected = mode === 'device';
       var editing = mode === 'edit';
       id('access-modal-title').textContent = editing ? '修改设备名称' : (connected ? '选择设备添加' : '手动添加');
@@ -1206,10 +1203,7 @@
       var list = activeList();
       id('access-list').innerHTML = list.length ? list.map(function (item) {
         var device = deviceFor(item.mac || item.macaddr);
-        var manual = Number(item.name_manual) === 1;
-        if (!manual && device.name) item.name = device.name;
-        var name = manual ? item.name : (device.name || item.name);
-        return '<ul class="native-table-row"><li class="access-name"><b>' + esc(deviceDisplayName(name, item.mac || item.macaddr)) + '</b><small>' + (manual ? '手动名称' : '自动同步') + '</small></li><li class="access-address"><code>' + esc(item.mac || item.macaddr) + '</code></li><li class="access-type">' + esc(device.device_type || item.device_type || '其他设备') + '</li><li class="access-vendor">' + esc(device.vendor || device.brand || item.vendor || item.brand || '暂未识别') + '</li><li class="access-action"><button class="edit access-sync" data-mac="' + esc(item.mac || item.macaddr) + '">同步名称</button><button class="edit access-edit" data-mac="' + esc(item.mac || item.macaddr) + '">修改</button><button class="edit access-remove" data-mac="' + esc(item.mac || item.macaddr) + '">移除</button></li></ul>';
+        return '<ul class="native-table-row"><li class="access-name"><b>' + esc(deviceDisplayName(item.name || device.name, item.mac || item.macaddr)) + '</b></li><li class="access-address"><code>' + esc(item.mac || item.macaddr) + '</code></li><li class="access-type">' + esc(device.device_type || item.device_type || '其他设备') + '</li><li class="access-vendor">' + esc(device.vendor || device.brand || item.vendor || item.brand || '暂未识别') + '</li><li class="access-action"><button class="edit access-sync" data-mac="' + esc(item.mac || item.macaddr) + '">同步名称</button><button class="edit access-edit" data-mac="' + esc(item.mac || item.macaddr) + '">修改</button><button class="edit access-remove" data-mac="' + esc(item.mac || item.macaddr) + '">移除</button></li></ul>';
       }).join('') : '<div class="native-empty">当前名单为空</div>';
       syncMode();
       refreshDeviceOptions();
@@ -1219,7 +1213,7 @@
           var item = activeList().filter(function (entry) { return normalizeMac(entry.mac || entry.macaddr) === mac; })[0];
           var device = deviceFor(mac);
           if (!item || !device.name) return notify('当前设备列表中没有可同步的名称', false);
-          item.name = device.name; item.name_manual = 0; dirty = true; render();
+          item.name = device.name; dirty = true; render();
         });
       });
       document.querySelectorAll('.access-edit').forEach(function (button) {
@@ -1238,46 +1232,22 @@
         });
       });
     }
-    function applyAccessData(items, resetDraft) {
-        state.access = items[0]; state.devices = asArray(items[1].device_list);
-        if (items[2]) state.rejected = asArray(items[2].data || items[2].rejected_list);
-        if (resetDraft && !dirty) {
-          draft.deny = asArray(state.access.blacklist).map(function (item) { return Object.assign({}, item); });
-          draft.allow = asArray(state.access.whitelist).map(function (item) { return Object.assign({}, item); });
-          set('access-policy', state.access.macpolicy || 'deny'); check('access-enabled', state.access.enable);
-        }
-        render();
-    }
     function load() {
-      var generation = ++accessLoadGeneration;
-      // The access list and live station inventory are sufficient for the
-      // first render.  Rejected-history reconciliation is independent and
-      // must never hold the add-device selector on “正在读取”.
-      var fast = Promise.all([
-        rpc('get_macfilter_info_fast', {}),
-        rpc('web_get_device_list_fast', {})
-      ]);
-      return fast.then(function (items) {
-        if (generation !== accessLoadGeneration) return;
-        applyAccessData(items, true);
-        rpc('web_get_rejected_list_fast', {}).then(function (rejected) {
-          if (generation !== accessLoadGeneration) return;
-          state.rejected = asArray(rejected.data || rejected.rejected_list);
-          render();
-        }).catch(function () {});
-        // Host hints, radio association data and OUI identification enrich
-        // the already visible rows without blocking the list itself.
-        Promise.all([
-          rpc('get_macfilter_info', {}),
-          rpc('web_get_device_list', {})
-        ]).then(function (fullItems) {
-          if (generation === accessLoadGeneration) applyAccessData(fullItems, true);
-        }).catch(function () {});
-        rpc('web_get_rejected_list', {}).then(function (rejected) {
-          if (generation !== accessLoadGeneration) return;
-          state.rejected = asArray(rejected.data || rejected.rejected_list);
-          render();
-        }).catch(function () {});
+      // Keep the v55 request lifecycle: one authoritative snapshot is loaded
+      // and the same snapshot is submitted after an edit.  The later fast/full
+      // dual refresh could replace the draft while a save was completing.
+      return Promise.all([
+        rpc('get_macfilter_info', {}),
+        rpc('web_get_device_list', {}),
+        rpc('web_get_rejected_list', {})
+      ]).then(function (items) {
+        state.access = items[0]; state.devices = asArray(items[1].device_list);
+        state.rejected = asArray(items[2].data || items[2].rejected_list);
+        draft.deny = asArray(state.access.blacklist).map(function (item) { return Object.assign({}, item); });
+        draft.allow = asArray(state.access.whitelist).map(function (item) { return Object.assign({}, item); });
+        dirty = false;
+        set('access-policy', state.access.macpolicy || 'deny'); check('access-enabled', state.access.enable);
+        render();
       }).catch(function (error) { notify(error.message, false); });
     }
     document.querySelectorAll('[data-policy]').forEach(function (button) { bindClick(button, function () { set('access-policy', button.getAttribute('data-policy')); dirty = true; render(); }); });
@@ -1307,8 +1277,8 @@
       var mac = normalizeMac(value('access-mac'));
       var existing = draft[policy].filter(function (item) { return normalizeMac(item.mac || item.macaddr) === mac; })[0];
       var name = value('access-name') || (existing && existing.name) || '未知设备';
-      if (existing) { existing.name = name; existing.name_manual = modalMode === 'device' ? 0 : 1; }
-      else draft[policy].push({ name: name, mac: mac, name_manual: modalMode === 'device' ? 0 : 1 });
+      if (existing) existing.name = name;
+      else draft[policy].push({ name: name, mac: mac });
       dirty = true; modal(false); render();
     });
     load();

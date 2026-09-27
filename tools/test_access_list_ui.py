@@ -15,12 +15,25 @@ class AccessListUiTests(unittest.TestCase):
         end = source.index("local function find_access", start)
         self.assertNotIn("table.sort", source[start:end])
 
-    def test_ui_supports_synced_and_manual_names(self):
+    def test_ui_supports_name_sync_and_edit_with_v55_payload(self):
         source = PAGES.read_text()
         self.assertIn("access-sync", source)
         self.assertIn("access-edit", source)
-        self.assertIn("item.name_manual = 0", source)
-        self.assertIn("name_manual: modalMode === 'device' ? 0 : 1", source)
+        self.assertNotIn("item.name_manual = 0", source)
+        self.assertNotIn("name_manual: modalMode", source)
+        self.assertIn("else draft[policy].push({ name: name, mac: mac });", source)
+
+    def test_access_page_uses_one_v55_style_snapshot(self):
+        source = PAGES.read_text()
+        start = source.index("  function accessPage() {")
+        end = source.index("\n  function rejectedPage() {", start)
+        access = source[start:end]
+        self.assertIn("rpc('get_macfilter_info', {})", access)
+        self.assertIn("rpc('web_get_device_list', {})", access)
+        self.assertIn("rpc('web_get_rejected_list', {})", access)
+        self.assertNotIn("get_macfilter_info_fast", access)
+        self.assertNotIn("accessLoadGeneration", access)
+        self.assertNotIn("applyAccessData", access)
 
 
 if __name__ == "__main__":

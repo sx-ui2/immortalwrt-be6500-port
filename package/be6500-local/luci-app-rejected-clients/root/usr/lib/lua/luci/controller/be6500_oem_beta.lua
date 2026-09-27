@@ -1758,17 +1758,8 @@ local function access_entries(uci, policy, fast)
     uci:foreach("be6500_oem", "access", function(section)
         if section.policy == policy and valid_mac(section.mac) then
             local mac = section.mac:upper()
-            local manual = tostring(section.name_manual or "") == "1"
-            local name = resolved_device_name(uci, catalog, mac, manual and section.name or nil)
-            -- Old access rows did not record whether their cached name came
-            -- from the device list.  Prefer the current device catalogue for
-            -- those rows, but retain the old value when the client is no
-            -- longer known so an offline entry does not lose its label.
-            if not manual and name == "设备-" .. mac:gsub(":", ""):sub(-4) then
-                name = usable_device_name(section.name) or name
-            end
             result[#result + 1] = {
-                mac = mac, name = name, name_manual = manual and 1 or 0
+                mac = mac, name = resolved_device_name(uci, catalog, mac, section.name)
             }
         end
     end)
@@ -1811,8 +1802,7 @@ local function replace_access_entries(uci, policy, entries)
         if valid_mac(mac) and not seen[mac] then
             seen[mac] = true
             uci:section("be6500_oem", "access", nil, {
-                policy = policy, mac = mac, name = clean(item.name, 64),
-                name_manual = tonumber(item.name_manual) == 1 and "1" or "0"
+                policy = policy, mac = mac, name = clean(item.name, 64)
             })
         end
     end
@@ -3341,7 +3331,13 @@ local function extended_jdcapi(method, args, uci)
     elseif method == "get_macfilter_info" or method == "get_macfilter_info_fast" then
         local fast = method == "get_macfilter_info_fast"
         local policy = uci:get("be6500_oem", "access", "policy") or "deny"
-        local client_mac, client_wireless = request_client(uci, fast)
+        local client_mac, client_wireless
+        if fast then
+            client_mac, client_wireless = request_client(uci, true)
+        else
+            -- Preserve the v55 request path for the authoritative ACL read.
+            client_mac, client_wireless = request_client(uci)
+        end
         return true, { status = 0, enable = uci:get("be6500_oem", "access", "enabled") == "0" and 0 or 1,
             macpolicy = policy, blacklist = access_entries(uci, "deny", fast), whitelist = access_entries(uci, "allow", fast),
             client_mac = client_mac, client_wireless = client_wireless and 1 or 0,
@@ -3367,7 +3363,6 @@ local function extended_jdcapi(method, args, uci)
                 else
                     if not existing then existing = uci:section("be6500_oem", "access", nil, { policy = policy, mac = mac }) end
                     uci:set("be6500_oem", existing, "name", clean(item.name, 64))
-                    uci:set("be6500_oem", existing, "name_manual", tonumber(item.name_manual) == 1 and "1" or "0")
                 end
             end
         end

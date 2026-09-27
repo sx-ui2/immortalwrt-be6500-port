@@ -35,5 +35,5 @@ end
 local mac, wireless = request_client(uci)
 assert(mac == "AA:BB:CC:DD:EE:FF" and wireless)
 local source = assert(io.open("package/be6500-local/luci-app-rejected-clients/root/usr/lib/lua/luci/controller/be6500_oem_beta.lua", "r")):read("*a")
-assert(source:find("local client_mac, client_wireless = request_client(uci)", 1, true))
+assert(source:find("client_mac, client_wireless = request_client(uci)", 1, true))
 print("access-control request client UCI context checks passed")
