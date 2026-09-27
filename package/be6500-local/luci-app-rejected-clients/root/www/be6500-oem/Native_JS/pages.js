@@ -949,7 +949,7 @@
     var mac = device.uid || device.id || device.mac || '';
     var online = Number(device.online);
     var connection = device.type === 'wire' ? '有线连接' : (device.type === 'Wi-Fi' ?
-      (String(device.ssid || '未知 SSID') + ' · ' + String(device.band || '未知频段')) : '正在识别连接');
+      (String(device.ssid || '未知 SSID') + (device.band ? ' · ' + String(device.band) : '')) : '正在识别连接');
     var upload = formatDeviceRate(device.upload_speed != null ? device.upload_speed : (device.uplink || device.up_speed || device.tx_rate || 0));
     var download = formatDeviceRate(device.download_speed != null ? device.download_speed : (device.downlink || device.down_speed || device.rx_rate || 0));
     var deviceType = device.device_type || '其他设备';
@@ -1008,7 +1008,8 @@
         var up = form.querySelector('[data-field="up"]');
         var down = form.querySelector('[data-field="down"]');
         name.value = device.name || '';
-        network.checked = device.network_enable == null ? true : !!Number(device.network_enable);
+        var networkEnabled = device.network_enable != null ? device.network_enable : device.net_enable;
+        network.checked = networkEnabled == null ? true : !!Number(networkEnabled);
         qos.checked = !!Number(device.qos_enable);
         up.value = Number(device.qos_upload) || 0;
         down.value = Number(device.qos_download) || 0;
@@ -1025,11 +1026,27 @@
         cancel.addEventListener('click', function () { deviceModalOpen = false; ui.hideModal(); });
         save.addEventListener('click', function () {
           var mac = device.uid || device.id || device.mac;
-          busy(save, Promise.all([
-            rpc('web_set_station_name', { uid: mac, name: name.value.trim(), manual: name.value.trim() !== (device.name || '') ? 1 : 0 }),
-            rpc('web_set_device_limit_speed', { uid: mac, enable: qos.checked ? 1 : 0, upload: Number(up.value) || 0, download: Number(down.value) || 0 }),
-            setNetworkAccess(device, network.checked)
-          ]), '设备设置已保存').then(function () {
+          var tasks = [];
+          var wantedName = name.value.trim();
+          var wantedQos = qos.checked ? 1 : 0;
+          var wantedUpload = Number(up.value) || 0;
+          var wantedDownload = Number(down.value) || 0;
+          if (wantedName !== (device.name || '')) tasks.push(function () {
+            return rpc('web_set_station_name', { uid: mac, name: wantedName, manual: 1 });
+          });
+          if (wantedQos !== Number(device.qos_enable || 0) ||
+              wantedUpload !== Number(device.qos_upload || 0) ||
+              wantedDownload !== Number(device.qos_download || 0)) tasks.push(function () {
+            return rpc('web_set_device_limit_speed', { uid: mac, enable: wantedQos,
+              upload: wantedUpload, download: wantedDownload });
+          });
+          if (network.checked !== !!Number(networkEnabled == null ? 1 : networkEnabled)) tasks.push(function () {
+            return setNetworkAccess(device, network.checked);
+          });
+          var saveChanges = tasks.reduce(function (promise, task) {
+            return promise.then(task);
+          }, Promise.resolve());
+          busy(save, saveChanges, tasks.length ? '设备设置已保存' : '设置未变化').then(function () {
             deviceModalOpen = false;
             return load('web_get_device_list', false);
           });

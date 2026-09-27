@@ -1512,6 +1512,13 @@ local function known_wireless_clients(uci)
     local result = {}
     local runtime_ssids = {}
     local runtime_mode = wifi_runtime_personality()
+    local main_mlo = uci:get("wireless", "main", "mlo") == "1"
+
+    local function is_main_mlo_iface(iface)
+        iface = tostring(iface or "")
+        return main_mlo and (iface:find("mld", 1, true) ~= nil
+            or iface:match("%-ap0$") ~= nil or iface:match("%-ap0_link%d+$") ~= nil)
+    end
 
     local function live_ssid(iface, reported, phy, frequency)
         local ssid = clean(reported, 64)
@@ -1548,7 +1555,7 @@ local function known_wireless_clients(uci)
         return ""
     end
 
-    local function add(mac, ssid, band, signature)
+    local function add(mac, ssid, band, signature, mlo)
         mac = tostring(mac or ""):upper()
         if not valid_mac(mac) then return end
         local item = result[mac]
@@ -1559,6 +1566,7 @@ local function known_wireless_clients(uci)
         if ssid and ssid ~= "" then item.ssid = ssid end
         if signature and signature ~= "" then item.signature = signature end
         if band and band ~= "未知频段" then item.bands[band] = true end
+        if mlo then item.mlo = true end
     end
 
     -- hostapd ubus on QSDK can expose every MLO station through the primary
@@ -1611,7 +1619,7 @@ local function known_wireless_clients(uci)
                 if mac then
                     mac = mac:upper()
                     control_seen[mac] = true
-                    add(mac, ssid, band, "")
+                    add(mac, ssid, band, "", is_main_mlo_iface(iface))
                 end
             end
         end
@@ -1636,7 +1644,8 @@ local function known_wireless_clients(uci)
                     if not control_seen[normalized] and valid_mac(normalized)
                         and (type(client) ~= "table" or client.authorized ~= false) then
                         add(mac, ssid, band,
-                            type(client) == "table" and tostring(client.signature or "") or "")
+                            type(client) == "table" and tostring(client.signature or "") or "",
+                            is_main_mlo_iface(iface))
                     end
                 end
             end
@@ -1657,7 +1666,9 @@ local function known_wireless_clients(uci)
             local ssid = clean(info:match("[\r\n]%s*ssid%s+([^\r\n]+)") or "", 64)
             local output = luci.sys.exec("iwinfo " .. iface .. " assoclist 2>/dev/null") or ""
             for mac in output:gmatch("(%x%x:%x%x:%x%x:%x%x:%x%x:%x%x)") do
-                if not control_seen[mac:upper()] then add(mac, ssid, band, "") end
+                if not control_seen[mac:upper()] then
+                    add(mac, ssid, band, "", is_main_mlo_iface(iface))
+                end
             end
         end
     end
@@ -1667,7 +1678,13 @@ local function known_wireless_clients(uci)
         for _, band in ipairs(ordered_bands) do
             if item.bands[band] then bands[#bands + 1] = band end
         end
-        item.band = #bands > 0 and table.concat(bands, " / ") or "未知频段"
+        -- A QSDK MLD may report every station through the primary 2.4 GHz
+        -- object even when its active partner link is on 5 GHz.  That value is
+        -- not a physical association and must never be presented as 2.4G.
+        -- Hide the band for MLO clients until the driver exposes trustworthy
+        -- per-link membership.
+        item.band = item.mlo and ""
+            or (#bands > 0 and table.concat(bands, " / ") or "未知频段")
         item.bands = nil
     end
     return result
@@ -1688,12 +1705,17 @@ local function known_wireless_clients_fast(uci)
     -- netdev, which is enough for the initial online/offline classification.
     local interfaces = luci.sys.exec("iw dev 2>/dev/null | awk '/Interface/{print $2}'") or ""
     local runtime_mode = wifi_runtime_personality()
+    local main_mlo = uci:get("wireless", "main", "mlo") == "1"
     for iface in interfaces:gmatch("[^%s]+") do
         if iface:match("^[%w_.%-]+$") then
             local info = luci.sys.exec("iw dev " .. iface .. " info 2>/dev/null") or ""
             local frequency = tonumber(info:match("channel%s+%d+%s+%((%d+)%s+MHz%)")) or 0
             local ssid = clean(info:match("[\r\n]%s*ssid%s+([^\r\n]+)") or "", 64)
             local band = wifi_band_from_interface(uci, "", iface, frequency, runtime_mode)
+            if main_mlo and (iface:find("mld", 1, true) ~= nil
+                or iface:match("%-ap0$") ~= nil or iface:match("%-ap0_link%d+$") ~= nil) then
+                band = ""
+            end
             local stations = luci.sys.exec("iw dev " .. iface .. " station dump 2>/dev/null") or ""
             for mac in stations:gmatch("Station%s+(%x%x:%x%x:%x%x:%x%x:%x%x:%x%x)") do
                 mac = mac:upper()
@@ -2469,6 +2491,7 @@ local function build_device_list(uci, fast)
             ssid = wifi and wifi.ssid or "", online = online and 1 or 0,
             is_guest = tostring(ip or ""):match("^" .. guest_prefix:gsub("%.", "%%.") .. "%.") and 1 or 0,
             is_remesh = 0, protect = 0, net_enable = net_enable and 1 or 0,
+            network_enable = net_enable and 1 or 0,
             qos_enable = qos_enable and 1 or 0,
             qos_upload = tonumber((uci:get("be6500_oem", section, "qos_upload"))) or 0,
             qos_download = tonumber((uci:get("be6500_oem", section, "qos_download"))) or 0,
@@ -3332,10 +3355,24 @@ local function extended_jdcapi(method, args, uci)
         local mac = tostring(args.uid or ""):upper()
         if mac:match("^%x%x%x%x%x%x%x%x%x%x%x%x$") then mac = mac:gsub("(%x%x)", "%1:"):sub(1, 17) end
         if not valid_mac(mac) then return true, { status = 1 } end
-        local section = oem_device_section(mac); if not uci:get("be6500_oem", section) then uci:section("be6500_oem", "device", section, { mac = mac }) end
-        uci:set("be6500_oem", section, "qos_enable", tonumber(args.enable) == 1 and "1" or "0")
+        local section = oem_device_section(mac)
+        local wanted_enable = tonumber(args.enable) == 1 and "1" or "0"
         local upload = tonumber(args.upload or args.qos_upload) or 0
         local download = tonumber(args.download or args.qos_download) or 0
+        local current_enable = uci:get("be6500_oem", section, "qos_enable") or "0"
+        local current_upload = tonumber(uci:get("be6500_oem", section, "qos_upload")) or 0
+        local current_download = tonumber(uci:get("be6500_oem", section, "qos_download")) or 0
+        -- The device editor used to re-run the QoS engine on every ordinary
+        -- save, even when only a name was changed.  ECM reloads can interrupt
+        -- every accelerated flow and look exactly like a Wi-Fi restart.
+        if current_enable == wanted_enable and current_upload == upload
+            and current_download == download then
+            return true, { status = 0, message = "限速设置未变化，无需重新应用" }
+        end
+        if not uci:get("be6500_oem", section) then
+            uci:section("be6500_oem", "device", section, { mac = mac })
+        end
+        uci:set("be6500_oem", section, "qos_enable", wanted_enable)
         uci:set("be6500_oem", section, "qos_upload", tostring(upload)); uci:set("be6500_oem", section, "qos_download", tostring(download))
         if not uci:commit("be6500_oem") then return true, { status = 1, message = "设备限速保存失败" } end
         local upload_kbit = tonumber(args.enable) == 1 and math.floor(upload * 1000 + 0.5) or 0

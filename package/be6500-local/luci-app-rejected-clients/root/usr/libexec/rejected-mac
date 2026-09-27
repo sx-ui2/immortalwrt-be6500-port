@@ -74,10 +74,6 @@ runtime_acl_sync() {
 	rm -f "$desired" "$current"
 }
 
-reload_wifi_later() {
-	(sleep 1; wifi reload) >/dev/null 2>&1 &
-}
-
 status() {
 	for scope in main guest; do
 		init_scope "$scope"; section="$(section_for "$scope")"; set -- $(radios_for "$scope"); first="$1"

@@ -5,15 +5,15 @@ ZhaoYun BE6500. A successful build does not establish hardware bootability.
 
 ## Current installation and recovery release
 
-Use the v66 stock-to-ImmortalWrt bundle.  It includes the pinned JDCloud
+Use the v67 stock-to-ImmortalWrt bundle.  It includes the pinned JDCloud
 RE-CS-06 uBootKit binary, guarded APPSBL/GPT backup-and-install scripts, the RAM
-installer and the final persistent sysupgrade image. Device rows now use the
-current hostname by default and resolve local OUI manufacturer/type data on the
-first-paint path instead of waiting for the full hostapd scan. Manual aliases,
-the v55 access-list save/apply contract and no-network-restart behavior remain
-unchanged.
+installer and the final persistent sysupgrade image. Device edits now submit
+only fields that actually changed, and unchanged QoS settings cannot reload the
+acceleration engine. MLO clients no longer show the unreliable aggregate 2.4G
+label; their band is hidden while non-MLO clients keep normal band reporting.
+The v66 hostname and first-paint identity fixes remain included.
 See
-[`releases/2026-09-28-device-identity-hostname-v66/README.md`](releases/2026-09-28-device-identity-hostname-v66/README.md).
+[`releases/2026-09-28-safe-device-save-mlo-v67/README.md`](releases/2026-09-28-safe-device-save-mlo-v67/README.md).
 
 ## Current status (2026-09-12)
 

@@ -35,6 +35,7 @@ local network_status_missing = false
 local control_socket_inventory = ""
 local control_statuses = {}
 local control_stations = {}
+local main_mlo = false
 package.loaded.ubus = {
     connect = function()
         return {
@@ -84,6 +85,7 @@ local uci = {
     get = function(_, config, section, option)
         if config ~= "wireless" then return nil end
         if section == "main" and option == "freq_mode" then return "1" end
+        if section == "main" and option == "mlo" then return main_mlo and "1" or "0" end
         if option == "radio" then return radio[section] end
         if section == "default_radio1" and option == "ssid" then return "TP-LINK_A59A" end
         if option == nil and radio[section] then return {} end
@@ -134,6 +136,13 @@ result = clients(uci)
 assert(result[D].band == "2.4G", "primary BSS station must stay on 2.4G")
 assert(result[E].band == "5.2G", "5.2G station inherited aggregate 2.4G band")
 assert(result[F].band == "5.8G", "5.8G station inherited aggregate 2.4G band")
+main_mlo = true
+result = clients(uci)
+assert(result[D].band == "", "MLO aggregate must not be labeled as 2.4G")
+assert(result[E].band == "", "MLO client band must stay hidden when link membership is ambiguous")
+assert(result[F].band == "", "MLO client band must stay hidden when link membership is ambiguous")
+assert(result[C].band == "5.2G", "guest non-MLO clients must retain their physical band")
+main_mlo = false
 runtime_bdf = "0x2"
 control_missing = false
 network_status_missing = false
