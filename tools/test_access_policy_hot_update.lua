@@ -23,12 +23,12 @@ end
 
 local controller = luci.controller.be6500_oem_beta
 local apply = upvalue(upvalue(controller.action_jdcapi, "extended_jdcapi"), "apply_mac_policy")
-local fixture = { list = {} }
+local fixture = { list = {}, ifaces = { "phy00.0-ap0" } }
 replace_upvalue(apply, "access_entries", function() return fixture.list end)
 replace_upvalue(apply, "radio_device", function() return "radio" end)
 replace_upvalue(apply, "oem_iface", function() return { [".name"] = "main" } end)
 replace_upvalue(apply, "set_uci_list", function() end)
-replace_upvalue(apply, "live_hostapd_ifaces", function() return { "phy00.0-ap0" }, true end)
+replace_upvalue(apply, "live_hostapd_ifaces", function() return fixture.ifaces, true end)
 
 local A = "AA:AA:AA:AA:AA:AA"
 local B = "BB:BB:BB:BB:BB:BB"
@@ -37,24 +37,29 @@ local function run_case(policy, previous, desired, present, stations)
     fixture.list = {}
     for _, mac in ipairs(desired) do fixture.list[#fixture.list + 1] = { mac = mac } end
     local calls = {}
-    local hostapd = { accept_acl = {}, deny_acl = {} }
-    for acl, macs in pairs(present) do
-        for _, mac in ipairs(macs) do hostapd[acl][mac] = true end
+    local hostapd = {}
+    for _, iface in ipairs(fixture.ifaces) do
+        hostapd[iface] = { accept_acl = {}, deny_acl = {} }
+        for acl, macs in pairs(present) do
+            for _, mac in ipairs(macs) do hostapd[iface][acl][mac] = true end
+        end
     end
     local original_popen = io.popen
     io.popen = function(command)
         calls[#calls + 1] = command
+        local iface = assert(command:match("%-i%s+([%w_.%-]+)%s+"))
+        local state = hostapd[iface]
         local args = assert(command:match("%-i%s+[%w_.%-]+%s+(.+)%s+2>&1"))
-        local acl, op, mac = args:match("^(%w+_acl)%s+(%u+)_MAC%s+(%S+)$")
+        local acl, op, mac = args:match("^(%w+_acl)%s+(%S+)%s+(%S+)$")
         local output = "OK\n"
         if acl then
-            if op == "ADD" then hostapd[acl][mac] = true
-            elseif op == "DEL" then hostapd[acl][mac] = nil end
+            if op:match("^ADD_MAC") then state[acl][mac] = true
+            elseif op:match("^DEL_MAC") then state[acl][mac] = nil end
         else
             acl = args:match("^(%w+_acl) SHOW$")
             if acl then
                 local rows = {}
-                for address in pairs(hostapd[acl]) do rows[#rows + 1] = address end
+                for address in pairs(state[acl]) do rows[#rows + 1] = address end
                 output = table.concat(rows, "\n") .. "\n"
             elseif args == "all_sta" then
                 output = table.concat(stations, "\n") .. "\n"
@@ -93,9 +98,15 @@ assert(count(calls, "deauthenticate") == 0)
 
 calls = run_case("allow", { enabled = true, policy = "allow", listed = { [A] = true, [B] = true } },
     { A }, { accept_acl = { A, B } }, { A, B })
-assert(count(calls, "accept_acl DEL_MAC " .. B) == 1)
-assert(count(calls, "accept_acl DEL_MAC " .. A) == 0)
-assert(count(calls, "deauthenticate " .. B) == 0)
+assert(count(calls, "accept_acl DEL_MAC_NODISASSOC " .. B) == 1)
+assert(count(calls, "accept_acl DEL_MAC_NODISASSOC " .. A) == 0)
+assert(count(calls, "deauthenticate " .. B) == 1)
+assert(count(calls, "deauthenticate " .. A) == 0)
+
+calls = run_case("allow", { enabled = true, policy = "allow", listed = { [A] = true, [B] = true } },
+    { A }, { accept_acl = { A } }, { A, B })
+assert(count(calls, "accept_acl DEL_MAC_NODISASSOC " .. B) == 0)
+assert(count(calls, "deauthenticate " .. B) == 1)
 assert(count(calls, "deauthenticate " .. A) == 0)
 
 calls = run_case("allow", { enabled = true, policy = "allow", listed = { [A] = true } },
@@ -110,12 +121,14 @@ assert(count(calls, "ADD_MAC") == 0)
 assert(count(calls, "DEL_MAC") == 0)
 assert(count(calls, "deauthenticate") == 0)
 
+fixture.ifaces = { "phy00.0-ap0", "phy00.0-ap0_link1" }
 calls = run_case("deny", { enabled = true, policy = "deny", listed = {} },
     { B }, { deny_acl = {} }, { A, B })
-assert(count(calls, "deny_acl ADD_MAC " .. B) == 1)
-assert(count(calls, "deauthenticate " .. B) == 0)
+assert(count(calls, "deny_acl ADD_MAC_NODISASSOC " .. B) == 2)
+assert(count(calls, "deauthenticate " .. B) == 2)
 assert(count(calls, "deauthenticate " .. A) == 0)
 
+fixture.ifaces = { "phy00.0-ap0" }
 calls = run_case("allow", { enabled = true, policy = "deny", listed = { [B] = true } },
     { A }, { accept_acl = {}, deny_acl = { B } }, { A, B })
 assert(count(calls, "accept_acl ADD_MAC " .. A) == 1)

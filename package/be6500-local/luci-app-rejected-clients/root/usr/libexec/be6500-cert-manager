@@ -4,7 +4,8 @@ CONFIG=be6500_cert
 SECTION=main
 CERT_DIR=/etc/be6500-certificates
 ACME_HOME=/root/.acme.sh
-LOG=/tmp/be6500-cert-manager.log
+GLOBAL_LOG=/tmp/be6500-cert-manager.log
+LOG="$GLOBAL_LOG"
 
 get() { uci -q get "$CONFIG.$SECTION.$1" 2>/dev/null || uci -q get "$CONFIG.main.$1"; }
 setv() { uci -q set "$CONFIG.$SECTION.$1=$2"; }
@@ -104,6 +105,7 @@ install_cron() {
 init_config
 action="$1"; shift 2>/dev/null
 if [ "$action" != save ] && valid_id "$1"; then SECTION="$1"; shift; fi
+[ "$SECTION" = main ] || LOG="/tmp/be6500-cert-$SECTION.log"
 case "$action" in
 	info)
 		[ -s "$(cert_file)" ] && present=1 || present=0
@@ -119,6 +121,7 @@ case "$action" in
 		setv domain "$1"; setv other_domains "$2"; setv acme_email "$3"; setv dns_provider "$4"
 		setv dns_email "$5"; [ -n "$6" ] && setv dns_secret "$6"; setv auto_renew "$7"
 		setv cert_file "$8"; setv key_file "$9"
+		[ -z "${10}" ] || setv ca "${10}"
 		uci -q commit "$CONFIG"; chmod 600 "/etc/config/$CONFIG"; install_cron; echo '证书设置已保存'
 		;;
 	auto)
@@ -148,23 +151,18 @@ case "$action" in
 		IFS="$oldifs"
 		ca="$(get ca)"; [ -n "$ca" ] || ca=letsencrypt
 		"$ACME_HOME/acme.sh" --home "$ACME_HOME" --config-home "$ACME_HOME" --set-default-ca --server "$ca" >>"$LOG" 2>&1 || fail_log
-		if [ "$action" = renew ]; then
-			ecc_arg=''
-			[ -d "$ACME_HOME/${domain}_ecc" ] && ecc_arg='--ecc'
-			force_arg=''
-			[ "$1" = '--force' ] && force_arg='--force'
-			if ! "$ACME_HOME/acme.sh" --home "$ACME_HOME" --config-home "$ACME_HOME" --renew -d "$domain" $ecc_arg $force_arg >>"$LOG" 2>&1; then
-				grep -q 'Skipping. Next renewal time' "$LOG" || fail_log
-			fi
-		else
-			# Domains are validated by the LuCI controller before reaching this command.
-			if ! eval '"$ACME_HOME/acme.sh" --home "$ACME_HOME" --config-home "$ACME_HOME" --issue --dns "$dns" '"$args" >>"$LOG" 2>&1; then
-				# acme.sh returns a non-zero status when the requested domain set
-				# already has a valid certificate.  This is not an issuance error:
-				# continue below so the existing certificate can be installed into
-				# this record's independently selected output paths.
-				grep -Eq 'Domains not changed\.|Skipping\. Next renewal time' "$LOG" || fail_log
-			fi
+		# Do not use `acme.sh --renew` here.  That command reuses Le_Webroot and
+		# Le_Alt from an older per-domain file, which can silently send a newly
+		# edited Cloudflare certificate through a stale DNSPod (dns_dp) hook.
+		# Re-state the complete domain set and selected DNS hook on every run.
+		# Manual issue/update is forced so stale provider metadata is replaced;
+		# the daily cron path remains subject to acme.sh's normal renewal window.
+		force_arg='--force'
+		[ "$action" = renew ] && [ "$1" = '--cron' ] && force_arg=''
+		if ! eval '"$ACME_HOME/acme.sh" --home "$ACME_HOME" --config-home "$ACME_HOME" --issue --dns "$dns" '"$force_arg $args" >>"$LOG" 2>&1; then
+			# A cron run outside the renewal window is successful: install the
+			# existing certificate instead of reporting a false failure.
+			grep -Eq 'Domains not changed\.|Skipping\. Next renewal time' "$LOG" || fail_log
 		fi
 		ecc_arg=''; [ -d "$ACME_HOME/${domain}_ecc" ] && ecc_arg='--ecc'
 		"$ACME_HOME/acme.sh" --home "$ACME_HOME" --config-home "$ACME_HOME" --install-cert -d "$domain" $ecc_arg --key-file "$(key_file)" --fullchain-file "$(cert_file)" --reloadcmd "/usr/libexec/be6500-cert-manager reload-if-active $SECTION" >>"$LOG" 2>&1 || fail_log

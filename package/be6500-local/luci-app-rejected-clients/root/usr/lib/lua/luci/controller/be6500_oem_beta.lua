@@ -1940,6 +1940,22 @@ end
 local function apply_mac_policy(uci, policy, previous)
     local list = access_entries(uci, policy)
     local enabled = uci:get("be6500_oem", "access", "enabled") ~= "0"
+    local rejected_now = {}
+    local stable_mode = previous and previous.enabled == enabled
+        and previous.policy == policy
+    local listed_now = {}
+    for _, item in ipairs(list) do listed_now[item.mac] = true end
+    if stable_mode and enabled then
+        if policy == "deny" then
+            for mac in pairs(listed_now) do
+                if not previous.listed[mac] then rejected_now[mac] = true end
+            end
+        else
+            for mac in pairs(previous.listed) do
+                if not listed_now[mac] then rejected_now[mac] = true end
+            end
+        end
+    end
     for index = 0, 2 do
         local device = radio_device(uci, index)
         local iface = device and oem_iface(uci, device, "main") or {}
@@ -1985,7 +2001,9 @@ local function apply_mac_policy(uci, policy, previous)
                 local newly_added = not previous_active
                     or not (previous and previous.listed[item.mac])
                 if newly_added and not present[item.mac]
-                    and not hostapd_command(iface, command_name .. " ADD_MAC " .. item.mac) then return false end
+                    and not hostapd_command(iface, command_name
+                        .. (command_name == "deny_acl" and " ADD_MAC_NODISASSOC " or " ADD_MAC ")
+                        .. item.mac) then return false end
             end
         end
         for mac in pairs(present) do
@@ -1994,7 +2012,9 @@ local function apply_mac_policy(uci, policy, previous)
             -- hostapd re-evaluate associated stations and can drop links.
             local changed_here = previous_active and previous and previous.listed[mac]
             if not desired[mac] and (active ~= previous_active or changed_here)
-                and not hostapd_command(iface, command_name .. " DEL_MAC " .. mac) then return false end
+                and not hostapd_command(iface, command_name
+                    .. (command_name == "accept_acl" and " DEL_MAC_NODISASSOC " or " DEL_MAC ")
+                    .. mac) then return false end
         end
         return true
     end
@@ -2024,6 +2044,15 @@ local function apply_mac_policy(uci, policy, previous)
         -- stations (DENY_ACL ADD_MAC / ACCEPT_ACL DEL_MAC).  A second all_sta
         -- pass with explicit deauthenticate is redundant and can kick MLO
         -- links that were not changed by this save.
+    end
+    -- Match the factory implementation: update every link's ACL without an
+    -- implicit station sweep, then disconnect only a MAC whose access was
+    -- revoked by this exact save.  This prevents unrelated WPA/SAE clients
+    -- from having to perform a full encrypted reconnect.
+    for mac in pairs(rejected_now) do
+        for _, iface in ipairs(ifaces) do
+            hostapd_command(iface, "deauthenticate " .. mac .. " reason=5")
+        end
     end
     return true, #ifaces > 0 and "名单已即时生效，Wi-Fi 未重启"
         or "名单已保存；主 Wi-Fi 当前未运行，将在启动后生效"
@@ -3726,6 +3755,9 @@ local function extended_jdcapi(method, args, uci)
         local domain = clean(args.domain, 253):lower()
         local others = clean(args.other_domains, 1024):lower():gsub("%s+", "")
         local email = clean(args.acme_email, 253)
+        local ca = tostring(args.ca or "letsencrypt")
+        local allowed_ca = { letsencrypt = true, zerossl = true, buypass = true, google = true }
+        if not allowed_ca[ca] then ca = "letsencrypt" end
         local provider = tostring(args.dns_provider) == "cloudflare_global" and "cloudflare_global" or "cloudflare_token"
         local dns_email, secret = clean(args.dns_email, 253), clean(args.dns_secret, 512)
         local cert_id = clean(args.id, 80)
@@ -3748,7 +3780,7 @@ local function extended_jdcapi(method, args, uci)
         end
         local q = (require "luci.util").shellquote
         local renew_enabled = args.auto_renew == true or tonumber(args.auto_renew) == 1
-        local command = "/usr/libexec/be6500-cert-manager save " .. table.concat({ q(cert_id), q(domain), q(others), q(email), q(provider), q(dns_email), q(secret), q(renew_enabled and "1" or "0"), q(cert_file), q(key_file) }, " ")
+        local command = "/usr/libexec/be6500-cert-manager save " .. table.concat({ q(cert_id), q(domain), q(others), q(email), q(provider), q(dns_email), q(secret), q(renew_enabled and "1" or "0"), q(cert_file), q(key_file), q(ca) }, " ")
         local code, output = marked_command(command)
         if code ~= 0 then return true, { status = 1, message = output ~= "" and output or "证书设置保存失败" } end
         return true, { status = 0, message = output, id = cert_id }
@@ -3798,7 +3830,7 @@ local function extended_jdcapi(method, args, uci)
         if method == "issue_certificate" then
             local q = (require "luci.util").shellquote
             local state_file = "/tmp/be6500-cert-" .. cert_id .. ".status"
-            local task_log = "/tmp/be6500-cert-" .. cert_id .. ".log"
+            local task_log = "/tmp/be6500-cert-" .. cert_id .. ".task.log"
             luci.sys.call("echo applying >" .. q(state_file) .. "; (/usr/libexec/be6500-cert-manager issue " ..
                 q(cert_id) .. " >" .. q(task_log) .. " 2>&1; rc=$?; if [ $rc -eq 0 ]; then echo success >" ..
                 q(state_file) .. "; else echo failed >" .. q(state_file) .. "; fi) </dev/null >/dev/null 2>&1 &")
@@ -3833,7 +3865,10 @@ local function extended_jdcapi(method, args, uci)
         local code, output = marked_command("/usr/libexec/be6500-cert-manager delete " .. cert_id)
         return true, { status = code == 0 and 0 or 1, message = output }
     elseif method == "get_certificate_log" then
-        return true, { status = 0, log = luci.sys.exec("/usr/libexec/be6500-cert-manager log 2>/dev/null") or "" }
+        local cert_id = clean(args.id, 80)
+        local command = "/usr/libexec/be6500-cert-manager log"
+        if cert_id:match("^cert_[A-Za-z0-9_]+$") then command = command .. " " .. cert_id end
+        return true, { status = 0, log = luci.sys.exec(command .. " 2>/dev/null") or "" }
     elseif method == "get_cf_ddns" then
         local fields = split_tabs(luci.sys.exec("/usr/libexec/be6500-ddns-manager info 2>/dev/null") or "")
         return true, { status = 0, enabled = tonumber(fields[2]) or 0, domain = fields[3] or "", zone = fields[4] or "",

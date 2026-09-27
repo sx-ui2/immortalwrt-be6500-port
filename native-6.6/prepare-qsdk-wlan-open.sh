@@ -15,12 +15,16 @@ target="$iwrt/package/kernel/mac80211"
 source_target="$iwrt/qca/src/mac80211/wlan-open/backports-6.1-9a0dddfb3"
 wifi_scripts_target="$iwrt/package/network/config/wifi-scripts/files/lib/netifd"
 hostapd_overlay="$self_dir/vendor-src/wlan-hostapd-da760301/files/hostapd.sh"
+hostapd_acl_patch="$self_dir/hostapd-acl-target-only.patch"
+hostapd_source="$iwrt/qca/src/network/services/hostapd"
 mac80211_overlay="$self_dir/files/lib/netifd/wireless/mac80211.sh"
 
 [ -f "$iwrt/rules.mk" ]
 [ -f "$feed/Makefile" ]
 [ -f "$source_tree/drivers/net/wireless/ath/ath12k/wifi7/pci.c" ]
 [ -f "$hostapd_overlay" ]
+[ -f "$hostapd_acl_patch" ]
+[ -f "$hostapd_source/hostapd/ctrl_iface.c" ]
 [ -f "$mac80211_overlay" ]
 
 feed_rev=$(git -C "$feed" rev-parse HEAD)
@@ -51,5 +55,8 @@ mv "$target.qsdk-stage1" "$target"
 mkdir -p "$wifi_scripts_target/wireless"
 cp "$hostapd_overlay" "$wifi_scripts_target/hostapd.sh"
 cp "$mac80211_overlay" "$wifi_scripts_target/wireless/mac80211.sh"
+if ! grep -q 'ADD_MAC_NODISASSOC' "$hostapd_source/hostapd/ctrl_iface.c"; then
+	patch --batch --forward -p1 -d "$hostapd_source" < "$hostapd_acl_patch"
+fi
 
 printf 'QSDK wlan-open stage1 plus BE6500 MLO/PPE overlays prepared\nfeed=%s\nsource=%s\n' "$feed_rev" "$source_rev"
