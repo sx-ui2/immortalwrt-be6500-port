@@ -1142,7 +1142,7 @@
     function activeList() { return draft[value('access-policy') === 'allow' ? 'allow' : 'deny']; }
     function deviceFor(mac) {
       mac = normalizeMac(mac);
-      return state.devices.filter(function (device) { return normalizeMac(device.uid || device.id || device.mac) === mac; })[0] || {};
+      return asArray(state.devices).filter(function (device) { return normalizeMac(device.uid || device.id || device.mac) === mac; })[0] || {};
     }
     function syncMode() {
       var policy = value('access-policy');
@@ -1154,7 +1154,7 @@
       var listed = {};
       activeList().forEach(function (item) { listed[normalizeMac(item.mac || item.macaddr)] = true; });
       var candidates = {}, order = [];
-      state.devices.forEach(function (device) {
+      asArray(state.devices).forEach(function (device) {
         var mac = normalizeMac(device.uid || device.id || device.mac);
         // The access list controls Wi-Fi only.  DHCP/ARP history is not proof
         // of a wired connection, and wired clients are not valid ACL targets.

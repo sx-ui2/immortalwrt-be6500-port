@@ -50,6 +50,16 @@ class AccessListUiTests(unittest.TestCase):
         self.assertIn("if fast then return mac, true end", request_client)
         self.assertNotIn("known_wireless_clients_fast", request_client)
 
+    def test_first_render_tolerates_pending_device_inventory(self):
+        source = PAGES.read_text()
+        start = source.index("  function accessPage() {")
+        end = source.index("\n  function rejectedPage() {", start)
+        access = source[start:end]
+        self.assertIn("return asArray(state.devices).filter", access)
+        self.assertIn("asArray(state.devices).forEach", access)
+        self.assertNotIn("return state.devices.filter", access)
+        self.assertNotIn("\n      state.devices.forEach(function (device) {", access)
+
 
 if __name__ == "__main__":
     unittest.main()
