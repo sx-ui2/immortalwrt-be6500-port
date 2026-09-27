@@ -1913,33 +1913,8 @@ local function access_policy_snapshot(uci)
 end
 
 local function apply_mac_policy(uci, policy, previous)
-    -- Applying the ACL only needs ordered MAC membership.  Do not make a
-    -- host-hint lookup part of the save path.
-    local list = access_entries(uci, policy, true)
+    local list = access_entries(uci, policy)
     local enabled = uci:get("be6500_oem", "access", "enabled") ~= "0"
-    -- A name sync, manual rename, or list reorder does not change the radio
-    -- policy.  Returning before *any* wireless UCI write or hostapd query is
-    -- important on QSDK: even rewriting an identical live ACL can make the
-    -- MLO authenticator re-evaluate an associated station and briefly drop
-    -- its links.  Only membership, enable-state, or mode changes belong on
-    -- the runtime ACL path.
-    local desired = {}
-    for _, item in ipairs(list) do desired[item.mac] = true end
-    local runtime_unchanged = previous ~= nil
-        and previous.enabled == enabled and previous.policy == policy
-    if runtime_unchanged then
-        for mac in pairs(desired) do
-            if not previous.listed[mac] then runtime_unchanged = false; break end
-        end
-    end
-    if runtime_unchanged then
-        for mac in pairs(previous.listed) do
-            if not desired[mac] then runtime_unchanged = false; break end
-        end
-    end
-    if runtime_unchanged then
-        return true, "名单信息已保存，运行中的 Wi-Fi 未改动"
-    end
     for index = 0, 2 do
         local device = radio_device(uci, index)
         local iface = device and oem_iface(uci, device, "main") or {}

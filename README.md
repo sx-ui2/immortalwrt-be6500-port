@@ -5,14 +5,13 @@ ZhaoYun BE6500. A successful build does not establish hardware bootability.
 
 ## Current installation and recovery release
 
-Use the v61 stock-to-ImmortalWrt bundle.  It includes the pinned JDCloud
+Use the v62 stock-to-ImmortalWrt bundle.  It includes the pinned JDCloud
 RE-CS-06 uBootKit binary, guarded APPSBL/GPT backup-and-install scripts, the RAM
-installer and the final persistent sysupgrade image.  It keeps access-list
-metadata edits from touching the live Wi-Fi ACL, identifies each associated
-station from its real interface and frequency, and keeps the two-second traffic
-rate refresh independent from the full wireless inventory.
+installer and the final persistent sysupgrade image.  Its access-list save and
+runtime ACL path is byte-for-byte restored to the v58 implementation, while the
+per-interface band detection and independent two-second rate refresh are kept.
 See
-[`releases/2026-09-27-device-band-acl-v61/README.md`](releases/2026-09-27-device-band-acl-v61/README.md).
+[`releases/2026-09-27-v58-acl-restore-v62/README.md`](releases/2026-09-27-v58-acl-restore-v62/README.md).
 
 ## Current status (2026-09-12)
 
