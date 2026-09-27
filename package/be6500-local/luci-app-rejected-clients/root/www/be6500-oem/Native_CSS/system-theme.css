@@ -727,21 +727,33 @@ body > .block,
   gap: 4px;
 }
 
+.native-page .native-port-link {
+  align-items: flex-start;
+}
+
+.native-page .native-port-link-main {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 24px;
+}
+
 .native-page .native-port-name small,
 .native-page .native-port-link small {
   opacity: .68;
 }
 
-.native-page .native-port-link i {
-  display: inline-block;
+.native-page .native-port-link-main i {
+  display: block;
+  flex: 0 0 9px;
   width: 9px;
   height: 9px;
-  margin-right: 8px;
+  margin: 0;
   border-radius: 50%;
   background: #888;
 }
 
-.native-page .native-port-link i.up {
+.native-page .native-port-link-main i.up {
   background: #38a875;
 }
 

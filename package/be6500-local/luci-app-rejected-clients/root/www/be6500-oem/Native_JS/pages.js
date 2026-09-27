@@ -554,7 +554,7 @@
         var warning = Number(port.link) && speed > 0 && speed < 1000 ? '<small class="native-port-warning">协商速率偏低，请检查网线和对端设备</small>' : '';
         return '<div class="native-port-row" data-port="' + esc(port.id) + '">' +
           '<div class="native-port-name"><strong>' + esc(port.name || String(port.id).toUpperCase()) + '</strong><small>物理端口 ' + esc(port.switch_port || '') + '</small></div>' +
-          '<div class="native-port-link"><i class="' + (Number(port.link) ? 'up' : '') + '"></i><span>' + esc(linkText(port)) + '</span>' + warning + '</div>' +
+          '<div class="native-port-link"><span class="native-port-link-main"><i class="' + (Number(port.link) ? 'up' : '') + '"></i><span>' + esc(linkText(port)) + '</span></span>' + warning + '</div>' +
           '<div class="native-port-role">' + roleControl(port, role) + '</div></div>';
       }).join('');
       state.physicalPorts = ports;
@@ -1663,7 +1663,7 @@
 
   var physicalPortStyle = document.createElement('style');
   physicalPortStyle.textContent = '\
-    .native-port-head,.native-port-row{display:grid;grid-template-columns:minmax(160px,.8fr) minmax(180px,1fr) minmax(240px,1.2fr);align-items:center;gap:24px;padding:15px 20px}.native-port-head{margin-top:18px;border-bottom:1px solid var(--be-border);color:#888;font-weight:550}.native-port-row{min-height:78px;border-bottom:1px solid var(--be-border)}.native-port-name strong,.native-port-name small{display:block}.native-port-name small{margin-top:6px;color:#999}.native-port-link{display:flex;align-items:center;gap:10px}.native-port-link i{display:inline-block;width:10px;height:10px;border-radius:50%;background:#999}.native-port-link i.up{background:#35ad78}.native-port-role select{width:100%}.native-port-role .native-value{min-height:46px}\
+    .native-port-head,.native-port-row{display:grid;grid-template-columns:minmax(160px,.8fr) minmax(180px,1fr) minmax(240px,1.2fr);align-items:center;gap:24px;padding:15px 20px}.native-port-head{margin-top:18px;border-bottom:1px solid var(--be-border);color:#888;font-weight:550}.native-port-row{min-height:78px;border-bottom:1px solid var(--be-border)}.native-port-name strong,.native-port-name small{display:block}.native-port-name small{margin-top:6px;color:#999}.native-port-link{display:flex;flex-direction:column;align-items:flex-start;gap:5px}.native-port-link-main{display:flex;align-items:center;gap:10px;min-height:24px}.native-port-link-main i{display:block;flex:0 0 10px;width:10px;height:10px;margin:0;border-radius:50%;background:#999}.native-port-link-main i.up{background:#35ad78}.native-port-role select{width:100%}.native-port-role .native-value{min-height:46px}\
     @media(max-width:760px){.native-port-head{display:none}.native-port-row{grid-template-columns:1fr;gap:10px;padding:18px 4px}.native-port-role select{width:100%}}';
   document.head.appendChild(physicalPortStyle);
 

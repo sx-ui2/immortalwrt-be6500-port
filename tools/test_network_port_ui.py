@@ -96,6 +96,8 @@ class NetworkPortUiTests(unittest.TestCase):
         self.assertIn("该端口由 IPTV 设置页面锁定为上联口", source)
         self.assertIn("IPTV 专用口", source)
         self.assertIn("IPTV 上联口和专用口不能使用同一个 LAN 口", source)
+        self.assertIn('class="native-port-link-main"', source)
+        self.assertIn(".native-port-link-main{display:flex;align-items:center", source)
         self.assertIn("applyPortRole(port, role)", source)
         self.assertIn("rpc('set_iptv_info'", source)
         self.assertIn("rpc('set_game_info'", source)
@@ -207,7 +209,7 @@ class NetworkPortUiTests(unittest.TestCase):
             self.assertNotIn("_('tagged')", switch_source)
             self.assertFalse(old_menu.exists())
             self.assertFalse(retired_module.exists())
-            self.assertIn("be6500v55", header.read_text())
+            self.assertIn("be6500v56", header.read_text())
 
     def test_patcher_replaces_old_physical_cards_in_minified_release_luci(self):
         with tempfile.TemporaryDirectory() as td:
@@ -292,7 +294,7 @@ class NetworkPortUiTests(unittest.TestCase):
 
     def test_package_installs_factory_port_helpers_and_network_patcher(self):
         makefile = MAKEFILE.read_text()
-        self.assertIn("PKG_RELEASE:=47", makefile)
+        self.assertIn("PKG_RELEASE:=48", makefile)
         self.assertIn("be6500-patch-luci-network", makefile)
         self.assertIn("be6500-luci-patches", makefile)
         self.assertIn("Package/luci-app-rejected-clients/postinst", makefile)
