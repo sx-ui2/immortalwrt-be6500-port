@@ -381,7 +381,7 @@ iptv_capture() {
 	# clients from being mistaken for the IPTV box.
 	# Collect the complete Discover/Request retry sequence. Some boxes omit
 	# Option 12/60 from the first packet and add them only to a later Request.
-	timeout 35 tcpdump -i "$port" -Q in -e -n -vvv -XX -s 0 -c 12 'udp src port 68 and dst port 67' >"$tmp" 2>&1
+	/usr/bin/timeout 35 tcpdump -i "$port" -Q in -e -n -vvv -XX -s 0 -c 12 'udp src port 68 and dst port 67' >"$tmp" 2>&1
 	cp "$tmp" "$last" 2>/dev/null
 	mac="$(sed -n 's/.*Request from \([0-9A-Fa-f:][0-9A-Fa-f:]*\).*/\1/p;s/.*Client-Ethernet-Address \([0-9A-Fa-f:][0-9A-Fa-f:]*\).*/\1/p' "$tmp" | head -1 | tr 'a-f' 'A-F')"
 	[ -n "$mac" ] || mac="$(sed -n 's/^.* \([0-9A-Fa-f][0-9A-Fa-f]:[0-9A-Fa-f:]*\) > .*BOOTP.*/\1/p' "$tmp" | head -1 | tr 'a-f' 'A-F')"

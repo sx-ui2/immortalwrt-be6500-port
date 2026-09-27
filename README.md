@@ -3,14 +3,14 @@
 This tree carries an experimental board-specific overlay for the JDCloud
 ZhaoYun BE6500. A successful build does not establish hardware bootability.
 
-## Current recovery release
+## Current installation and recovery release
 
-The uBootKit factory-image route is withdrawn because uBootKit writes the
-stock primary HLOS/bootconfig path and does not run this port's board-specific
-overlay setup.  Use the two-stage v56 recovery instead: boot the supplied FIT
-from uBootKit's **Initramfs** page, then flash the supplied v56 sysupgrade image
-from the RAM system with configuration preservation disabled.  See
-[`releases/2026-09-27-ubootkit-initramfs-recovery-v56/README.md`](releases/2026-09-27-ubootkit-initramfs-recovery-v56/README.md).
+Use the v59 stock-to-ImmortalWrt bundle.  It includes the pinned JDCloud
+RE-CS-06 uBootKit binary, guarded APPSBL/GPT backup-and-install scripts, the RAM
+installer and the final persistent sysupgrade image.  It also fixes progressive
+device-list loading and the package manager's missing BusyBox timeout applet.
+See
+[`releases/2026-09-27-stock-to-openwrt-device-fast-v59/README.md`](releases/2026-09-27-stock-to-openwrt-device-fast-v59/README.md).
 
 ## Current status (2026-09-12)
 

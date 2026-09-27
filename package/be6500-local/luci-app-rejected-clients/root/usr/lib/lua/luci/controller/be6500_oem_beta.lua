@@ -1586,10 +1586,12 @@ local function known_wireless_clients(uci)
     end
 
     local control_seen = {}
+    local saw_control_socket = false
     local sockets = luci.sys.exec("ls -1 /var/run/hostapd 2>/dev/null") or ""
     for iface in sockets:gmatch("[^%s]+") do
         if iface ~= "global" and iface:match("^[%w_.%-]+$") then
-            local status = luci.sys.exec("hostapd_cli -p /var/run/hostapd -i " .. iface
+            saw_control_socket = true
+            local status = luci.sys.exec("/usr/bin/timeout 1 hostapd_cli -p /var/run/hostapd -i " .. iface
                 .. " status 2>/dev/null") or ""
             local prefixed = "\n" .. status
             local frequency = tonumber(prefixed:match("\nfreq=(%d+)")) or 0
@@ -1599,7 +1601,7 @@ local function known_wireless_clients(uci)
                 or prefixed:match("\nssid=([^\r\n]*)")
             local ssid = live_ssid(iface, reported_ssid, phy, frequency)
             local band = wifi_band_from_interface(uci, phy, iface, frequency, runtime_mode)
-            local stations = luci.sys.exec("hostapd_cli -p /var/run/hostapd -i " .. iface
+            local stations = luci.sys.exec("/usr/bin/timeout 1 hostapd_cli -p /var/run/hostapd -i " .. iface
                 .. " all_sta 2>/dev/null") or ""
             for line in stations:gmatch("[^\r\n]+") do
                 local mac = line:match("^(%x%x:%x%x:%x%x:%x%x:%x%x:%x%x)$")
@@ -1616,9 +1618,11 @@ local function known_wireless_clients(uci)
 
     -- hostapd is still the compatibility source for drivers/builds which do
     -- not publish per-BSS control sockets or omit a station from all_sta.
+    local saw_ubus_object = false
     if connection then
         local objects = luci.sys.exec("ubus list 'hostapd.*' 2>/dev/null") or ""
         for object in objects:gmatch("[^%s]+") do
+            saw_ubus_object = true
             local ok, status = pcall(connection.call, connection, object, "get_clients", {})
             if ok and type(status) == "table" then
                 local status_ok, bss = pcall(connection.call, connection, object, "get_status", {})
@@ -1639,16 +1643,21 @@ local function known_wireless_clients(uci)
         connection:close()
     end
 
-    -- Compatibility fallback for drivers without hostapd ubus objects.
-    local interfaces = luci.sys.exec("iw dev 2>/dev/null | awk '/Interface/{print $2}'") or ""
-    for iface in interfaces:gmatch("[^%s]+") do
-        local info = luci.sys.exec("iw dev " .. iface .. " info 2>/dev/null") or ""
-        local frequency = tonumber(info:match("channel%s+%d+%s+%((%d+)%s+MHz%)")) or 0
-        local band = wifi_band_from_interface(uci, "", iface, frequency, runtime_mode)
-        local ssid = clean(info:match("[\r\n]%s*ssid%s+([^\r\n]+)") or "", 64)
-        local output = luci.sys.exec("iwinfo " .. iface .. " assoclist 2>/dev/null") or ""
-        for mac in output:gmatch("(%x%x:%x%x:%x%x:%x%x:%x%x:%x%x)") do
-            if not control_seen[mac:upper()] then add(mac, ssid, band, "") end
+    -- Compatibility fallback for drivers without either hostapd control
+    -- sockets or hostapd ubus objects.  Running iwinfo for every interface
+    -- after a successful hostapd inventory duplicated all radio work and was
+    -- the main reason the device page stayed on "正在读取设备" for many seconds.
+    if not saw_control_socket and not saw_ubus_object then
+        local interfaces = luci.sys.exec("iw dev 2>/dev/null | awk '/Interface/{print $2}'") or ""
+        for iface in interfaces:gmatch("[^%s]+") do
+            local info = luci.sys.exec("/usr/bin/timeout 1 iw dev " .. iface .. " info 2>/dev/null") or ""
+            local frequency = tonumber(info:match("channel%s+%d+%s+%((%d+)%s+MHz%)")) or 0
+            local band = wifi_band_from_interface(uci, "", iface, frequency, runtime_mode)
+            local ssid = clean(info:match("[\r\n]%s*ssid%s+([^\r\n]+)") or "", 64)
+            local output = luci.sys.exec("/usr/bin/timeout 1 iwinfo " .. iface .. " assoclist 2>/dev/null") or ""
+            for mac in output:gmatch("(%x%x:%x%x:%x%x:%x%x:%x%x:%x%x)") do
+                if not control_seen[mac:upper()] then add(mac, ssid, band, "") end
+            end
         end
     end
     local ordered_bands = { "2.4G", "5.2G", "5.8G", "5G", "6G" }
@@ -2318,26 +2327,34 @@ local function device_traffic_rates(devices)
     return rates
 end
 
-local function build_device_list(uci)
-    local wireless = known_wireless_clients(uci)
+local function build_device_list(uci, fast)
+    fast = fast == true
+    local wireless = fast and {} or known_wireless_clients(uci)
     local online_macs, result, leases_by_mac, configured_names, hinted_names = {}, {}, {}, {}, {}
     local guest_ip = uci:get("network", "guest", "ipaddr") or "192.168.4.1"
     local guest_prefix = guest_ip:match("^(%d+%.%d+%.%d+)%.") or "192.168.4"
     local active_policy = uci:get("be6500_oem", "access", "policy") or "deny"
     local access_enabled = uci:get("be6500_oem", "access", "enabled") ~= "0"
-    local active_entries = access_entries(uci, active_policy)
     local active_set = {}
-    for _, item in ipairs(active_entries) do active_set[item.mac] = true end
+    -- Only MAC membership is needed here.  Calling access_entries() also
+    -- resolves names through getHostHints, which made the device endpoint do
+    -- the same potentially slow ubus lookup twice.
+    uci:foreach("be6500_oem", "access", function(section)
+        local mac = tostring(section.mac or ""):upper()
+        if section.policy == active_policy and valid_mac(mac) then active_set[mac] = true end
+    end)
 
     -- LuCI host hints merge DHCP, static-host and resolver information.  Keep
     -- this as a fallback behind the live DHCP lease hostname, and strip the
     -- local DNS suffix before presenting it as a device name.
-    local hints = require("luci.jsonc").parse(luci.sys.exec(
-        "ubus call luci-rpc getHostHints 2>/dev/null") or "") or {}
-    for mac, hint in pairs(hints) do
-        local name = type(hint) == "table" and trim(hint.name or "") or ""
-        name = name:gsub("%.lan%.$", ""):gsub("%.lan$", "")
-        if valid_mac(mac) and name ~= "" then hinted_names[mac:upper()] = name end
+    if not fast then
+        local hints = require("luci.jsonc").parse(luci.sys.exec(
+            "/usr/bin/timeout 2 ubus call luci-rpc getHostHints 2>/dev/null") or "") or {}
+        for mac, hint in pairs(hints) do
+            local name = type(hint) == "table" and trim(hint.name or "") or ""
+            name = name:gsub("%.lan%.$", ""):gsub("%.lan$", "")
+            if valid_mac(mac) and name ~= "" then hinted_names[mac:upper()] = name end
+        end
     end
     uci:foreach("dhcp", "host", function(section)
         local mac = type(section.mac) == "table" and section.mac[1] or section.mac
@@ -2369,7 +2386,8 @@ local function build_device_list(uci)
         local saved_name = generated_device_name(raw_saved_name, mac) and nil or usable_hostname(raw_saved_name)
         local display_name = saved_name or usable_hostname(lease_name)
             or usable_hostname(configured_names[mac]) or usable_hostname(hinted_names[mac]) or ""
-        local device_type, vendor = device_identity(display_name, mac)
+        local device_type, vendor = "其他设备", "正在识别"
+        if not fast then device_type, vendor = device_identity(display_name, mac) end
         local wifi = wireless[mac]
         if wifi then
             local fingerprint_type, fingerprint_vendor = fingerprint_identity(wifi.signature)
@@ -2397,14 +2415,15 @@ local function build_device_list(uci)
         result[#result + 1] = {
             id = mac, uid = mac, ip = ip or "", name = display_name,
             device_type = device_type, vendor = vendor, brand = vendor,
-            type = wifi and "Wi-Fi" or "wire", band = wifi and wifi.band or "",
+            type = wifi and "Wi-Fi" or (fast and "pending" or "wire"), band = wifi and wifi.band or "",
             ssid = wifi and wifi.ssid or "", online = online and 1 or 0,
             is_guest = tostring(ip or ""):match("^" .. guest_prefix:gsub("%.", "%%.") .. "%.") and 1 or 0,
             is_remesh = 0, protect = 0, net_enable = net_enable and 1 or 0,
             qos_enable = qos_enable and 1 or 0,
             qos_upload = tonumber((uci:get("be6500_oem", section, "qos_upload"))) or 0,
             qos_download = tonumber((uci:get("be6500_oem", section, "qos_download"))) or 0,
-            uplink = 0, downlink = 0, upload_speed = 0, download_speed = 0
+            uplink = 0, downlink = 0, upload_speed = 0, download_speed = 0,
+            enriched = fast and 0 or 1
         }
     end
 
@@ -2451,13 +2470,15 @@ local function build_device_list(uci)
         if mac and not online_macs[tostring(mac):upper()] then add(mac, section.ip or "", section.name or "未知设备", false) end
     end)
 
-    local rates = device_traffic_rates(result)
-    for _, device in ipairs(result) do
-        local rate = rates[tostring(device.uid or ""):upper()] or { upload = 0, download = 0 }
-        device.uplink = rate.upload
-        device.downlink = rate.download
-        device.upload_speed = rate.upload
-        device.download_speed = rate.download
+    if not fast then
+        local rates = device_traffic_rates(result)
+        for _, device in ipairs(result) do
+            local rate = rates[tostring(device.uid or ""):upper()] or { upload = 0, download = 0 }
+            device.uplink = rate.upload
+            device.downlink = rate.download
+            device.upload_speed = rate.upload
+            device.download_speed = rate.download
+        end
     end
     table.sort(result, function(a, b)
         if a.online ~= b.online then return a.online > b.online end
@@ -3197,7 +3218,10 @@ local function extended_jdcapi(method, args, uci)
     elseif method == "capture_iptv_dhcp" then
         if luci.sys.call("command -v tcpdump >/dev/null 2>&1") ~= 0 then return true, { status = 1, message = "路由器未安装 tcpdump，无法自动抓取" } end
         return true, { status = 1, message = "当前交换机端口需先隔离后才能准确抓取；请先选择 LAN 口并保存 IPTV 接入方式" }
-    elseif method == "web_get_device_list" then return true, { status = 0, device_list = build_device_list(uci) }
+    elseif method == "web_get_device_list_fast" then
+        return true, { status = 0, device_list = build_device_list(uci, true), enriched = 0 }
+    elseif method == "web_get_device_list" then
+        return true, { status = 0, device_list = build_device_list(uci, false), enriched = 1 }
     elseif method == "web_set_station_name" then
         local mac = tostring(args.uid or args.mac or ""):upper(); if not valid_mac(mac) then return true, { status = 1 } end
         -- Saving QoS/access settings must not turn the displayed fallback name

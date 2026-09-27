@@ -90,7 +90,8 @@ class NetworkPortUiTests(unittest.TestCase):
         defaults = (PKG / "root/etc/uci-defaults/95-be6500-luci-wireless").read_text()
         uhttpd = UHTTPD_CONFIG.read_text()
 
-        self.assertIn("/bin/busybox timeout 240", helper)
+        self.assertIn("/usr/bin/timeout 240", helper)
+        self.assertNotIn("/bin/busybox timeout", helper)
         self.assertIn("json_dump", helper)
         self.assertIn("软件源响应超时", helper)
         self.assertIn("package-manager-call", service)
@@ -316,7 +317,8 @@ class NetworkPortUiTests(unittest.TestCase):
 
     def test_package_installs_factory_port_helpers_and_network_patcher(self):
         makefile = MAKEFILE.read_text()
-        self.assertIn("PKG_RELEASE:=50", makefile)
+        self.assertIn("PKG_RELEASE:=52", makefile)
+        self.assertIn("+coreutils-timeout", makefile)
         self.assertIn("be6500-luci-overrides/package-manager-call", makefile)
         self.assertIn("be6500-patch-luci-network", makefile)
         self.assertIn("be6500-luci-patches", makefile)

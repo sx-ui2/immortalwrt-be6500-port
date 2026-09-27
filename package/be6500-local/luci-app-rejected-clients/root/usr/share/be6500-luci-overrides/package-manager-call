@@ -75,9 +75,10 @@ case "$action" in
 
 			if flock -x 200; then
 				pkmcmd="$cmd $action $*"
-				# BusyBox timeout is invoked explicitly because OpenWrt does not
-				# install a standalone /usr/bin/timeout link by default.
-				/bin/busybox timeout 240 $cmd "$action" "$@" </dev/null >/tmp/ipkg.out 2>/tmp/ipkg.err
+				# This image installs coreutils-timeout explicitly.  Do not call
+				# `busybox timeout`: the selected BusyBox configuration has no
+				# timeout applet and would return 127 before opkg is ever started.
+				/usr/bin/timeout 240 $cmd "$action" "$@" </dev/null >/tmp/ipkg.out 2>/tmp/ipkg.err
 				code=$?
 				stdout=$(cat /tmp/ipkg.out 2>/dev/null)
 				stderr=$(cat /tmp/ipkg.err 2>/dev/null)

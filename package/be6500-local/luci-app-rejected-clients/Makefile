@@ -1,7 +1,7 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=luci-app-rejected-clients
-PKG_RELEASE:=50
+PKG_RELEASE:=52
 PKG_MAINTAINER:=Codex
 
 include $(INCLUDE_DIR)/package.mk
@@ -17,7 +17,7 @@ define Package/luci-app-rejected-clients
 	+luci-i18n-package-manager-zh-cn +luci-i18n-ddns-zh-cn \
 	+luci-i18n-nlbwmon-zh-cn +luci-i18n-sqm-zh-cn +luci-i18n-upnp-zh-cn \
 	+luci-i18n-diskman-zh-cn +luci-i18n-usb-printer-zh-cn \
-	+udpxy +tcpdump +kmod-macvlan +arp-scan-database +zram-swap +losetup \
+	+udpxy +tcpdump +coreutils-timeout +kmod-macvlan +arp-scan-database +zram-swap +losetup \
 	+qca-ssdk-shell +kmod-qca-nss-ppe-vp +kmod-qca-nss-ppe-ds \
 	+kmod-qca-nss-ppe-bridge-mgr +kmod-qca-nss-ppe-vlan-mgr \
 	+kmod-qca-nss-ppe-pppoe-mgr \

@@ -162,6 +162,7 @@
   }
   function page(title, body) {
     if (window.__nativeDeviceTimer) {
+      clearTimeout(window.__nativeDeviceTimer);
       clearInterval(window.__nativeDeviceTimer);
       window.__nativeDeviceTimer = null;
     }
@@ -936,8 +937,8 @@
   function deviceRow(device, index) {
     var mac = device.uid || device.id || device.mac || '';
     var online = Number(device.online);
-    var connection = device.type === 'wire' ? '有线连接' :
-      (String(device.ssid || '未知 SSID') + ' · ' + String(device.band || '未知频段'));
+    var connection = device.type === 'wire' ? '有线连接' : (device.type === 'Wi-Fi' ?
+      (String(device.ssid || '未知 SSID') + ' · ' + String(device.band || '未知频段')) : '正在识别连接');
     function formatRate(bytes) {
       bytes = Number(bytes) || 0;
       if (bytes >= 1048576) return (bytes / 1048576).toFixed(bytes >= 10485760 ? 1 : 2) + ' MB/s';
@@ -963,6 +964,7 @@
       '<div class="native-device-group"><h3>离线设备</h3><div class="native-table native-device-table"><ul class="native-table-head"><li class="col-device-name">设备名称</li><li class="col-device-address">MAC/IP</li><li class="col-device-type">设备类型</li><li class="col-device-vendor">品牌 / 厂商</li><li class="col-device-status">状态</li><li class="col-device-speed">实时速度</li><li class="col-device-actions">操作</li></ul><div id="device-offline"><div class="native-empty">正在读取设备…</div></div></div></div>');
     var editing = null;
     var deviceLoading = false;
+    var deviceListReady = false;
     var deviceModalOpen = false;
     function setNetworkAccess(device, allowed) {
       var mac = device.uid || device.id || device.mac;
@@ -1021,15 +1023,15 @@
             rpc('web_set_station_name', { uid: mac, name: name.value.trim(), manual: name.value.trim() !== (device.name || '') ? 1 : 0 }),
             rpc('web_set_device_limit_speed', { uid: mac, enable: qos.checked ? 1 : 0, upload: Number(up.value) || 0, download: Number(down.value) || 0 }),
             setNetworkAccess(device, network.checked)
-          ]), '设备设置已保存').then(function () { deviceModalOpen = false; return load(); });
+          ]), '设备设置已保存').then(function () {
+            deviceModalOpen = false;
+            return load('web_get_device_list', false);
+          });
         });
         ui.showModal('设备信息', [form, footer]);
       }).catch(function (error) { deviceModalOpen = false; notify(error.message || '无法打开设备设置', false); });
     }
-    function load() {
-      if (deviceLoading || deviceModalOpen) return Promise.resolve();
-      deviceLoading = true;
-      return rpc('web_get_device_list', {}).then(function (result) {
+    function renderDevices(result) {
         state.devices = asArray(result.device_list);
         var online = [], offline = [];
         state.devices.forEach(function (device, index) { (Number(device.online) ? online : offline).push(deviceRow(device, index)); });
@@ -1041,11 +1043,25 @@
             openDeviceEditor(editing);
           });
         });
+        deviceListReady = true;
         if (window.parent && window.parent.setHeight) window.parent.setHeight(document.body.scrollHeight + 40, 850);
-      }).catch(function (error) { notify(error.message, false); }).then(function () { deviceLoading = false; });
     }
-    load();
-    window.__nativeDeviceTimer = setInterval(load, 2000);
+    function load(method, quiet) {
+      if (deviceLoading || deviceModalOpen) return Promise.resolve();
+      deviceLoading = true;
+      return rpc(method, {}).then(renderDevices).catch(function (error) {
+        if (!quiet || !deviceListReady) notify(error.message, false);
+      }).then(function () { deviceLoading = false; });
+    }
+    function refreshDetails() {
+      return load('web_get_device_list', true).then(function () {
+        clearTimeout(window.__nativeDeviceTimer);
+        window.__nativeDeviceTimer = setTimeout(refreshDetails, 5000);
+      });
+    }
+    // Render DHCP/neighbour data first.  Radio fingerprinting, OUI lookup and
+    // traffic accounting then enrich the already visible rows in background.
+    load('web_get_device_list_fast', false).then(refreshDetails);
   }
 
   function accessPage() {
