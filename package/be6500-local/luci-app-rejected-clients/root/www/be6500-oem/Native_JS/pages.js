@@ -1064,6 +1064,7 @@
       row('设备名', input('access-name', 'text', '请输入设备名')) + row('MAC 地址', input('access-mac', 'text', 'AA:BB:CC:DD:EE:FF')) + buttons(['access-add', '加入待保存名单']) + '</div></div>')
     ;
     var draft = { deny: [], allow: [] };
+    var modalMode = 'manual';
     var dirty = false;
     function activeList() { return draft[value('access-policy') === 'allow' ? 'allow' : 'deny']; }
     function deviceFor(mac) {
@@ -1108,18 +1109,52 @@
           esc(deviceDisplayName(device.name, mac)) + '（' + esc(mac) + '）' + esc(rejected) + '</option>';
       }).join('');
     }
-    function modal(open, connected) {
+    function modal(open, mode, item) {
+      mode = mode || 'manual';
       document.querySelector('.native-modal-mask').classList.toggle('open', open); id('access-modal').classList.toggle('open', open);
-      if (open) { id('access-modal-title').textContent = connected ? '选择设备添加' : '手动添加'; show('#access-device-row', connected); if (connected) refreshDeviceOptions(); else { set('access-name', ''); set('access-mac', ''); } }
+      if (!open) return;
+      modalMode = mode;
+      var connected = mode === 'device';
+      var editing = mode === 'edit';
+      id('access-modal-title').textContent = editing ? '修改设备名称' : (connected ? '选择设备添加' : '手动添加');
+      id('access-add').textContent = editing ? '保存名称' : '加入待保存名单';
+      show('#access-device-row', connected);
+      id('access-mac').readOnly = editing;
+      if (connected) {
+        refreshDeviceOptions(); set('access-device', ''); set('access-name', ''); set('access-mac', '');
+      } else if (editing) {
+        set('access-name', item && item.name || ''); set('access-mac', item && (item.mac || item.macaddr) || '');
+      } else {
+        set('access-name', ''); set('access-mac', '');
+      }
     }
     function render() {
       var list = activeList();
       id('access-list').innerHTML = list.length ? list.map(function (item) {
         var device = deviceFor(item.mac || item.macaddr);
-        return '<ul class="native-table-row"><li class="access-name"><b>' + esc(deviceDisplayName(item.name || device.name, item.mac || item.macaddr)) + '</b></li><li class="access-address"><code>' + esc(item.mac || item.macaddr) + '</code></li><li class="access-type">' + esc(device.device_type || item.device_type || '其他设备') + '</li><li class="access-vendor">' + esc(device.vendor || device.brand || item.vendor || item.brand || '暂未识别') + '</li><li class="access-action"><button class="edit access-remove" data-mac="' + esc(item.mac || item.macaddr) + '">移除</button></li></ul>';
+        var manual = Number(item.name_manual) === 1;
+        if (!manual && device.name) item.name = device.name;
+        var name = manual ? item.name : (device.name || item.name);
+        return '<ul class="native-table-row"><li class="access-name"><b>' + esc(deviceDisplayName(name, item.mac || item.macaddr)) + '</b><small>' + (manual ? '手动名称' : '自动同步') + '</small></li><li class="access-address"><code>' + esc(item.mac || item.macaddr) + '</code></li><li class="access-type">' + esc(device.device_type || item.device_type || '其他设备') + '</li><li class="access-vendor">' + esc(device.vendor || device.brand || item.vendor || item.brand || '暂未识别') + '</li><li class="access-action"><button class="edit access-sync" data-mac="' + esc(item.mac || item.macaddr) + '">同步名称</button><button class="edit access-edit" data-mac="' + esc(item.mac || item.macaddr) + '">修改</button><button class="edit access-remove" data-mac="' + esc(item.mac || item.macaddr) + '">移除</button></li></ul>';
       }).join('') : '<div class="native-empty">当前名单为空</div>';
       syncMode();
       refreshDeviceOptions();
+      document.querySelectorAll('.access-sync').forEach(function (button) {
+        bindClick(button, function () {
+          var mac = normalizeMac(button.dataset.mac);
+          var item = activeList().filter(function (entry) { return normalizeMac(entry.mac || entry.macaddr) === mac; })[0];
+          var device = deviceFor(mac);
+          if (!item || !device.name) return notify('当前设备列表中没有可同步的名称', false);
+          item.name = device.name; item.name_manual = 0; dirty = true; render();
+        });
+      });
+      document.querySelectorAll('.access-edit').forEach(function (button) {
+        bindClick(button, function () {
+          var mac = normalizeMac(button.dataset.mac);
+          var item = activeList().filter(function (entry) { return normalizeMac(entry.mac || entry.macaddr) === mac; })[0];
+          if (item) modal(true, 'edit', item);
+        });
+      });
       document.querySelectorAll('.access-remove').forEach(function (button) {
         bindClick(button, function () {
           var mac = normalizeMac(button.dataset.mac);
@@ -1144,7 +1179,7 @@
     id('access-policy').addEventListener('change', render);
     id('access-enabled').addEventListener('change', function () { dirty = true; });
     id('access-device').addEventListener('change', function () { var option = this.options[this.selectedIndex]; set('access-mac', this.value); set('access-name', option ? option.dataset.name : ''); });
-    bindClick('#access-manual-open', function () { modal(true, false); }); bindClick('#access-device-open', function () { modal(true, true); });
+    bindClick('#access-manual-open', function () { modal(true, 'manual'); }); bindClick('#access-device-open', function () { modal(true, 'device'); });
     bindClick('.native-modal-close', function () { modal(false); }); bindClick('.native-modal-mask', function () { modal(false); });
     bindClick('#access-mode-save', function () {
       var enabled = checked('access-enabled');
@@ -1166,8 +1201,9 @@
       var policy = value('access-policy') === 'allow' ? 'allow' : 'deny';
       var mac = normalizeMac(value('access-mac'));
       var existing = draft[policy].filter(function (item) { return normalizeMac(item.mac || item.macaddr) === mac; })[0];
-      if (existing) existing.name = value('access-name') || existing.name || '未知设备';
-      else draft[policy].push({ name: value('access-name') || '未知设备', mac: mac });
+      var name = value('access-name') || (existing && existing.name) || '未知设备';
+      if (existing) { existing.name = name; existing.name_manual = modalMode === 'device' ? 0 : 1; }
+      else draft[policy].push({ name: name, mac: mac, name_manual: modalMode === 'device' ? 0 : 1 });
       dirty = true; modal(false); render();
     });
     load();

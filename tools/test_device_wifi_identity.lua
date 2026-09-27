@@ -16,6 +16,7 @@ local dispatch = upvalue(controller.action_jdcapi, "extended_jdcapi")
 local build = upvalue(dispatch, "build_device_list")
 local clients = upvalue(build, "known_wireless_clients")
 local A, B, C = "AA:AA:AA:AA:AA:AA", "BB:BB:BB:BB:BB:BB", "CC:CC:CC:CC:CC:CC"
+local D, E, F = "DD:DD:DD:DD:DD:DD", "EE:EE:EE:EE:EE:EE", "FF:FF:FF:FF:FF:FF"
 local statuses = {
     ["hostapd.phy00.0-ap0"] = { ssid = "TP-LINK_A59A", phy = "phy00.0", freq = 2437 },
     -- QSDK sometimes omits the SSID from get_status on a live BSS.
@@ -31,6 +32,9 @@ local client_sets = {
 }
 local control_missing = false
 local network_status_missing = false
+local control_socket_inventory = ""
+local control_statuses = {}
+local control_stations = {}
 package.loaded.ubus = {
     connect = function()
         return {
@@ -59,8 +63,18 @@ luci.sys.exec = function(command)
     if command:find("ubus list", 1, true) then
         return "hostapd.phy00.0-ap0\nhostapd.phy00.1-ap0\nhostapd.phy00.2-ap0\nhostapd.phy00.1-ap1\n"
     end
-    if not control_missing and command:find("hostapd_cli", 1, true)
-        and command:find("phy00.1-ap0", 1, true) then
+    if command:find("ls -1 /var/run/hostapd", 1, true) then
+        return control_socket_inventory
+    end
+    local control_iface = command:match("hostapd_cli.-%-i%s+([%w_.%-]+)")
+    if control_iface and command:find(" status ", 1, true) then
+        return control_statuses[control_iface] or ""
+    end
+    if control_iface and command:find(" all_sta ", 1, true) then
+        return control_stations[control_iface] or ""
+    end
+    if not control_missing and control_iface == "phy00.1-ap0"
+        and command:find(" get_config ", 1, true) then
         return "bssid=00:11:22:33:44:55\nssid=TP-LINK_A59A\n"
     end
     return ""
@@ -98,6 +112,28 @@ result = clients(uci)
 assert(result[A].ssid == "TP-LINK_A59A" and result[A].band == "2.4G")
 assert(result[B].ssid == "TP-LINK_A59A" and result[B].band == "5.2G / 5.8G")
 assert(result[C].ssid == "Guest-WiFi" and result[C].band == "5.2G")
+
+-- QSDK exposes an aggregate MLO client set through the primary 2.4 GHz ubus
+-- object.  Per-BSS all_sta membership must win, otherwise D/E/F all become
+-- 2.4G even though E and F are associated with the 5 GHz BSSes.
+client_sets["hostapd.phy00.0-ap0"][D] = { authorized = true }
+client_sets["hostapd.phy00.0-ap0"][E] = { authorized = true }
+client_sets["hostapd.phy00.0-ap0"][F] = { authorized = true }
+control_socket_inventory = "global\nphy00.0-ap0\nphy00.1-ap0\nphy00.2-ap0\n"
+control_statuses = {
+    ["phy00.0-ap0"] = "freq=2437\nssid[0]=TP-LINK_A59A\n",
+    ["phy00.1-ap0"] = "freq=5180\nssid[0]=TP-LINK_A59A\n",
+    ["phy00.2-ap0"] = "freq=5540\nssid[0]=TP-LINK_A59A\n"
+}
+control_stations = {
+    ["phy00.0-ap0"] = D .. "\naid=1\n",
+    ["phy00.1-ap0"] = E .. "\naid=2\n",
+    ["phy00.2-ap0"] = F .. "\naid=3\n"
+}
+result = clients(uci)
+assert(result[D].band == "2.4G", "primary BSS station must stay on 2.4G")
+assert(result[E].band == "5.2G", "5.2G station inherited aggregate 2.4G band")
+assert(result[F].band == "5.8G", "5.8G station inherited aggregate 2.4G band")
 runtime_bdf = "0x2"
 control_missing = false
 network_status_missing = false

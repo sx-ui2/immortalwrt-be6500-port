@@ -1560,8 +1560,11 @@ local function known_wireless_clients(uci)
         if band and band ~= "未知频段" then item.bands[band] = true end
     end
 
-    -- hostapd is authoritative for stations associated with the current BSS.
-    -- This also works with ath12k/mac80211 interface names used by this build.
+    -- hostapd ubus on QSDK can expose every MLO station through the primary
+    -- (2.4 GHz) object.  Treating that aggregate object as a physical BSS made
+    -- every wireless client appear to be connected to 2.4G.  The per-BSS
+    -- control sockets retain the actual station membership, so collect those
+    -- first and use ubus only as a fallback for stations absent from them.
     local loaded, ubus = pcall(require, "ubus")
     local connection = loaded and ubus and ubus.connect() or nil
     if connection then
@@ -1580,6 +1583,40 @@ local function known_wireless_clients(uci)
                 end
             end
         end
+    end
+
+    local control_seen = {}
+    local sockets = luci.sys.exec("ls -1 /var/run/hostapd 2>/dev/null") or ""
+    for iface in sockets:gmatch("[^%s]+") do
+        if iface ~= "global" and iface:match("^[%w_.%-]+$") then
+            local status = luci.sys.exec("hostapd_cli -p /var/run/hostapd -i " .. iface
+                .. " status 2>/dev/null") or ""
+            local prefixed = "\n" .. status
+            local frequency = tonumber(prefixed:match("\nfreq=(%d+)")) or 0
+            local phy = clean(prefixed:match("\nphy=([^\r\n]+)")
+                or iface:match("^(phy%d+%.%d+)"), 32)
+            local reported_ssid = prefixed:match("\nssid%[%d+%]=([^\r\n]*)")
+                or prefixed:match("\nssid=([^\r\n]*)")
+            local ssid = live_ssid(iface, reported_ssid, phy, frequency)
+            local band = wifi_band_from_interface(uci, phy, iface, frequency, runtime_mode)
+            local stations = luci.sys.exec("hostapd_cli -p /var/run/hostapd -i " .. iface
+                .. " all_sta 2>/dev/null") or ""
+            for line in stations:gmatch("[^\r\n]+") do
+                local mac = line:match("^(%x%x:%x%x:%x%x:%x%x:%x%x:%x%x)$")
+                    or line:match("^STA%s+(%x%x:%x%x:%x%x:%x%x:%x%x:%x%x)$")
+                    or line:match("^sta_addr=(%x%x:%x%x:%x%x:%x%x:%x%x:%x%x)$")
+                if mac then
+                    mac = mac:upper()
+                    control_seen[mac] = true
+                    add(mac, ssid, band, "")
+                end
+            end
+        end
+    end
+
+    -- hostapd is still the compatibility source for drivers/builds which do
+    -- not publish per-BSS control sockets or omit a station from all_sta.
+    if connection then
         local objects = luci.sys.exec("ubus list 'hostapd.*' 2>/dev/null") or ""
         for object in objects:gmatch("[^%s]+") do
             local ok, status = pcall(connection.call, connection, object, "get_clients", {})
@@ -1590,7 +1627,9 @@ local function known_wireless_clients(uci)
                 local band = wifi_band_from_interface(uci, bss.phy, iface, bss.freq or status.freq, runtime_mode)
                 local ssid = live_ssid(iface, bss.ssid, bss.phy, bss.freq or status.freq)
                 for mac, client in pairs(status.clients or {}) do
-                    if valid_mac(mac) and (type(client) ~= "table" or client.authorized ~= false) then
+                    local normalized = tostring(mac or ""):upper()
+                    if not control_seen[normalized] and valid_mac(normalized)
+                        and (type(client) ~= "table" or client.authorized ~= false) then
                         add(mac, ssid, band,
                             type(client) == "table" and tostring(client.signature or "") or "")
                     end
@@ -1609,7 +1648,7 @@ local function known_wireless_clients(uci)
         local ssid = clean(info:match("[\r\n]%s*ssid%s+([^\r\n]+)") or "", 64)
         local output = luci.sys.exec("iwinfo " .. iface .. " assoclist 2>/dev/null") or ""
         for mac in output:gmatch("(%x%x:%x%x:%x%x:%x%x:%x%x:%x%x)") do
-            add(mac, ssid, band, "")
+            if not control_seen[mac:upper()] then add(mac, ssid, band, "") end
         end
     end
     local ordered_bands = { "2.4G", "5.2G", "5.8G", "5G", "6G" }
@@ -1675,10 +1714,22 @@ local function access_entries(uci, policy)
     uci:foreach("be6500_oem", "access", function(section)
         if section.policy == policy and valid_mac(section.mac) then
             local mac = section.mac:upper()
-            result[#result + 1] = { mac = mac, name = resolved_device_name(uci, catalog, mac, section.name) }
+            local manual = tostring(section.name_manual or "") == "1"
+            local name = resolved_device_name(uci, catalog, mac, manual and section.name or nil)
+            -- Old access rows did not record whether their cached name came
+            -- from the device list.  Prefer the current device catalogue for
+            -- those rows, but retain the old value when the client is no
+            -- longer known so an offline entry does not lose its label.
+            if not manual and name == "设备-" .. mac:gsub(":", ""):sub(-4) then
+                name = usable_device_name(section.name) or name
+            end
+            result[#result + 1] = {
+                mac = mac, name = name, name_manual = manual and 1 or 0
+            }
         end
     end)
-    table.sort(result, function(a, b) return a.mac < b.mac end)
+    -- UCI foreach follows config-file order.  Do not sort here: the access
+    -- list is intentionally shown in the order in which entries were added.
     return result
 end
 
@@ -1715,7 +1766,8 @@ local function replace_access_entries(uci, policy, entries)
         if valid_mac(mac) and not seen[mac] then
             seen[mac] = true
             uci:section("be6500_oem", "access", nil, {
-                policy = policy, mac = mac, name = clean(item.name, 64)
+                policy = policy, mac = mac, name = clean(item.name, 64),
+                name_manual = tonumber(item.name_manual) == 1 and "1" or "0"
             })
         end
     end
@@ -3207,6 +3259,7 @@ local function extended_jdcapi(method, args, uci)
                 else
                     if not existing then existing = uci:section("be6500_oem", "access", nil, { policy = policy, mac = mac }) end
                     uci:set("be6500_oem", existing, "name", clean(item.name, 64))
+                    uci:set("be6500_oem", existing, "name_manual", tonumber(item.name_manual) == 1 and "1" or "0")
                 end
             end
         end
