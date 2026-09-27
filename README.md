@@ -7,10 +7,10 @@ ZhaoYun BE6500. A successful build does not establish hardware bootability.
 
 The uBootKit factory-image route is withdrawn because uBootKit writes the
 stock primary HLOS/bootconfig path and does not run this port's board-specific
-overlay setup.  Use the two-stage v50 recovery instead: boot the supplied FIT
-from uBootKit's **Initramfs** page, then flash the supplied sysupgrade image
+overlay setup.  Use the two-stage v56 recovery instead: boot the supplied FIT
+from uBootKit's **Initramfs** page, then flash the supplied v56 sysupgrade image
 from the RAM system with configuration preservation disabled.  See
-[`releases/2026-09-27-ubootkit-initramfs-recovery-v50/README.md`](releases/2026-09-27-ubootkit-initramfs-recovery-v50/README.md).
+[`releases/2026-09-27-ubootkit-initramfs-recovery-v56/README.md`](releases/2026-09-27-ubootkit-initramfs-recovery-v56/README.md).
 
 ## Current status (2026-09-12)
 
