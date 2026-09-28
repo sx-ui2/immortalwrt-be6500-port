@@ -1,7 +1,7 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=luci-app-rejected-clients
-PKG_RELEASE:=65
+PKG_RELEASE:=66
 PKG_MAINTAINER:=Codex
 
 include $(INCLUDE_DIR)/package.mk
@@ -138,6 +138,7 @@ if [ -f "$$wireless" ] && [ -x "$$wireless_patcher" ]; then
 	BE6500_LUCI_WIRELESS_VIEW="$$wireless" \
 	BE6500_NETIFD_WIFI_SCRIPT="$$root/lib/netifd/wireless/mac80211.sh" \
 	BE6500_LUCI_CHANNEL_VIEW="$$root/www/luci-static/resources/view/status/channel_analysis.js" \
+	BE6500_LUCI_WIFI_STATUS_VIEW="$$root/www/luci-static/resources/view/status/include/60_wifi.js" \
 	BE6500_LUCI_HEADERS="$$root/usr/share/ucode/luci/template/header.ut" \
 	BE6500_RPCD_LUCI="$$root/usr/share/rpcd/ucode/luci" \
 		"$$wireless_patcher" || exit 1

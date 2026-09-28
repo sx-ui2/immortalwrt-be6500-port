@@ -43,8 +43,15 @@ fi
 if ! grep -q 'be6500MloLogicalRow' "$view"; then
 	sed -i "s#if(wifi.getWifiDeviceName()==radio.getName())#if(\/\*be6500MloLogicalRow\*\/wifi.getWifiDeviceName()==radio.getName()\&\&(!be6500MloOverview||!be6500SeenLogical[be6500MloKey(wifi)]\&\&(be6500SeenLogical[be6500MloKey(wifi)]=true)))#" "$view"
 fi
-if ! grep -q 'be6500MloRadioStatus' "$view"; then
-	sed -i "s#]);let channel,frequency,bitrate;#]);if(String(uci.get('wireless','main','mlo'))==='1'){dom.content(node,[E('big',{},E('strong',{},name+' · MLO')),E('div',{},\/\*be6500MloRadioStatus\*\/'多链路状态由驱动统一管理')]);return node;}let channel,frequency,bitrate;#" "$view"
+# Upgrade v70's intentionally hidden aggregate value to a truthful per-radio
+# configured channel and frequency.  Fixed channels are the actual channels
+# passed to hostapd; for ACS, saying "automatic" is more accurate than copying
+# the shared MLD's first link onto all radios.
+if grep -q 'be6500MloRadioStatus' "$view" && ! grep -q 'be6500MloRadioFrequency' "$view"; then
+	sed -i "s#]);if(String(uci.get('wireless','main','mlo'))==='1'){dom.content(node,\[E('big',{},E('strong',{},name+' · MLO')),E('div',{},/\*be6500MloRadioStatus\*/'多链路状态由驱动统一管理')\]);return node;}let channel,frequency,bitrate;#]);let channel,frequency,bitrate;if(String(uci.get('wireless','main','mlo'))==='1'){const be6500Channel=parseInt(radioDev.get('channel'),10),be6500Band=String(radioDev.get('band')||''),be6500Frequency=be6500Channel>0?(be6500Band==='2g'?(be6500Channel===14?2.484:(2407+be6500Channel*5)\/1000):(5000+be6500Channel*5)\/1000):0;L.itemlist(node.lastElementChild,[_('Channel'),be6500Channel>0?'%d (%.3f %s)'.format(be6500Channel,be6500Frequency,_('GHz')):'自动',_('Bitrate'),/\*be6500MloRadioFrequency\*/'MLO'],' | ');return node;}#" "$view"
+fi
+if ! grep -q 'be6500MloRadioFrequency' "$view"; then
+	sed -i "s#]);let channel,frequency,bitrate;#]);let channel,frequency,bitrate;if(String(uci.get('wireless','main','mlo'))==='1'){const be6500Channel=parseInt(radioDev.get('channel'),10),be6500Band=String(radioDev.get('band')||''),be6500Frequency=be6500Channel>0?(be6500Band==='2g'?(be6500Channel===14?2.484:(2407+be6500Channel*5)\/1000):(5000+be6500Channel*5)\/1000):0;L.itemlist(node.lastElementChild,[_('Channel'),be6500Channel>0?'%d (%.3f %s)'.format(be6500Channel,be6500Frequency,_('GHz')):'自动',_('Bitrate'),/\*be6500MloRadioFrequency\*/'MLO'],' | ');return node;}#" "$view"
 fi
 
 if grep -q 'be6500SplitMode' "$view"; then
@@ -83,7 +90,31 @@ fi
 # otherwise it incorrectly creates 2.4 GHz and 5 GHz tabs for every radio.
 channel_view="${BE6500_LUCI_CHANNEL_VIEW:-/www/luci-static/resources/view/status/channel_analysis.js}"
 if [ -f "$channel_view" ] && ! grep -q 'be6500ConfiguredBand' "$channel_view"; then
-	sed -i "s/for(var band in bands){if(bands\[band\]\.channels\.length==0)/for(var band in bands){var be6500ConfiguredBand=wifiDevs[ifname].dev.get('band'),be6500Disabled=String(wifiDevs[ifname].dev.get('disabled'))==='1';if(be6500Disabled||(be6500ConfiguredBand==='2g'\&\&band!=2)||(be6500ConfiguredBand==='5g'\&\&band!=5)||(be6500ConfiguredBand==='6g'\&\&band!=6))continue;if(bands[band].channels.length==0)/" "$channel_view"
+	sed -i "s/for(var band in bands){if(bands\[band\]\.channels\.length==0)/for(var band in bands){var be6500ConfiguredBand=wifiDevs[ifname].dev.get('band'),be6500Disabled=String(wifiDevs[ifname].dev.get('disabled'))==='1';if(be6500Disabled||(be6500ConfiguredBand==='2g'\&\&band!=2)||(be6500ConfiguredBand==='5g'\&\&band!=5))continue;if(bands[band].channels.length==0)/" "$channel_view"
+fi
+
+# The status overview uses a second LuCI renderer.  It has the same shared-MLD
+# problem as the network page: getChannel()/getFrequency() return one aggregate
+# link for every radio.  For MLO, format each physical radio from its own UCI
+# band/channel.  Keep ACS as "automatic" instead of inventing a frequency, and
+# de-duplicate the logical main MLD while preserving distinct guest BSSIDs.
+status_view="${BE6500_LUCI_WIFI_STATUS_VIEW:-/www/luci-static/resources/view/status/include/60_wifi.js}"
+if [ -f "$status_view" ]; then
+	if ! grep -q 'be6500MloStatusFrequency' "$status_view"; then
+		# Inject next to renderbox's return statement instead of next to the
+		# bitrate assignment.  The former is stable in both LuCI's formatted
+		# feed source and the minified file installed in the image.
+		sed -i "s#return E('div', { class: 'ifacebox' }, \[#var be6500MloStatus=String(uci.get('wireless','main','mlo'))==='1',be6500ConfiguredChannel=parseInt(radio.get('channel'),10),be6500ConfiguredBand=String(radio.get('band')||''),be6500ConfiguredFrequency=be6500ConfiguredChannel>0?(be6500ConfiguredBand==='2g'?(be6500ConfiguredChannel===14?2.484:(2407+be6500ConfiguredChannel*5)\/1000):(5000+be6500ConfiguredChannel*5)\/1000):0,be6500ChannelText=null;if(be6500MloStatus){be6500ChannelText=be6500ConfiguredChannel>0?'%d (%.3f %s)'.format(be6500ConfiguredChannel,be6500ConfiguredFrequency,_('GHz')):'自动';rate=null;}\/\*be6500MloStatusFrequency\*\/return E('div', { class: 'ifacebox' }, [#" "$status_view"
+		sed -i "s#return E('div',{class:'ifacebox'},\[#var be6500MloStatus=String(uci.get('wireless','main','mlo'))==='1',be6500ConfiguredChannel=parseInt(radio.get('channel'),10),be6500ConfiguredBand=String(radio.get('band')||''),be6500ConfiguredFrequency=be6500ConfiguredChannel>0?(be6500ConfiguredBand==='2g'?(be6500ConfiguredChannel===14?2.484:(2407+be6500ConfiguredChannel*5)\/1000):(5000+be6500ConfiguredChannel*5)\/1000):0,be6500ChannelText=null;if(be6500MloStatus){be6500ChannelText=be6500ConfiguredChannel>0?'%d (%.3f %s)'.format(be6500ConfiguredChannel,be6500ConfiguredFrequency,_('GHz')):'自动';rate=null;}\/\*be6500MloStatusFrequency\*\/return E('div',{class:'ifacebox'},[#" "$status_view"
+		sed -i "s#_('Channel'), chan ? '%d (%.3f %s)'.format(chan, freq, _('GHz')) : '-'#_('Channel'), be6500ChannelText || (chan ? '%d (%.3f %s)'.format(chan, freq, _('GHz')) : '-')#" "$status_view"
+		sed -i "s#_('Channel'),chan?'%d (%.3f %s)'.format(chan,freq,_('GHz')):'-'#_('Channel'),be6500ChannelText||(chan?'%d (%.3f %s)'.format(chan,freq,_('GHz')):'-')#" "$status_view"
+	fi
+	if ! grep -q 'be6500MloStatusLogicalRow' "$status_view"; then
+		sed -i "s#table.appendChild(this.renderbox(radios\[i\],networks.filter(function(net){return net.getWifiDeviceName()==radios\[i\].getName()})));#table.appendChild(this.renderbox(radios[i],networks.filter(function(net){if(\/\*be6500MloStatusLogicalRow\*\/net.getWifiDeviceName()!=radios[i].getName())return false;if(String(uci.get('wireless','main','mlo'))!=='1')return true;var role=uci.get('wireless',net.sid,'be6500_role'),bssid=String(net.getActiveBSSID()||'').toUpperCase(),key=role==='main'?'main:'+String(net.getActiveSSID()||''):(bssid\&\&bssid!='00:00:00:00:00:00'?'bssid:'+bssid:net.sid);if(seen[key])return false;seen[key]=true;return true;})));#" "$status_view"
+		sed -i "s#networks.filter(function(net) { return net.getWifiDeviceName() == radios\[i\].getName() })));#networks.filter(function(net) { if (\/\*be6500MloStatusLogicalRow\*\/net.getWifiDeviceName() != radios[i].getName()) return false; if (String(uci.get('wireless', 'main', 'mlo')) !== '1') return true; var role = uci.get('wireless', net.sid, 'be6500_role'), bssid = String(net.getActiveBSSID() || '').toUpperCase(), key = role === 'main' ? 'main:' + String(net.getActiveSSID() || '') : (bssid \&\& bssid != '00:00:00:00:00:00' ? 'bssid:' + bssid : net.sid); if (seen[key]) return false; seen[key] = true; return true; })));#" "$status_view"
+	fi
+	grep -q 'be6500MloStatusFrequency' "$status_view" &&
+		grep -q 'be6500MloStatusLogicalRow' "$status_view" || exit 1
 fi
 
 # Change the loader URL whenever this board-specific view patch changes. This
@@ -91,15 +122,15 @@ fi
 headers="${BE6500_LUCI_HEADERS:-/usr/share/ucode/luci/template/header.ut}"
 for header in $headers; do
 	[ ! -f "$header" ] || sed -i \
-		-e 's#luci\.js?v=26\.236\.50592~9b8ee64-{{ pkgs_update_time }}#luci.js?v=26.236.50592~9b8ee64-be6500v22-{{ pkgs_update_time }}#' \
-		-e 's#be6500v[0-9]*-{{ pkgs_update_time }}#be6500v22-{{ pkgs_update_time }}#' "$header"
+		-e 's#luci\.js?v=26\.236\.50592~9b8ee64-{{ pkgs_update_time }}#luci.js?v=26.236.50592~9b8ee64-be6500v23-{{ pkgs_update_time }}#' \
+		-e 's#be6500v[0-9]*-{{ pkgs_update_time }}#be6500v23-{{ pkgs_update_time }}#' "$header"
 done
 
 grep -q 'be6500SplitMode' "$view" &&
 	grep -q 'be6500-width-selectable' "$view" &&
 	grep -q 'be6500MloOverview' "$view" &&
 	grep -q 'be6500MloLogicalRow' "$view" &&
-	grep -q 'be6500MloRadioStatus' "$view" || exit 1
+	grep -q 'be6500MloRadioFrequency' "$view" || exit 1
 
 # LuCI's stock swconfig RPC only exposes link state and speed.  Export the
 # QCA8386 per-port MIB byte counters as well so the overview does not show

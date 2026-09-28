@@ -5,15 +5,17 @@ ZhaoYun BE6500. A successful build does not establish hardware bootability.
 
 ## Current installation and recovery release
 
-Use the v70 stock-to-ImmortalWrt bundle.  It includes the pinned JDCloud
+Use the v71 stock-to-ImmortalWrt bundle.  It includes the pinned JDCloud
 RE-CS-06 uBootKit binary, guarded APPSBL/GPT backup-and-install scripts, the RAM
 installer and the final persistent sysupgrade image. The LuCI wireless overview
-now treats the three MLO links as one logical main network: duplicate SSID/BSSID
-rows are removed and a single link's channel and bitrate are no longer repeated
-as the status of all three radios. The v69 access-control and certificate fixes,
-the safe device editor and the fast hostname/identity pipeline remain included.
-See
-[`releases/2026-09-28-mlo-wireless-overview-v70/README.md`](releases/2026-09-28-mlo-wireless-overview-v70/README.md).
+now derives each MLO radio's displayed channel and frequency from its own UCI
+band/channel instead of copying the shared MLD aggregate. Channel 108 is thus
+shown as 5.540 GHz instead of the invalid 6.490 GHz, while ACS is shown as
+automatic. This board is handled strictly as 2.4 GHz + 5.2 GHz + 5.8 GHz;
+there is no 6 GHz path. Duplicate logical MLD rows remain removed. The v69 access-control
+and certificate fixes, the safe device editor and the fast hostname/identity
+pipeline remain included. See
+[`releases/2026-09-28-mlo-radio-frequency-v71/README.md`](releases/2026-09-28-mlo-radio-frequency-v71/README.md).
 
 ## Current status (2026-09-12)
 
