@@ -5,17 +5,17 @@ ZhaoYun BE6500. A successful build does not establish hardware bootability.
 
 ## Current installation and recovery release
 
-Use the v71 stock-to-ImmortalWrt bundle.  It includes the pinned JDCloud
+Use the v72 stock-to-ImmortalWrt bundle.  It includes the pinned JDCloud
 RE-CS-06 uBootKit binary, guarded APPSBL/GPT backup-and-install scripts, the RAM
-installer and the final persistent sysupgrade image. The LuCI wireless overview
-now derives each MLO radio's displayed channel and frequency from its own UCI
-band/channel instead of copying the shared MLD aggregate. Channel 108 is thus
-shown as 5.540 GHz instead of the invalid 6.490 GHz, while ACS is shown as
-automatic. This board is handled strictly as 2.4 GHz + 5.2 GHz + 5.8 GHz;
-there is no 6 GHz path. Duplicate logical MLD rows remain removed. The v69 access-control
-and certificate fixes, the safe device editor and the fast hostname/identity
-pipeline remain included. See
-[`releases/2026-09-28-mlo-radio-frequency-v71/README.md`](releases/2026-09-28-mlo-radio-frequency-v71/README.md).
+installer and the final persistent sysupgrade image. Wired clients are now
+labelled immediately instead of waiting in an indeterminate connection state.
+The LuCI wireless overview also recognizes preserved MLD configurations even
+when the bookkeeping flag is absent, de-duplicates the shared logical BSSID and
+derives each physical radio's displayed channel and frequency from its own UCI
+band/channel. Channel 108 is shown as 5.540 GHz instead of the invalid 6.490
+GHz. This board has no 6 GHz path. The v69 access-control and certificate fixes,
+the safe device editor and the fast hostname/identity pipeline remain included.
+See [`releases/2026-09-28-wired-mlo-status-v72/README.md`](releases/2026-09-28-wired-mlo-status-v72/README.md).
 
 ## Current status (2026-09-12)
 

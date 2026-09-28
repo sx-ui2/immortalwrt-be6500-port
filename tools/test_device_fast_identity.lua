@@ -108,6 +108,24 @@ assert(by_mac[C].name == "current-host", "generated old name must not override h
     .. tostring(by_mac[C].name) .. " / ip=" .. tostring(by_mac[C].ip) .. " / " .. tostring(by_mac[C].device_type)
     .. " / generated=" .. table.concat(generated_debug, ","))
 assert(by_mac[C].device_type == "类型:current-host")
+assert(by_mac[A].type == "Wi-Fi", "fast wireless client lost its Wi-Fi type")
+
+-- A live neighbour absent from the bounded wireless inventory must be marked
+-- wired on the first response instead of waiting for slow enrichment.
+local W = "00:D8:61:18:D2:D0"
+luci.sys.exec = function(command)
+    commands[#commands + 1] = command
+    if command:find("getHostHints", 1, true) then return "{}" end
+    if command:find("ip neigh show", 1, true) then
+        return "192.168.1.141 dev br-lan lladdr " .. W .. " REACHABLE\n"
+    end
+    return ""
+end
+local wired_rows = build(uci, true)
+local wired_by_mac = {}
+for _, row in ipairs(wired_rows) do wired_by_mac[row.uid] = row end
+assert(wired_by_mac[W] and wired_by_mac[W].type == "wire",
+    "fast live neighbour must be identified as wired immediately")
 local saw_fast_hint = false
 for _, command in ipairs(commands) do
     if command:find("ubus -t 1 call luci-rpc getHostHints", 1, true) then saw_fast_hint = true end

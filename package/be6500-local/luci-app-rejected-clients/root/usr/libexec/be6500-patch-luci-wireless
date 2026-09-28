@@ -43,6 +43,14 @@ fi
 if ! grep -q 'be6500MloLogicalRow' "$view"; then
 	sed -i "s#if(wifi.getWifiDeviceName()==radio.getName())#if(\/\*be6500MloLogicalRow\*\/wifi.getWifiDeviceName()==radio.getName()\&\&(!be6500MloOverview||!be6500SeenLogical[be6500MloKey(wifi)]\&\&(be6500SeenLogical[be6500MloKey(wifi)]=true)))#" "$view"
 fi
+# Preserved configurations may have working mld_ap/ifname options but no
+# wireless.main.mlo bookkeeping flag. Detect the actual MLD topology too, and
+# use the active BSSID as the de-duplication key so ordinary non-MLO radios are
+# not collapsed merely because their wifi-ifaces all have role=main.
+if ! grep -q 'be6500MloTopology' "$view"; then
+	sed -i "s#be6500MloOverview=String(uci.get('wireless','main','mlo'))==='1'#be6500MloOverview=\/\*be6500MloTopology\*\/(String(uci.get('wireless','main','mlo'))==='1'||uci.sections('wireless','wifi-iface').some(function(s){return String(s.ifname||'').indexOf('mld')>=0||L.toArray(s.hostapd_bss_options).indexOf('mld_ap=1')>=0;}))#" "$view"
+	sed -i "s#,role=uci.get('wireless',wifi.getName(),'be6500_role');return role==='main'?'main:'+String(wifi.getSSID()||''):(bssid\&\&bssid!='00:00:00:00:00:00'?'bssid:'+bssid:wifi.getName());#;return bssid\&\&bssid!='00:00:00:00:00:00'?'bssid:'+bssid:wifi.getName();#" "$view"
+fi
 # Upgrade v70's intentionally hidden aggregate value to a truthful per-radio
 # configured channel and frequency.  Fixed channels are the actual channels
 # passed to hostapd; for ACS, saying "automatic" is more accurate than copying
@@ -52,6 +60,9 @@ if grep -q 'be6500MloRadioStatus' "$view" && ! grep -q 'be6500MloRadioFrequency'
 fi
 if ! grep -q 'be6500MloRadioFrequency' "$view"; then
 	sed -i "s#]);let channel,frequency,bitrate;#]);let channel,frequency,bitrate;if(String(uci.get('wireless','main','mlo'))==='1'){const be6500Channel=parseInt(radioDev.get('channel'),10),be6500Band=String(radioDev.get('band')||''),be6500Frequency=be6500Channel>0?(be6500Band==='2g'?(be6500Channel===14?2.484:(2407+be6500Channel*5)\/1000):(5000+be6500Channel*5)\/1000):0;L.itemlist(node.lastElementChild,[_('Channel'),be6500Channel>0?'%d (%.3f %s)'.format(be6500Channel,be6500Frequency,_('GHz')):'自动',_('Bitrate'),/\*be6500MloRadioFrequency\*/'MLO'],' | ');return node;}#" "$view"
+fi
+if ! grep -q 'be6500MloRadioTopology' "$view"; then
+	sed -i "s#if(String(uci.get('wireless','main','mlo'))==='1'){const be6500Channel#if(\/\*be6500MloRadioTopology\*\/(String(uci.get('wireless','main','mlo'))==='1'||uci.sections('wireless','wifi-iface').some(function(s){return String(s.ifname||'').indexOf('mld')>=0||L.toArray(s.hostapd_bss_options).indexOf('mld_ap=1')>=0;}))){const be6500Channel#" "$view"
 fi
 
 if grep -q 'be6500SplitMode' "$view"; then
@@ -109,12 +120,26 @@ if [ -f "$status_view" ]; then
 		sed -i "s#_('Channel'), chan ? '%d (%.3f %s)'.format(chan, freq, _('GHz')) : '-'#_('Channel'), be6500ChannelText || (chan ? '%d (%.3f %s)'.format(chan, freq, _('GHz')) : '-')#" "$status_view"
 		sed -i "s#_('Channel'),chan?'%d (%.3f %s)'.format(chan,freq,_('GHz')):'-'#_('Channel'),be6500ChannelText||(chan?'%d (%.3f %s)'.format(chan,freq,_('GHz')):'-')#" "$status_view"
 	fi
+	# Upgrade v71 as well as a freshly patched stock view. Always show the
+	# physical radio's configured band/channel on this board. Detect MLO from
+	# the shared MLD ifname or mld_ap option when the profile flag was lost.
+	if ! grep -q 'be6500PerRadioStatus' "$status_view"; then
+		sed -i "s#be6500ChannelText=null;if(be6500MloStatus){be6500ChannelText=be6500ConfiguredChannel>0?'%d (%.3f %s)'.format(be6500ConfiguredChannel,be6500ConfiguredFrequency,_('GHz')):'自动';rate=null;}\/\*be6500MloStatusFrequency\*\/#be6500ChannelText=be6500ConfiguredChannel>0?'%d (%.3f %s)'.format(be6500ConfiguredChannel,be6500ConfiguredFrequency,_('GHz')):'自动';be6500MloStatus=be6500MloStatus||networks.some(function(net){var be6500Ifname=String(uci.get('wireless',net.sid,'ifname')||'');return be6500Ifname.indexOf('mld')>=0||L.toArray(uci.get('wireless',net.sid,'hostapd_bss_options')).indexOf('mld_ap=1')>=0;});if(be6500MloStatus)rate=null;\/\*be6500PerRadioStatus\*\/#" "$status_view"
+	fi
 	if ! grep -q 'be6500MloStatusLogicalRow' "$status_view"; then
 		sed -i "s#table.appendChild(this.renderbox(radios\[i\],networks.filter(function(net){return net.getWifiDeviceName()==radios\[i\].getName()})));#table.appendChild(this.renderbox(radios[i],networks.filter(function(net){if(\/\*be6500MloStatusLogicalRow\*\/net.getWifiDeviceName()!=radios[i].getName())return false;if(String(uci.get('wireless','main','mlo'))!=='1')return true;var role=uci.get('wireless',net.sid,'be6500_role'),bssid=String(net.getActiveBSSID()||'').toUpperCase(),key=role==='main'?'main:'+String(net.getActiveSSID()||''):(bssid\&\&bssid!='00:00:00:00:00:00'?'bssid:'+bssid:net.sid);if(seen[key])return false;seen[key]=true;return true;})));#" "$status_view"
 		sed -i "s#networks.filter(function(net) { return net.getWifiDeviceName() == radios\[i\].getName() })));#networks.filter(function(net) { if (\/\*be6500MloStatusLogicalRow\*\/net.getWifiDeviceName() != radios[i].getName()) return false; if (String(uci.get('wireless', 'main', 'mlo')) !== '1') return true; var role = uci.get('wireless', net.sid, 'be6500_role'), bssid = String(net.getActiveBSSID() || '').toUpperCase(), key = role === 'main' ? 'main:' + String(net.getActiveSSID() || '') : (bssid \&\& bssid != '00:00:00:00:00:00' ? 'bssid:' + bssid : net.sid); if (seen[key]) return false; seen[key] = true; return true; })));#" "$status_view"
 	fi
-	grep -q 'be6500MloStatusFrequency' "$status_view" &&
-		grep -q 'be6500MloStatusLogicalRow' "$status_view" || exit 1
+	# v71 only de-duplicated when wireless.main.mlo existed and keyed all
+	# role=main interfaces together.  Preserved profiles can omit that flag,
+	# while unrelated non-MLO BSSes may legitimately share the same role.  A
+	# live BSSID is the stable identity of the logical AP in both cases.
+	if ! grep -q 'be6500MloStatusTopology' "$status_view"; then
+		sed -i "s#if(\/\*be6500MloStatusLogicalRow\*\/net.getWifiDeviceName()!=radios\[i\].getName())return false;if(String(uci.get('wireless','main','mlo'))!=='1')return true;var role=uci.get('wireless',net.sid,'be6500_role'),bssid=String(net.getActiveBSSID()||'').toUpperCase(),key=role==='main'?'main:'+String(net.getActiveSSID()||''):(bssid\&\&bssid!='00:00:00:00:00:00'?'bssid:'+bssid:net.sid);#if(\/\*be6500MloStatusTopology\*\/net.getWifiDeviceName()!=radios[i].getName())return false;var bssid=String(net.getActiveBSSID()||'').toUpperCase(),key=bssid\&\&bssid!='00:00:00:00:00:00'?'bssid:'+bssid:net.sid;#" "$status_view"
+		sed -i "s#if (\/\*be6500MloStatusLogicalRow\*\/net.getWifiDeviceName() != radios\[i\].getName()) return false; if (String(uci.get('wireless', 'main', 'mlo')) !== '1') return true; var role = uci.get('wireless', net.sid, 'be6500_role'), bssid = String(net.getActiveBSSID() || '').toUpperCase(), key = role === 'main' ? 'main:' + String(net.getActiveSSID() || '') : (bssid \&\& bssid != '00:00:00:00:00:00' ? 'bssid:' + bssid : net.sid);#if (\/\*be6500MloStatusTopology\*\/net.getWifiDeviceName() != radios[i].getName()) return false; var bssid = String(net.getActiveBSSID() || '').toUpperCase(), key = bssid \&\& bssid != '00:00:00:00:00:00' ? 'bssid:' + bssid : net.sid;#" "$status_view"
+	fi
+	grep -q 'be6500PerRadioStatus' "$status_view" &&
+		grep -q 'be6500MloStatusTopology' "$status_view" || exit 1
 fi
 
 # Change the loader URL whenever this board-specific view patch changes. This
@@ -122,15 +147,17 @@ fi
 headers="${BE6500_LUCI_HEADERS:-/usr/share/ucode/luci/template/header.ut}"
 for header in $headers; do
 	[ ! -f "$header" ] || sed -i \
-		-e 's#luci\.js?v=26\.236\.50592~9b8ee64-{{ pkgs_update_time }}#luci.js?v=26.236.50592~9b8ee64-be6500v23-{{ pkgs_update_time }}#' \
-		-e 's#be6500v[0-9]*-{{ pkgs_update_time }}#be6500v23-{{ pkgs_update_time }}#' "$header"
+		-e 's#luci\.js?v=26\.236\.50592~9b8ee64-{{ pkgs_update_time }}#luci.js?v=26.236.50592~9b8ee64-be6500v24-{{ pkgs_update_time }}#' \
+		-e 's#be6500v[0-9]*-{{ pkgs_update_time }}#be6500v24-{{ pkgs_update_time }}#' "$header"
 done
 
 grep -q 'be6500SplitMode' "$view" &&
 	grep -q 'be6500-width-selectable' "$view" &&
 	grep -q 'be6500MloOverview' "$view" &&
 	grep -q 'be6500MloLogicalRow' "$view" &&
-	grep -q 'be6500MloRadioFrequency' "$view" || exit 1
+	grep -q 'be6500MloTopology' "$view" &&
+	grep -q 'be6500MloRadioFrequency' "$view" &&
+	grep -q 'be6500MloRadioTopology' "$view" || exit 1
 
 # LuCI's stock swconfig RPC only exposes link state and speed.  Export the
 # QCA8386 per-port MIB byte counters as well so the overview does not show

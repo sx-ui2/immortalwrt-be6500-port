@@ -2516,7 +2516,11 @@ local function build_device_list(uci, fast)
         result[#result + 1] = {
             id = mac, uid = mac, ip = ip or "", name = display_name,
             device_type = device_type, vendor = vendor, brand = vendor,
-            type = wifi and "Wi-Fi" or (fast and "pending" or "wire"), band = wifi and wifi.band or "",
+            -- The bounded radio inventory has already decided whether this
+            -- client is wireless.  Do not leave every other live neighbour in
+            -- a synthetic "pending" state until the slower fingerprint scan
+            -- finishes; those rows are wired and can be labelled immediately.
+            type = wifi and "Wi-Fi" or "wire", band = wifi and wifi.band or "",
             ssid = wifi and wifi.ssid or "", online = online and 1 or 0,
             is_guest = tostring(ip or ""):match("^" .. guest_prefix:gsub("%.", "%%.") .. "%.") and 1 or 0,
             is_remesh = 0, protect = 0, net_enable = net_enable and 1 or 0,

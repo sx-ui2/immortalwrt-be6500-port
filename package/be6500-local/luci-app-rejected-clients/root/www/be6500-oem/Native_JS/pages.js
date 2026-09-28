@@ -948,8 +948,8 @@
   function deviceRow(device, index) {
     var mac = device.uid || device.id || device.mac || '';
     var online = Number(device.online);
-    var connection = device.type === 'wire' ? '有线连接' : (device.type === 'Wi-Fi' ?
-      (String(device.ssid || '未知 SSID') + (device.band ? ' · ' + String(device.band) : '')) : '正在识别连接');
+    var connection = device.type === 'Wi-Fi' ?
+      (String(device.ssid || '未知 SSID') + (device.band ? ' · ' + String(device.band) : '')) : '有线连接';
     var upload = formatDeviceRate(device.upload_speed != null ? device.upload_speed : (device.uplink || device.up_speed || device.tx_rate || 0));
     var download = formatDeviceRate(device.download_speed != null ? device.download_speed : (device.downlink || device.down_speed || device.rx_rate || 0));
     var deviceType = device.device_type || '其他设备';

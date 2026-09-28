@@ -38,6 +38,17 @@ class DeviceListProgressiveTests(unittest.TestCase):
         self.assertIn('prefix:find("无线设备", 1, true)', source)
         self.assertIn("if generated_device_name(raw_saved_name, mac) then saved_name = nil end", source)
 
+    def test_fast_inventory_labels_non_wireless_clients_as_wired_immediately(self):
+        controller = CONTROLLER.read_text()
+        page = PAGES.read_text()
+        self.assertIn('type = wifi and "Wi-Fi" or "wire"', controller)
+        self.assertNotIn('fast and "pending" or "wire"', controller)
+        row_start = page.index("function deviceRow(device, index)")
+        row_end = page.index("function devicesPage()", row_start)
+        row = page[row_start:row_end]
+        self.assertIn(": '有线连接'", row)
+        self.assertNotIn("正在识别连接", row)
+
     def test_hostapd_inventory_avoids_duplicate_iwinfo_scan(self):
         source = CONTROLLER.read_text()
         self.assertIn("if not saw_control_socket and not saw_ubus_object then", source)
