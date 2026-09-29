@@ -1,0 +1,13 @@
+#!/bin/sh
+
+# hostapd_cli passes: <interface> <event-name> <event fields...>.  Return at
+# once so its control event queue never waits for the steering delay.
+[ "$2" = AP-STA-CONNECTED ] || exit 0
+case "$3" in
+	[0-9a-fA-F][0-9a-fA-F]:[0-9a-fA-F][0-9a-fA-F]:[0-9a-fA-F][0-9a-fA-F]:[0-9a-fA-F][0-9a-fA-F]:[0-9a-fA-F][0-9a-fA-F]:[0-9a-fA-F][0-9a-fA-F]) ;;
+	*) exit 0 ;;
+esac
+
+STEERING_BIN="${BE6500_STEERING_BIN:-/usr/libexec/be6500-band-steering}"
+"$STEERING_BIN" steer "$3" "$1" >/dev/null 2>&1 &
+exit 0

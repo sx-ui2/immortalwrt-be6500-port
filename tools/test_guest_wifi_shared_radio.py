@@ -19,7 +19,12 @@ class GuestWifiSharedRadioTest(unittest.TestCase):
 
     def test_guest_save_cannot_write_wifi_device_radio_options(self):
         source = CONTROLLER.read_text()
-        self.assertIn('if role == "main" then\n                local channel = tonumber(band.channel) or 0', source)
+        steering = source.index('set_value(section, "bss_transition", "1", device)')
+        main_guard = source.rfind('if role == "main" then', 0, steering)
+        radio_options = source.index('local channel = tonumber(band.channel) or 0', steering)
+        self.assertGreaterEqual(main_guard, 0)
+        self.assertLess(main_guard, steering)
+        self.assertLess(steering, radio_options)
         self.assertIn('if role == "main" then\n            local compat_2g = compatible and selected_bands[0]', source)
 
 

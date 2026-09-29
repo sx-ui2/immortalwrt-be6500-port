@@ -1,0 +1,298 @@
+#!/bin/sh
+
+# Prefer the non-DFS 5 GHz MLD link for dual-band legacy stations without
+# forcing a disconnect.  MLO peers already use multiple links and are left
+# alone.  The hostapd BSS transition request is advisory, so the station can
+# reject it when the 5 GHz link is not suitable.
+
+HOSTAPD_CLI="${BE6500_HOSTAPD_CLI:-/usr/sbin/hostapd_cli}"
+HOSTAPD_CTRL="${BE6500_HOSTAPD_CTRL:-/var/run/hostapd}"
+UCI="${BE6500_UCI:-/sbin/uci}"
+ACTION="${BE6500_STEERING_ACTION:-/usr/libexec/be6500-band-steering-action}"
+STATE_DIR="${BE6500_STEERING_STATE_DIR:-/tmp/be6500-band-steering}"
+LOGGER="${BE6500_LOGGER:-/usr/bin/logger}"
+
+uci_get() {
+	"$UCI" -q get "$1" 2>/dev/null
+}
+
+steering_enabled() {
+	[ "$(uci_get be6500_oem.band_steering.enabled)" != "0" ]
+}
+
+iface_status() {
+	"$HOSTAPD_CLI" -p "$HOSTAPD_CTRL" -i "$1" status 2>/dev/null
+}
+
+status_value() {
+	awk -F= -v key="$2" '$1 == key { sub(/^[^=]*=/, ""); print; exit }' <<-EOF
+	$1
+	EOF
+}
+
+hostapd_ifaces() {
+	local socket iface status links link
+	if [ -n "$BE6500_HOSTAPD_IFACES" ]; then
+		printf '%s\n' $BE6500_HOSTAPD_IFACES
+		return
+	fi
+	for socket in "$HOSTAPD_CTRL"/*; do
+		[ -S "$socket" ] || continue
+		iface="$(basename "$socket")"
+		case "$iface" in
+			global|hostapd_if_eloop_*.sock) continue ;;
+			*_link[0-9]*) printf '%s\n' "$iface"; continue ;;
+		esac
+		# QSDK normally creates both the base MLD socket and link aliases.
+		# Ignore the base in that case so link0/link1 keep distinct status.
+		[ -S "$HOSTAPD_CTRL/${iface}_link0" ] && continue
+		status="$(iface_status "$iface")"
+		[ "$status" != FAIL ] || continue
+		links="$(status_value "$status" num_links)"
+		case "$links" in
+			''|*[!0-9]*|0|1) printf '%s\n' "$iface" ;;
+			*)
+				# A QSDK MLD has one filesystem socket but separate virtual
+				# control names for every link.  Using only the base socket
+				# makes all links look like the 2.4 GHz primary link.
+				link=0
+				while [ "$link" -lt "$links" ]; do
+					printf '%s_link%s\n' "$iface" "$link"
+					link=$((link + 1))
+				done
+				;;
+		esac
+	done
+}
+
+main_2g_ssid() {
+	local section role device network ssid
+	ssid="$(uci_get wireless.default_radio0.ssid)"
+	[ -n "$ssid" ] && { printf '%s\n' "$ssid"; return; }
+	for section in $("$UCI" -q show wireless 2>/dev/null | sed -n 's/^wireless\.\([^.=]*\)=wifi-iface$/\1/p'); do
+		device="$(uci_get "wireless.$section.device")"
+		[ "$device" = radio0 ] || continue
+		role="$(uci_get "wireless.$section.be6500_role")"
+		network="$(uci_get "wireless.$section.network")"
+		[ "$role" = main ] || [ "$network" = lan ] || continue
+		ssid="$(uci_get "wireless.$section.ssid")"
+		[ -n "$ssid" ] && { printf '%s\n' "$ssid"; return; }
+	done
+}
+
+find_2g_iface() {
+	local wanted iface status freq ssid
+	wanted="$(main_2g_ssid)"
+	for iface in $(hostapd_ifaces); do
+		status="$(iface_status "$iface")"
+		freq="$(status_value "$status" freq)"
+		case "$freq" in
+			2[4-5][0-9][0-9]) ;;
+			*) continue ;;
+		esac
+		ssid="$(status_value "$status" 'ssid[0]')"
+		[ -z "$wanted" ] || [ "$ssid" = "$wanted" ] || continue
+		printf '%s\n' "$iface"
+		return 0
+	done
+	return 1
+}
+
+find_5g_iface() {
+	local wanted iface status state freq ssid channel load non_dfs
+	local best_iface best_load best_non_dfs
+	wanted="$1"
+	best_iface=
+	best_load=256
+	best_non_dfs=0
+	for iface in $(hostapd_ifaces); do
+		status="$(iface_status "$iface")"
+		state="$(status_value "$status" state)"
+		[ "$state" = ENABLED ] || continue
+		freq="$(status_value "$status" freq)"
+		case "$freq" in
+			5[0-9][0-9][0-9]) ;;
+			*) continue ;;
+		esac
+		ssid="$(status_value "$status" 'ssid[0]')"
+		[ "$ssid" = "$wanted" ] || continue
+		channel="$(status_value "$status" channel)"
+		case "$channel" in
+			''|*[!0-9]*) continue ;;
+		esac
+		load="$(status_value "$status" chan_util_avg)"
+		case "$load" in ''|*[!0-9]*) load=255 ;; esac
+		[ "$load" -le 255 ] || load=255
+		non_dfs=0
+		[ "$channel" -le 48 ] && non_dfs=1
+		# The OEM LBD evaluates W5 and W6 independently and keeps only one
+		# target (MaxSteeringTargetCount=1).  chan_util_avg is the available
+		# hostapd equivalent of its estimated-airtime decision.  On a tie,
+		# prefer the lower non-DFS radio so the target is immediately usable.
+		if [ -z "$best_iface" ] || [ "$load" -lt "$best_load" ] || \
+			{ [ "$load" -eq "$best_load" ] && [ "$non_dfs" -gt "$best_non_dfs" ]; }; then
+			best_iface="$iface"
+			best_load="$load"
+			best_non_dfs="$non_dfs"
+		fi
+	done
+	[ -n "$best_iface" ] && { printf '%s\n' "$best_iface"; return 0; }
+	return 1
+}
+
+operating_class() {
+	local status channel width secondary
+	status="$1"
+	channel="$(status_value "$status" channel)"
+	width="$(status_value "$status" he_oper_chwidth)"
+	[ -n "$width" ] || width="$(status_value "$status" vht_oper_chwidth)"
+	secondary="$(status_value "$status" secondary_channel)"
+	case "$width" in
+		3) printf '130\n'; return ;;
+		2) printf '129\n'; return ;;
+		1) printf '128\n'; return ;;
+	esac
+	case "$channel" in
+		3[6-9]|4[0-8]) printf '115\n' ;;
+		5[2-9]|6[0-4]) printf '118\n' ;;
+		1[0-3][0-9]|14[0-4]) printf '121\n' ;;
+		14[9]|15[0-9]|16[0-9]|17[0-7]) printf '125\n' ;;
+		*) printf '128\n' ;;
+	esac
+}
+
+station_on_iface() {
+	"$HOSTAPD_CLI" -p "$HOSTAPD_CTRL" -i "$1" sta "$2" 2>/dev/null
+}
+
+station_supports_5g() {
+	local classes
+	classes="$(printf '%s\n' "$1" | sed -n 's/^supp_op_classes=//p' | head -n1)"
+	if [ -n "$classes" ]; then
+		# Operating classes 115..130 are encoded as hexadecimal 73..82.
+		printf '%s\n' "$classes" | awk '
+			{
+				for (i = 1; i + 1 <= length($0); i += 2) {
+					byte = tolower(substr($0, i, 2))
+					if (byte ~ /^(73|74|75|76|77|78|79|7a|7b|7c|7d|7e|7f|80|81|82)$/)
+						exit 0
+				}
+				exit 1
+			}'
+		return $?
+	fi
+	# Older station dumps may omit operating classes when associated on 5 GHz.
+	printf '%s\n' "$1" | grep -q '^VHT_capability=yes$'
+}
+
+station_supports_btm() {
+	local capabilities
+	capabilities="$(printf '%s\n' "$1" | sed -n 's/^ext_capab=//p' | head -n1)"
+	# BSS Transition is Extended Capabilities bit 19: bit 3 in byte three.
+	printf '%s\n' "$capabilities" | awk '
+		length($0) >= 6 && substr(tolower($0), 6, 1) ~ /[89a-f]/ { exit 0 }
+		{ exit 1 }'
+}
+
+station_rssi() {
+	local value
+	for field in max_rssi mgmt_signal last_ack_signal; do
+		value="$(printf '%s\n' "$1" | sed -n "s/^$field=//p" | head -n1)"
+		case "$value" in
+			-[0-9]*) printf '%s\n' "$value"; return 0 ;;
+		esac
+	done
+	return 1
+}
+
+steer_station() {
+	local mac source safe lock delay cooldown now previous source_status source_freq
+	local sta_info rssi min_rssi source_ssid target target_status target_bssid target_channel op_class result
+	mac="$(printf '%s' "$1" | tr 'A-F' 'a-f')"
+	source="$2"
+	case "$mac" in
+		[0-9a-f][0-9a-f]:[0-9a-f][0-9a-f]:[0-9a-f][0-9a-f]:[0-9a-f][0-9a-f]:[0-9a-f][0-9a-f]:[0-9a-f][0-9a-f]) ;;
+		*) return 0 ;;
+	esac
+	steering_enabled || return 0
+	[ "$(uci_get wireless.main.unified)" = 1 ] || return 0
+
+	mkdir -p "$STATE_DIR" || return 0
+	safe="$(printf '%s' "$mac" | tr ':' '_')"
+	lock="$STATE_DIR/.$safe.lock"
+	mkdir "$lock" 2>/dev/null || return 0
+	trap 'rmdir "$lock" 2>/dev/null' EXIT INT TERM
+
+	delay="$(uci_get be6500_oem.band_steering.delay)"
+	case "$delay" in ''|*[!0-9]*) delay=8 ;; esac
+	[ "$delay" -le 30 ] || delay=30
+	[ "$delay" -eq 0 ] || sleep "$delay"
+
+	# The peer may already have added its 5 GHz MLO link while we waited.
+	sta_info="$(station_on_iface "$source" "$mac")"
+	[ -n "$sta_info" ] && [ "$sta_info" != FAIL ] || return 0
+	printf '%s\n' "$sta_info" | grep -q '^MLO=yes$' && return 0
+	station_supports_5g "$sta_info" || return 0
+	station_supports_btm "$sta_info" || return 0
+	# Do not suggest 5 GHz at the edge of coverage.  QSDK's max_rssi is the
+	# stable per-association value; fall back to current management/ACK RSSI.
+	min_rssi="$(uci_get be6500_oem.band_steering.min_rssi)"
+	case "$min_rssi" in -[0-9]*) ;; *) min_rssi=-65 ;; esac
+	rssi="$(station_rssi "$sta_info")" || return 0
+	[ "$rssi" -ge "$min_rssi" ] || return 0
+
+	source_status="$(iface_status "$source")"
+	source_freq="$(status_value "$source_status" freq)"
+	case "$source_freq" in 2[4-5][0-9][0-9]) ;; *) return 0 ;; esac
+	source_ssid="$(status_value "$source_status" 'ssid[0]')"
+	[ -n "$source_ssid" ] || return 0
+	target="$(find_5g_iface "$source_ssid")" || return 0
+	[ "$target" != "$source" ] || return 0
+	if station_on_iface "$target" "$mac" | grep -q "^$mac$"; then
+		return 0
+	fi
+
+	cooldown="$(uci_get be6500_oem.band_steering.cooldown)"
+	case "$cooldown" in ''|*[!0-9]*) cooldown=300 ;; esac
+	now="$(date +%s)"
+	previous="$(cat "$STATE_DIR/$safe" 2>/dev/null)"
+	case "$previous" in ''|*[!0-9]*) previous=0 ;; esac
+	[ $((now - previous)) -ge "$cooldown" ] || return 0
+
+	target_status="$(iface_status "$target")"
+	target_bssid="$(status_value "$target_status" 'bssid[0]')"
+	[ -n "$target_bssid" ] || target_bssid="$(status_value "$target_status" link_addr)"
+	target_channel="$(status_value "$target_status" channel)"
+	op_class="$(operating_class "$target_status")"
+	case "$target_bssid" in
+		[0-9a-fA-F][0-9a-fA-F]:[0-9a-fA-F][0-9a-fA-F]:[0-9a-fA-F][0-9a-fA-F]:[0-9a-fA-F][0-9a-fA-F]:[0-9a-fA-F][0-9a-fA-F]:[0-9a-fA-F][0-9a-fA-F]) ;;
+		*) return 0 ;;
+	esac
+	case "$target_channel" in ''|*[!0-9]*) return 0 ;; esac
+
+	result="$("$HOSTAPD_CLI" -p "$HOSTAPD_CTRL" -i "$source" bss_tm_req "$mac" \
+		pref=1 abridged=1 valid_int=10 \
+		"neighbor=$target_bssid,0x00000000,$op_class,$target_channel,9,0301ff" 2>/dev/null)"
+	[ "$result" = OK ] || return 0
+	printf '%s\n' "$now" > "$STATE_DIR/$safe"
+	"$LOGGER" -t be6500-band-steering \
+		"suggested 5 GHz BSSID $target_bssid to $mac (channel $target_channel, no forced disconnect)"
+}
+
+listen() {
+	local source
+	while steering_enabled; do
+		source="$(find_2g_iface)"
+		if [ -n "$source" ]; then
+			exec "$HOSTAPD_CLI" -r -p "$HOSTAPD_CTRL" -i "$source" -a "$ACTION"
+		fi
+		sleep 5
+	done
+	return 0
+}
+
+case "$1" in
+	listen) listen ;;
+	steer) steer_station "$2" "$3" ;;
+	*) echo "usage: $0 {listen|steer <mac> <source-iface>}" >&2; exit 2 ;;
+esac

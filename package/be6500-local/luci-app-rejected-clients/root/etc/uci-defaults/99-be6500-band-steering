@@ -1,0 +1,33 @@
+#!/bin/sh
+
+# Advertise 802.11k/v support on the main APs and enable the advisory 5 GHz
+# steering listener.  This runs before netifd on a preserved-config upgrade,
+# so no extra Wi-Fi restart is needed.
+revision=20260930-2
+[ "$(uci -q get be6500_oem.band_steering.defaults_revision)" = "$revision" ] && exit 0
+
+if [ "$(uci -q get be6500_oem.band_steering)" != settings ]; then
+	uci -q set be6500_oem.band_steering=settings || exit 1
+fi
+[ -n "$(uci -q get be6500_oem.band_steering.enabled)" ] || uci -q set be6500_oem.band_steering.enabled=1
+[ -n "$(uci -q get be6500_oem.band_steering.delay)" ] || uci -q set be6500_oem.band_steering.delay=8
+uci -q set be6500_oem.band_steering.cooldown=300
+uci -q set be6500_oem.band_steering.min_rssi=-65
+
+changed=0
+for section in $(uci -q show wireless 2>/dev/null | sed -n 's/^wireless\.\([^.=]*\)=wifi-iface$/\1/p'); do
+	[ "$(uci -q get "wireless.$section.mode")" = ap ] || continue
+	role="$(uci -q get "wireless.$section.be6500_role")"
+	network="$(uci -q get "wireless.$section.network")"
+	[ "$role" = main ] || [ "$network" = lan ] || continue
+	for option in bss_transition ieee80211k rrm_neighbor_report rrm_beacon_report; do
+		[ "$(uci -q get "wireless.$section.$option")" = 1 ] && continue
+		uci -q set "wireless.$section.$option=1" || exit 1
+		changed=1
+	done
+done
+
+[ "$changed" -eq 0 ] || uci -q commit wireless
+uci -q set "be6500_oem.band_steering.defaults_revision=$revision" || exit 1
+uci -q commit be6500_oem || exit 1
+exit 0

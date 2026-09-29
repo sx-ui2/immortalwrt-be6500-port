@@ -5,19 +5,28 @@ ZhaoYun BE6500. A successful build does not establish hardware bootability.
 
 ## Current installation and recovery release
 
-Use the v75 stock-to-ImmortalWrt bundle. It includes the pinned JDCloud
+Use the v76 stock-to-ImmortalWrt bundle. It includes the pinned JDCloud
 RE-CS-06 uBootKit binary, guarded APPSBL/GPT backup-and-install scripts, the RAM
-installer and the final persistent sysupgrade image. v75 retains the v73 MLO
+installer and the final persistent sysupgrade image. v76 retains the v73 MLO
 client fix and the v74 complete USB modem/tethering stack: CDC Ethernet,
 RNDIS, NCM, MBIM, `ipheth`, QMI WWAN, RMNET, Huawei NCM, USB serial and
 `usb-wdm`. It also adds pinned QModem Next with Chinese modem/SMS pages,
 ZeroTier, ttyd, Wake on LAN, htop, dig and bash. PCIe modem scanning and
 automatic dialing are disabled by default on this board, so QModem cannot
 probe the QCN9274 Wi-Fi endpoint or silently replace the current WAN.
-In v75, the QModem Next background suite follows QWRT's idle behavior: it is
+The QModem Next background suite follows QWRT's idle behavior: it is
 started only when a real cellular USB modem is present and stopped after the
 last modem is removed. Storage, printers, iPhone `ipheth` and Android RNDIS
 tethering do not wake the modem scanner.
+
+v76 adds conservative OEM-style 2.4-to-5 GHz steering. It only sends an
+advisory 802.11v transition request to a non-MLO station that explicitly
+advertises both 5 GHz operating classes and BSS-transition support while its
+2.4 GHz RSSI is at least -65 dBm. Dual-band mode uses its sole 5 GHz target;
+tri-band mode evaluates both 5 GHz radios and selects the lower-airtime target,
+with the non-DFS radio winning a tie. Requests are delayed for eight seconds
+and rate-limited to one per 300 seconds. There is no forced disassociation or
+temporary MAC blacklist, so a distant client can stay on 2.4 GHz.
 
 The inherited v73 change fixed MLO client association failures caused by the
 QCN9274 firmware reporting a zero ML-peer
@@ -31,7 +40,7 @@ derives each physical radio's displayed channel and frequency from its own UCI
 band/channel. Channel 108 is shown as 5.540 GHz instead of the invalid 6.490
 GHz. This board has no 6 GHz path. The v69 access-control and certificate fixes,
 the safe device editor and the fast hostname/identity pipeline remain included.
-See [`releases/2026-09-29-qmodem-ondemand-v75/README.md`](releases/2026-09-29-qmodem-ondemand-v75/README.md).
+See [`releases/2026-09-30-oem-band-steering-v76/README.md`](releases/2026-09-30-oem-band-steering-v76/README.md).
 
 ## Current status (2026-09-12)
 

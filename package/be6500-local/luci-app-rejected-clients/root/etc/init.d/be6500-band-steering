@@ -1,0 +1,18 @@
+#!/bin/sh /etc/rc.common
+
+START=96
+USE_PROCD=1
+
+start_service() {
+	[ "$(uci -q get be6500_oem.band_steering.enabled)" != 0 ] || return 0
+	procd_open_instance
+	procd_set_param command /usr/libexec/be6500-band-steering listen
+	procd_set_param respawn 3600 5 5
+	procd_set_param stdout 0
+	procd_set_param stderr 0
+	procd_close_instance
+}
+
+service_triggers() {
+	procd_add_reload_trigger be6500_oem wireless
+}

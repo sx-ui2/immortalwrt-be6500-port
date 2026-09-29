@@ -1,7 +1,7 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=luci-app-rejected-clients
-PKG_RELEASE:=68
+PKG_RELEASE:=69
 PKG_MAINTAINER:=Codex
 
 include $(INCLUDE_DIR)/package.mk
@@ -66,6 +66,8 @@ define Package/luci-app-rejected-clients/install
 	$(INSTALL_BIN) ./root/usr/libexec/be6500-iptv-priority $(1)/usr/libexec/be6500-iptv-priority
 	$(INSTALL_BIN) ./root/usr/libexec/be6500-patch-luci-firewall $(1)/usr/libexec/be6500-patch-luci-firewall
 	$(INSTALL_BIN) ./root/usr/libexec/be6500-fw4-multiwan $(1)/usr/libexec/be6500-fw4-multiwan
+	$(INSTALL_BIN) ./root/usr/libexec/be6500-band-steering $(1)/usr/libexec/be6500-band-steering
+	$(INSTALL_BIN) ./root/usr/libexec/be6500-band-steering-action $(1)/usr/libexec/be6500-band-steering-action
 	$(INSTALL_DIR) $(1)/etc/uci-defaults
 	$(INSTALL_BIN) ./root/etc/uci-defaults/95-be6500-luci-wireless $(1)/etc/uci-defaults/95-be6500-luci-wireless
 	$(INSTALL_BIN) ./root/etc/uci-defaults/99-be6500-wireless-runtime-fix $(1)/etc/uci-defaults/99-be6500-wireless-runtime-fix
@@ -74,6 +76,7 @@ define Package/luci-app-rejected-clients/install
 	$(INSTALL_BIN) ./root/etc/uci-defaults/99-be6500-led-defaults $(1)/etc/uci-defaults/99-be6500-led-defaults
 	$(INSTALL_BIN) ./root/etc/uci-defaults/99-be6500-switch-port-labels $(1)/etc/uci-defaults/99-be6500-switch-port-labels
 	$(INSTALL_BIN) ./root/etc/uci-defaults/99-be6500-runtime-services $(1)/etc/uci-defaults/99-be6500-runtime-services
+	$(INSTALL_BIN) ./root/etc/uci-defaults/99-be6500-band-steering $(1)/etc/uci-defaults/99-be6500-band-steering
 	$(INSTALL_DIR) $(1)/etc/sysctl.d
 	$(INSTALL_CONF) ./root/etc/sysctl.d/99-be6500-ppe.conf $(1)/etc/sysctl.d/99-be6500-ppe.conf
 	$(INSTALL_DIR) $(1)/etc/rc.button
@@ -85,6 +88,7 @@ define Package/luci-app-rejected-clients/install
 	$(INSTALL_BIN) ./root/etc/init.d/be6500-luci-patches $(1)/etc/init.d/be6500-luci-patches
 	$(INSTALL_BIN) ./root/etc/init.d/be6500-guest-qos $(1)/etc/init.d/be6500-guest-qos
 	$(INSTALL_BIN) ./root/etc/init.d/be6500-game-port $(1)/etc/init.d/be6500-game-port
+	$(INSTALL_BIN) ./root/etc/init.d/be6500-band-steering $(1)/etc/init.d/be6500-band-steering
 	$(INSTALL_DIR) $(1)/etc/hotplug.d/iface
 	$(INSTALL_BIN) ./root/etc/hotplug.d/iface/95-be6500-fw4-multiwan $(1)/etc/hotplug.d/iface/95-be6500-fw4-multiwan
 	$(INSTALL_BIN) ./root/etc/hotplug.d/iface/96-be6500-guest-qos $(1)/etc/hotplug.d/iface/96-be6500-guest-qos

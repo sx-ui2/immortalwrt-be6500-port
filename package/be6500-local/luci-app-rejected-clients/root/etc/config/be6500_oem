@@ -10,6 +10,13 @@ config settings 'guest_qos'
 config settings 'qos'
 	option mode '1'
 
+config settings 'band_steering'
+	option enabled '1'
+	option delay '8'
+	option cooldown '300'
+	option min_rssi '-65'
+	option defaults_revision '20260930-2'
+
 config settings 'game'
 	option enable '0'
 	option port 'lan2'

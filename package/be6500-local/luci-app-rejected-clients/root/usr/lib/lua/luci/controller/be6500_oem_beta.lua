@@ -1089,6 +1089,13 @@ local function action_native_wifi_impl()
                 delete_value(section, "auth_secret", device)
             end
             if role == "main" then
+				-- Advertise 802.11k/v on every main link.  The steering
+				-- service only sends an advisory BTM request to non-MLO,
+				-- dual-band stations which remain on 2.4 GHz.
+				set_value(section, "bss_transition", "1", device)
+				set_value(section, "ieee80211k", "1", device)
+				set_value(section, "rrm_neighbor_report", "1", device)
+				set_value(section, "rrm_beacon_report", "1", device)
                 local channel = tonumber(band.channel) or 0
                 -- QCN92xx exposes the two 5 GHz RF ranges as separate hardware
                 -- radio indices under one wiphy.  Unrestricted ACS on logical
