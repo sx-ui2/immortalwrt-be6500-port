@@ -60,6 +60,16 @@ class AccessListUiTests(unittest.TestCase):
         self.assertNotIn("return state.devices.filter", access)
         self.assertNotIn("\n      state.devices.forEach(function (device) {", access)
 
+    def test_device_picker_keeps_complete_known_inventory(self):
+        source = PAGES.read_text()
+        start = source.index("    function refreshDeviceOptions() {")
+        end = source.index("    function modal(", start)
+        picker = source[start:end]
+        self.assertIn("asArray(state.devices).forEach", picker)
+        self.assertNotIn("indexOf('Wi-Fi')", picker)
+        self.assertNotIn('indexOf("Wi-Fi")', picker)
+        self.assertIn("if (!mac || listed[mac] || candidates[mac]) return;", picker)
+
 
 if __name__ == "__main__":
     unittest.main()

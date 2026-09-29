@@ -1174,9 +1174,10 @@
       var candidates = {}, order = [];
       asArray(state.devices).forEach(function (device) {
         var mac = normalizeMac(device.uid || device.id || device.mac);
-        // The access list controls Wi-Fi only.  DHCP/ARP history is not proof
-        // of a wired connection, and wired clients are not valid ACL targets.
-        if (String(device.type || '').indexOf('Wi-Fi') < 0) return;
+        // Offer the complete known-device inventory, as older releases did.
+        // An offline or currently wired client may later join Wi-Fi with the
+        // same MAC, so hiding it here makes a valid ACL target impossible to
+        // select even though it is already visible on the device page.
         if (!mac || listed[mac] || candidates[mac]) return;
         candidates[mac] = { mac: mac, name: device.name || '', rejected_at: '' };
         order.push(mac);
