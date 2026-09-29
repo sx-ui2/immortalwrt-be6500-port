@@ -5,9 +5,25 @@ ZhaoYun BE6500. A successful build does not establish hardware bootability.
 
 ## Current installation and recovery release
 
-Use the v72 stock-to-ImmortalWrt bundle.  It includes the pinned JDCloud
+Use the v75 stock-to-ImmortalWrt bundle. It includes the pinned JDCloud
 RE-CS-06 uBootKit binary, guarded APPSBL/GPT backup-and-install scripts, the RAM
-installer and the final persistent sysupgrade image. Wired clients are now
+installer and the final persistent sysupgrade image. v75 retains the v73 MLO
+client fix and the v74 complete USB modem/tethering stack: CDC Ethernet,
+RNDIS, NCM, MBIM, `ipheth`, QMI WWAN, RMNET, Huawei NCM, USB serial and
+`usb-wdm`. It also adds pinned QModem Next with Chinese modem/SMS pages,
+ZeroTier, ttyd, Wake on LAN, htop, dig and bash. PCIe modem scanning and
+automatic dialing are disabled by default on this board, so QModem cannot
+probe the QCN9274 Wi-Fi endpoint or silently replace the current WAN.
+In v75, the QModem Next background suite follows QWRT's idle behavior: it is
+started only when a real cellular USB modem is present and stopped after the
+last modem is removed. Storage, printers, iPhone `ipheth` and Android RNDIS
+tethering do not wake the modem scanner.
+
+The inherited v73 change fixed MLO client association failures caused by the
+QCN9274 firmware reporting a zero ML-peer
+limit to the Linux 6.6 ath12k driver. The board-local fallback uses the same
+256-peer value required by the matching OEM and QWRT Qualcomm 5.4 drivers,
+while preserving every valid firmware-reported limit. Wired clients are
 labelled immediately instead of waiting in an indeterminate connection state.
 The LuCI wireless overview also recognizes preserved MLD configurations even
 when the bookkeeping flag is absent, de-duplicates the shared logical BSSID and
@@ -15,7 +31,7 @@ derives each physical radio's displayed channel and frequency from its own UCI
 band/channel. Channel 108 is shown as 5.540 GHz instead of the invalid 6.490
 GHz. This board has no 6 GHz path. The v69 access-control and certificate fixes,
 the safe device editor and the fast hostname/identity pipeline remain included.
-See [`releases/2026-09-28-wired-mlo-status-v72/README.md`](releases/2026-09-28-wired-mlo-status-v72/README.md).
+See [`releases/2026-09-29-qmodem-ondemand-v75/README.md`](releases/2026-09-29-qmodem-ondemand-v75/README.md).
 
 ## Current status (2026-09-12)
 
@@ -39,6 +55,7 @@ the source overlays, patches and reproducible build inputs only.
 - ImmortalWrt branch: `openwrt-24.10`
 - ImmortalWrt source commit: `99ca94091f673607bdcb92ba1f93bda1e811fc93`
 - ImmortalWrt userspace branch: `openwrt-24.10`
+- QModem commit: `c49654efc870f53712ee8e25bf181722eb1466d9`
 - Effective external kernel: Qualcomm QSDK 14 Linux `6.6.116` (runtime release
   `6.6.116+`)
 - Qualcomm QSDK release: `NHSS.QSDK.14.0.r9-00040-O`

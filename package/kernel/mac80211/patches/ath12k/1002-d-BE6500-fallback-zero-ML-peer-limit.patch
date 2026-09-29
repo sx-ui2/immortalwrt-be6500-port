@@ -1,0 +1,31 @@
+--- a/drivers/net/wireless/ath/ath12k/wmi.c
++++ b/drivers/net/wireless/ath/ath12k/wmi.c
+@@ -11952,7 +11952,27 @@ static int ath12k_wmi_rdy_parse(struct ath12k_base *ab, u16 tag, u16 len,
+ 				fixed_param.ready_event_min.mac_addr.addr);
+ 		ab->pktlog_defs_checksum = le32_to_cpu(fixed_param.pktlog_defs_checksum);
+ 		ab->wmi_ready = true;
+-		ab->max_ml_peer_supported = fixed_param.max_num_ml_peers;
++		ab->max_ml_peer_supported =
++			le32_to_cpu(fixed_param.max_num_ml_peers);
++
++		/*
++		 * The IPQ5332/QCN9274 firmware shipped for JDC-BE6500 uses an
++		 * older READY_EVENT layout and leaves max_num_ml_peers at zero.
++		 * Passing that value through makes every MLO association fail in
++		 * ath12k_wifi7_peer_ml_id_alloc() before the peer reaches firmware.
++		 *
++		 * Qualcomm's matching 5.4 qca_ol driver requires the MLO group
++		 * configuration to advertise exactly 256 peers.  Use that same value
++		 * only for this board; firmware that reports a valid ML peer limit
++		 * remains authoritative.
++		 */
++		if (of_machine_is_compatible("jdcloud,be6500") &&
++		    (!ab->max_ml_peer_supported ||
++		     ab->max_ml_peer_supported > ATH12K_MAX_MLO_PEERS)) {
++			ab->max_ml_peer_supported = 256;
++			ath12k_warn(ab, "invalid firmware ML peer limit, using %u\n",
++				    ab->max_ml_peer_supported);
++		}
+ 		break;
+ 	case WMI_TAG_ARRAY_FIXED_STRUCT:
+ 		addr_list = (struct ath12k_wmi_mac_addr_params *)ptr;

@@ -290,7 +290,7 @@ class NetworkPortUiTests(unittest.TestCase):
         default = IFNAME_DEFAULT.read_text()
         makefile = (CURRENT_CONFIG / "Makefile").read_text()
 
-        self.assertIn("PKG_RELEASE:=11", makefile)
+        self.assertIn("PKG_RELEASE:=13", makefile)
         self.assertIn("be6500-migrate-network-ifname", makefile)
         self.assertIn("Package/be6500-current-config/postinst", makefile)
         self.assertIn("migrate_bridge_interfaces", source)

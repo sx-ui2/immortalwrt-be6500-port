@@ -1,0 +1,153 @@
+#!/bin/sh
+
+TAG=be6500-qmodem-runtime
+SYSFS_ROOT="${BE6500_SYSFS_ROOT:-/sys}"
+INITD_ROOT="${BE6500_INITD_ROOT:-/etc/init.d}"
+QMODEM_SCAN="${BE6500_QMODEM_SCAN:-/usr/share/qmodem/modem_scan.sh}"
+UCI="${BE6500_UCI:-uci}"
+LOGGER="${BE6500_LOGGER:-logger}"
+RUNTIME_DIR="${BE6500_RUNTIME_DIR:-/var/run}"
+ACTIVE_MARKER="$RUNTIME_DIR/be6500-qmodem-runtime.active"
+
+qmodem_services="qmodem_init ubus-at-daemon qmodem-settings qmodem-smsd qmodem_led qmodem_network qmodem_reboot qmodem_usage_stats sms_forwarder"
+
+usb_device_path()
+{
+	local path="$1" name parent
+
+	case "$path" in
+		"$SYSFS_ROOT"/*) ;;
+		/sys/*) path="$SYSFS_ROOT/${path#/sys/}" ;;
+		/*) path="$SYSFS_ROOT$path" ;;
+		*) path="$SYSFS_ROOT/bus/usb/devices/$path" ;;
+	esac
+
+	# Interface events name 2-1:1.0 while the USB device itself is 2-1.
+	name="${path##*/}"
+	parent="${path%/*}"
+	case "$name" in
+		*:*) path="$parent/${name%%:*}" ;;
+	esac
+
+	[ -f "$path/idVendor" ] || return 1
+	printf '%s\n' "$path"
+}
+
+is_cellular_usb_device()
+{
+	local path="$1" node driver item
+
+	path="$(usb_device_path "$path")" || return 1
+
+	# QMI/MBIM control channels and USB serial AT ports are reliable modem
+	# evidence. They deliberately exclude storage, printers, iPhone ipheth and
+	# Android RNDIS tethering, which must not wake the QModem service suite.
+	for item in \
+		"$path":*/usbmisc/cdc-wdm* \
+		"$path":*/ttyUSB* \
+		"$path":*/ttyACM* \
+		"$path":*/*/ttyUSB* \
+		"$path":*/*/ttyACM*; do
+		[ -e "$item" ] && return 0
+	done
+
+	for node in "$path":*; do
+		[ -e "$node" ] || continue
+		driver="$(basename "$(readlink -f "$node/driver" 2>/dev/null)")"
+		case "$driver" in
+			option|qcserial|qmi_wwan|cdc_mbim|huawei_cdc_ncm)
+				return 0
+				;;
+		esac
+	done
+
+	return 1
+}
+
+find_cellular_usb_device()
+{
+	local path
+
+	for path in "$SYSFS_ROOT"/bus/usb/devices/*; do
+		[ -f "$path/idVendor" ] || continue
+		is_cellular_usb_device "$path" && {
+			printf '%s\n' "$path"
+			return 0
+		}
+	done
+
+	return 1
+}
+
+service_start()
+{
+	[ -x "$INITD_ROOT/$1" ] || return 0
+	"$INITD_ROOT/$1" start >/dev/null 2>&1
+}
+
+service_stop()
+{
+	[ -x "$INITD_ROOT/$1" ] || return 0
+	"$INITD_ROOT/$1" stop >/dev/null 2>&1
+}
+
+start_runtime()
+{
+	local path="$1" service slot
+
+	[ "$("$UCI" -q get qmodem.main.be6500_runtime)" = "on_demand" ] || return 0
+	path="$(usb_device_path "$path")" || return 0
+	is_cellular_usb_device "$path" || return 0
+
+	mkdir -p "$RUNTIME_DIR"
+	if [ ! -e "$ACTIVE_MARKER" ]; then
+		for service in $qmodem_services; do
+			service_start "$service"
+		done
+		: > "$ACTIVE_MARKER"
+	fi
+
+	slot="${path##*/}"
+	"$LOGGER" -t "$TAG" "cellular USB device $slot detected; QModem runtime started"
+	# The init service and USB hotplug hook already invoke this helper in their
+	# own short-lived background jobs. Run discovery serially here so an early
+	# shell exit cannot lose the scan and add/bind events cannot overlap it.
+	[ -x "$QMODEM_SCAN" ] && \
+		"$QMODEM_SCAN" add "$slot" usb 0 >/dev/null 2>&1
+}
+
+stop_runtime()
+{
+	local reverse service
+
+	# Stop in reverse dependency order. Driver modules and LuCI pages remain
+	# installed; only resident helpers are released.
+	reverse="sms_forwarder qmodem_usage_stats qmodem_reboot qmodem_network qmodem_led qmodem-smsd qmodem-settings ubus-at-daemon qmodem_init"
+	for service in $reverse; do
+		service_stop "$service"
+	done
+	rm -f "$ACTIVE_MARKER"
+	"$LOGGER" -t "$TAG" "no cellular USB device present; QModem runtime stopped"
+}
+
+case "$1" in
+	boot)
+		device="$(find_cellular_usb_device)" || exit 0
+		start_runtime "$device"
+		;;
+	add)
+		start_runtime "$2"
+		;;
+	remove)
+		find_cellular_usb_device >/dev/null 2>&1 || stop_runtime
+		;;
+	stop)
+		stop_runtime
+		;;
+	*)
+		echo "usage: $0 {boot|add DEVPATH|remove|stop}" >&2
+		exit 2
+		;;
+esac
+
+exit 0

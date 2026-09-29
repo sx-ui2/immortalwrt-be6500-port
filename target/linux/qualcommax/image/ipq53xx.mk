@@ -29,10 +29,25 @@ define Device/jdcloud_be6500
 		luci-app-rejected-clients \
 		be6500-current-config \
 		openssh-sftp-server \
+		bash htop bind-dig \
+		zerotier luci-app-zerotier luci-i18n-zerotier-zh-cn \
+		ttyd luci-app-ttyd luci-i18n-ttyd-zh-cn \
+		etherwake luci-app-wol luci-i18n-wol-zh-cn \
 		automount block-mount blockd usbutils \
 		kmod-usb-core kmod-usb3 kmod-usb-dwc3 kmod-usb-dwc3-qcom \
 		kmod-usb-storage kmod-usb-storage-extras kmod-usb-storage-uas \
 		kmod-usb-printer \
+		kmod-usb-net-cdc-ether kmod-usb-net-rndis \
+		kmod-usb-net-cdc-ncm kmod-usb-net-cdc-mbim \
+		kmod-usb-net-huawei-cdc-ncm kmod-usb-net-ipheth \
+		kmod-usb-net-qmi-wwan kmod-rmnet \
+		kmod-usb-acm kmod-usb-wdm \
+		kmod-usb-serial kmod-usb-serial-wwan \
+		kmod-usb-serial-option kmod-usb-serial-qualcomm \
+		usb-modeswitch \
+		luci-proto-qmi luci-i18n-proto-qmi-zh-cn \
+		luci-proto-mbim luci-i18n-proto-mbim-zh-cn \
+		luci-app-qmodem-next luci-i18n-qmodem-next-zh-cn \
 		kmod-fs-btrfs kmod-fs-ext4 kmod-fs-exfat kmod-fs-vfat \
 		kmod-fs-ntfs3 ntfs3-mount \
 		luci-app-diskman luci-app-samba4 luci-app-hd-idle luci-app-usb-printer \

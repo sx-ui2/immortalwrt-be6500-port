@@ -1,0 +1,34 @@
+#!/bin/sh
+
+# This file deliberately has a new uci-defaults name for v75. An overlay that
+# already deleted v74's 96-be6500-qmodem-defaults must not mask this migration.
+# QWRT runs modem discovery as a one-shot boot/hotplug job. QModem Next starts
+# several resident helpers even when no modem exists. On this board that costs
+# memory and periodically wakes the CPU, while the only PCIe endpoint is the
+# QCN9274 Wi-Fi radio. Mask the upstream automatic probes and let the small
+# BE6500 runtime helper start QModem only for a real USB cellular device.
+uci -q get qmodem.main >/dev/null 2>&1 || exit 0
+
+uci -q set qmodem.main.enable_dial='0'
+uci -q set qmodem.main.block_auto_probe='1'
+uci -q set qmodem.main.try_preset_usb='0'
+uci -q set qmodem.main.enable_usb_scan='0'
+uci -q set qmodem.main.try_preset_pcie='0'
+uci -q set qmodem.main.enable_pcie_scan='0'
+uci -q set qmodem.main.be6500_runtime='on_demand'
+uci -q commit qmodem
+
+# Keep package functionality installed, but prevent QModem Next's background
+# suite from being launched unconditionally by rcS. The BE6500 runtime service
+# below starts the same scripts when a supported modem is physically present.
+for service in \
+	qmodem_led qmodem_init qmodem-settings qmodem-smsd \
+	qmodem_network qmodem_reboot qmodem_usage_stats \
+	ubus-at-daemon sms_forwarder; do
+	[ -x "/etc/init.d/$service" ] && "/etc/init.d/$service" disable
+done
+
+[ -x /etc/init.d/be6500-qmodem-runtime ] && \
+	/etc/init.d/be6500-qmodem-runtime enable
+
+exit 0

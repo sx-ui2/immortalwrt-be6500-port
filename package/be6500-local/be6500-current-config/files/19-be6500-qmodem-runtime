@@ -1,0 +1,17 @@
+#!/bin/sh
+
+[ "$(uci -q get qmodem.main.be6500_runtime)" = "on_demand" ] || exit 0
+
+case "$ACTION" in
+	add|bind)
+		[ -n "$DEVPATH" ] || exit 0
+		( sleep 3; /usr/libexec/be6500-qmodem-runtime add "$DEVPATH" ) \
+			>/dev/null 2>&1 &
+		;;
+	remove|unbind)
+		( sleep 3; /usr/libexec/be6500-qmodem-runtime remove ) \
+			>/dev/null 2>&1 &
+		;;
+esac
+
+exit 0

@@ -1,7 +1,7 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=be6500-current-config
-PKG_RELEASE:=11
+PKG_RELEASE:=13
 
 include $(INCLUDE_DIR)/package.mk
 
@@ -24,11 +24,17 @@ define Package/be6500-current-config/install
 	$(INSTALL_DIR) $(1)/usr/share/be6500-current-config
 	$(CP) ./files/etc/config/* $(1)/usr/share/be6500-current-config/
 	$(INSTALL_DIR) $(1)/etc/uci-defaults
+	$(INSTALL_BIN) ./files/95-be6500-qmodem-ondemand $(1)/etc/uci-defaults/95-be6500-qmodem-ondemand
 	$(INSTALL_BIN) ./files/98-be6500-default-password $(1)/etc/uci-defaults/98-be6500-default-password
 	$(INSTALL_BIN) ./files/97-be6500-migrate-network-ifname $(1)/etc/uci-defaults/97-be6500-migrate-network-ifname
 	$(INSTALL_BIN) ./files/99-be6500-current-config $(1)/etc/uci-defaults/99-be6500-current-config
 	$(INSTALL_DIR) $(1)/usr/libexec
 	$(INSTALL_BIN) ./files/be6500-migrate-network-ifname $(1)/usr/libexec/be6500-migrate-network-ifname
+	$(INSTALL_BIN) ./files/be6500-qmodem-runtime $(1)/usr/libexec/be6500-qmodem-runtime
+	$(INSTALL_DIR) $(1)/etc/init.d
+	$(INSTALL_BIN) ./files/be6500-qmodem-runtime.init $(1)/etc/init.d/be6500-qmodem-runtime
+	$(INSTALL_DIR) $(1)/etc/hotplug.d/usb
+	$(INSTALL_BIN) ./files/19-be6500-qmodem-runtime $(1)/etc/hotplug.d/usb/19-be6500-qmodem-runtime
 endef
 
 define Package/be6500-current-config/postinst

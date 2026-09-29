@@ -499,6 +499,7 @@ define Build/Prepare
 	$(PATCH) -d $(PKG_BUILD_DIR) -p1 < $(PATCH_DIR)/ath12k/0999-d-BE6500-select-single-or-dual-mac-firmware.patch
 	$(PATCH) -d $(PKG_BUILD_DIR) -p1 < $(PATCH_DIR)/ath12k/1000-d-BE6500-skip-absent-IPQ5332-rxgainlut.patch
 	$(PATCH) -d $(PKG_BUILD_DIR) -p1 < $(PATCH_DIR)/ath12k/1001-d-BE6500-expose-full-single-radio-5g-range.patch
+	$(PATCH) -d $(PKG_BUILD_DIR) -p1 < $(PATCH_DIR)/ath12k/1002-d-BE6500-fallback-zero-ML-peer-limit.patch
 ifdef CONFIG_PACKAGE_QCN_EXTN
 	$(CP) $(TOPDIR)/$(SRCPREFIX)src/wlan-open-extns/subsys/src $(PKG_BUILD_DIR)/net/mac80211/qcn_extns
 	$(CP) $(TOPDIR)/$(SRCPREFIX)src/wlan-open-extns/ath/ath12k/src $(PKG_BUILD_DIR)/drivers/net/wireless/ath/ath12k/qcn_extns
