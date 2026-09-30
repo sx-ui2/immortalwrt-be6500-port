@@ -7,28 +7,49 @@
 LOCK_DIR="/var/lock/be6500-usb-host.lock"
 # Keep the crash marker on the writable overlay, but outside /etc so a
 # sysupgrade does not carry an old hardware-probe failure into a new image.
-STATE_DIR="/overlay/be6500-usb-state"
+STATE_DIR="${BE6500_USB_STATE_DIR:-/overlay/be6500-usb-state}"
+SYSFS_ROOT="${BE6500_USB_SYSFS_ROOT:-/sys}"
 PENDING_FILE="$STATE_DIR/probe-in-progress"
 BLOCKED_FILE="$STATE_DIR/auto-disabled"
 HEALTHY_FILE="$STATE_DIR/last-probe-ok"
+GUARD_REVISION_FILE="$STATE_DIR/guard-revision"
+GUARD_REVISION=2
 
 log() {
 	logger -t be6500-usb-host -- "$*"
 }
 
 host_ready() {
-	local host
-	local controller
+	local bus
+	local bus_path
 
-	for host in /sys/class/usb_host/host*; do
-		[ -e "$host" ] || continue
-		for controller in /sys/bus/platform/devices/*8a00000*; do
-			[ -e "$controller" ] || continue
-			[ -L "$controller/driver" ] && return 0
-		done
+	# USB host controllers are not represented by /sys/class/usb_host.  A
+	# registered xHCI controller exposes one or more root hubs as usb* devices;
+	# make sure the hub belongs to the IPQ5332 controller at 0x08a00000.
+	for bus in "$SYSFS_ROOT"/bus/usb/devices/usb*; do
+		[ -e "$bus" ] || continue
+		bus_path="$(readlink -f "$bus" 2>/dev/null)"
+		case "$bus_path" in
+			*8a00000*) return 0 ;;
+		esac
 	done
 
 	return 1
+}
+
+migrate_guard_state() {
+	local revision
+
+	revision="$(cat "$GUARD_REVISION_FILE" 2>/dev/null)"
+	[ "$revision" = "$GUARD_REVISION" ] && return 0
+
+	# Revision 1 checked a nonexistent sysfs class and could mark a successful
+	# probe as failed.  Retry exactly once with the corrected root-hub check.
+	# The revision is stored before probing, so a real crash still becomes
+	# blocked on the following boot instead of causing a retry loop.
+	rm -f "$PENDING_FILE" "$BLOCKED_FILE" "$HEALTHY_FILE"
+	printf '%s\n' "$GUARD_REVISION" > "$GUARD_REVISION_FILE" || return 1
+	sync
 }
 
 module_loaded() {
@@ -94,6 +115,10 @@ guarded_probe() {
 	}
 
 	mkdir -p "$STATE_DIR"
+	migrate_guard_state || {
+		log "unable to migrate USB probe guard state"
+		return 1
+	}
 
 	[ ! -e "$BLOCKED_FILE" ] || {
 		log "automatic USB probe held after an earlier incomplete attempt"
@@ -132,6 +157,7 @@ print_status() {
 	auto_enabled && printf '%s\n' 'autostart=enabled' || printf '%s\n' 'autostart=disabled'
 	[ -e "$BLOCKED_FILE" ] && printf '%s\n' 'guard=blocked' || printf '%s\n' 'guard=clear'
 	[ -e "$HEALTHY_FILE" ] && printf '%s\n' 'last_probe=ok' || printf '%s\n' 'last_probe=unknown'
+	printf 'guard_revision=%s\n' "$(cat "$GUARD_REVISION_FILE" 2>/dev/null || printf 'unknown')"
 }
 
 case "${1:-status}" in

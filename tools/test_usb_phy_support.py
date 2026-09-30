@@ -1,4 +1,7 @@
+import os
 import pathlib
+import subprocess
+import tempfile
 import unittest
 
 
@@ -81,6 +84,11 @@ class UsbPhySupportTests(unittest.TestCase):
         makefile = (AUTOSTART_PKG / "Makefile").read_text()
         self.assertIn('PENDING_FILE="$STATE_DIR/probe-in-progress"', helper)
         self.assertIn('BLOCKED_FILE="$STATE_DIR/auto-disabled"', helper)
+        self.assertIn('GUARD_REVISION_FILE="$STATE_DIR/guard-revision"', helper)
+        self.assertIn('SYSFS_ROOT="${BE6500_USB_SYSFS_ROOT:-/sys}"', helper)
+        self.assertIn('"$SYSFS_ROOT"/bus/usb/devices/usb*', helper)
+        self.assertNotIn('/sys/class/usb_host/host*', helper)
+        self.assertLess(helper.index("migrate_guard_state ||"), helper.index('[ ! -e "$BLOCKED_FILE" ]'))
         self.assertLess(helper.index('> "$PENDING_FILE"'), helper.index('if run_locked; then'))
         self.assertIn("guarded-probe)", helper)
         self.assertIn("enable|retry)", helper)
@@ -88,6 +96,29 @@ class UsbPhySupportTests(unittest.TestCase):
         self.assertIn("START=99", init)
         self.assertIn("be6500-usb-host guarded-probe", init)
         self.assertIn("+kmod-usb-phy-ipq5018", makefile)
+
+    def test_usb_host_ready_detects_ipq5332_xhci_root_hub(self):
+        helper = PKG / "files/be6500-usb-host"
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            sysfs = root / "sys"
+            root_hub = sysfs / "devices/platform/soc@0/8a00000.usb/xhci-hcd.0.auto/usb1"
+            root_hub.mkdir(parents=True)
+            usb_devices = sysfs / "bus/usb/devices"
+            usb_devices.mkdir(parents=True)
+            (usb_devices / "usb1").symlink_to(root_hub)
+
+            environment = os.environ.copy()
+            environment["BE6500_USB_SYSFS_ROOT"] = str(sysfs)
+            environment["BE6500_USB_STATE_DIR"] = str(root / "state")
+            result = subprocess.run(
+                ["sh", str(helper), "status"],
+                check=True,
+                capture_output=True,
+                text=True,
+                env=environment,
+            )
+            self.assertIn("host=ready", result.stdout)
 
     def test_persistent_image_excludes_phy_experiment(self):
         profile = PROFILE.read_text()
