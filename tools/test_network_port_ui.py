@@ -97,6 +97,10 @@ class NetworkPortUiTests(unittest.TestCase):
         self.assertIn("package-manager-call", service)
         self.assertIn("option http_timeout 20", service)
         self.assertIn("unavailable custom ipq53xx feed", service)
+        self.assertIn("unavailable bundled qmodem feed", service)
+        self.assertIn("immortalwrt_qmodem", service)
+        self.assertIn("unavailable bundled qmodem feed", defaults)
+        self.assertIn("immortalwrt_qmodem", defaults)
         self.assertIn("package-manager-call", defaults)
         self.assertIn("option script_timeout '300'", uhttpd)
         self.assertIn("option network_timeout '300'", uhttpd)
@@ -317,7 +321,7 @@ class NetworkPortUiTests(unittest.TestCase):
 
     def test_package_installs_factory_port_helpers_and_network_patcher(self):
         makefile = MAKEFILE.read_text()
-        self.assertIn("PKG_RELEASE:=69", makefile)
+        self.assertIn("PKG_RELEASE:=70", makefile)
         self.assertIn("+coreutils-timeout", makefile)
         self.assertIn("be6500-luci-overrides/package-manager-call", makefile)
         self.assertIn("be6500-patch-luci-network", makefile)

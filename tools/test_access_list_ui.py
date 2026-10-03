@@ -70,6 +70,24 @@ class AccessListUiTests(unittest.TestCase):
         self.assertNotIn('indexOf("Wi-Fi")', picker)
         self.assertIn("if (!mac || listed[mac] || candidates[mac]) return;", picker)
 
+    def test_access_list_json_export_and_validated_staged_import(self):
+        source = PAGES.read_text()
+        start = source.index("  function accessPage() {")
+        end = source.index("\n  function rejectedPage() {", start)
+        access = source[start:end]
+        self.assertIn('id="access-export"', access)
+        self.assertIn('id="access-import"', access)
+        self.assertIn('id="access-import-file"', access)
+        self.assertIn("format: 'be6500-access-list', version: 1", access)
+        self.assertIn("blacklist: portableEntries(draft.deny)", access)
+        self.assertIn("whitelist: portableEntries(draft.allow)", access)
+        self.assertIn("validatedImportList(payload.blacklist, '黑名单')", access)
+        self.assertIn("validatedImportList(payload.whitelist, '白名单')", access)
+        self.assertIn("if (seen[mac]) return;", access)
+        self.assertIn("dirty = true; render();", access)
+        self.assertIn("请检查后点击“保存并应用”", access)
+        self.assertNotIn("rpc('set_macfilter'", access[access.index("function importAccessFile"):access.index("function deviceFor")])
+
 
 if __name__ == "__main__":
     unittest.main()

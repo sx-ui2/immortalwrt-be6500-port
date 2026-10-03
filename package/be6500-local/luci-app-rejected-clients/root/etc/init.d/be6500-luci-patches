@@ -3,12 +3,12 @@
 START=19
 
 start() {
-	# The ipq53xx target feed is not published, while the architecture feeds
-	# are valid. Remove the permanent 404 and install a bounded JSON helper
-	# before uhttpd starts so LuCI package operations cannot return an empty
-	# CGI response when a mirror is slow.
+	# The ipq53xx target feed and the local QModem build feed are not published
+	# by downloads.immortalwrt.org, while the standard architecture feeds are
+	# valid. Remove both permanent 404s before LuCI performs opkg operations.
 	if [ -f /etc/opkg/distfeeds.conf ]; then
 		sed -i '/^[[:space:]]*src\/gz[[:space:]]\+immortalwrt_core[[:space:]].*\/targets\/qualcommax\/ipq53xx\/packages/s/^/# unavailable custom ipq53xx feed: /' /etc/opkg/distfeeds.conf
+		sed -i '/^[[:space:]]*src\/gz[[:space:]]\+immortalwrt_qmodem[[:space:]].*\/qmodem\/*$/s/^/# unavailable bundled qmodem feed: /' /etc/opkg/distfeeds.conf
 	fi
 	if [ -f /etc/opkg.conf ] && ! grep -q '^[[:space:]]*option[[:space:]]\+http_timeout[[:space:]]' /etc/opkg.conf; then
 		printf '\noption http_timeout 20\n' >> /etc/opkg.conf

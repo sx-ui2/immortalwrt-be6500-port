@@ -6,11 +6,12 @@ if [ -d /usr/share/be6500-luci-overrides/status/include ]; then
 	mkdir -p /www/luci-static/resources/view/status/include
 	cp -f /usr/share/be6500-luci-overrides/status/include/*.js /www/luci-static/resources/view/status/include/
 fi
-# ipq53xx is a local BE6500 subtarget and ImmortalWrt does not publish a
-# matching target package index. Keep architecture-independent feeds usable
-# without making every opkg update fail on the permanently absent core URL.
+# ipq53xx and QModem are local BE6500 build feeds; ImmortalWrt does not publish
+# matching indexes for either one. Keep the standard architecture feeds usable
+# without making every opkg update fail on these permanently absent URLs.
 if [ -f /etc/opkg/distfeeds.conf ]; then
 	sed -i '/^[[:space:]]*src\/gz[[:space:]]\+immortalwrt_core[[:space:]].*\/targets\/qualcommax\/ipq53xx\/packages/s/^/# unavailable custom ipq53xx feed: /' /etc/opkg/distfeeds.conf
+	sed -i '/^[[:space:]]*src\/gz[[:space:]]\+immortalwrt_qmodem[[:space:]].*\/qmodem\/*$/s/^/# unavailable bundled qmodem feed: /' /etc/opkg/distfeeds.conf
 fi
 if [ -f /etc/opkg.conf ] && ! grep -q '^[[:space:]]*option[[:space:]]\+http_timeout[[:space:]]' /etc/opkg.conf; then
 	printf '\noption http_timeout 20\n' >> /etc/opkg.conf

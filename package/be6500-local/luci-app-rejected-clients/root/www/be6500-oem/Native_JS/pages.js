@@ -1146,9 +1146,9 @@
       '<button type="button" id="access-allow" data-policy="allow"><i></i><span>白名单模式（只允许列表中设备访问）</span></button></div>' +
       '<select id="access-policy" class="native-hidden"><option value="deny">deny</option><option value="allow">allow</option></select></div>' +
       row('启用', toggle('access-enabled', '')) +
-      '<div class="native-info">添加、移除、启停及名单模式切换会暂存；保存后会即时同步到运行中的 Wi-Fi，不会重启 Wi-Fi。</div>' +
+      '<div class="native-info">添加、移除、启停、名单模式切换和导入都会暂存；确认后点击“保存并应用”，配置会即时同步到运行中的 Wi-Fi，不会重启 Wi-Fi。导出文件同时包含黑名单、白名单、当前模式和启用状态。</div>' +
       '<section class="native-access-list"><h3 id="access-list-title">黑名单设备列表</h3><div class="native-table native-access-table"><ul class="native-table-head"><li class="access-name">设备名称</li><li class="access-address">MAC</li><li class="access-type">设备类型</li><li class="access-vendor">品牌 / 厂商</li><li class="access-action">操作</li></ul><div id="access-list"><div class="native-empty">正在读取名单…</div></div></div>' +
-      '<div class="native-access-actions"><button type="button" id="access-manual-open">手动添加</button><button type="button" id="access-device-open">选择设备添加</button></div></section>' +
+      '<div class="native-access-actions"><button type="button" id="access-manual-open">手动添加</button><button type="button" id="access-device-open">选择设备添加</button><button type="button" id="access-export">导出名单</button><button type="button" id="access-import">导入名单</button><input type="file" id="access-import-file" class="native-hidden" accept="application/json,.json"></div></section>' +
       buttons(['access-mode-save', '保存并应用']) +
       '<div class="native-modal-mask"></div><div class="modal cbi-modal native-modal" id="access-modal"><div class="native-modal-head"><h4 id="access-modal-title">手动添加</h4><button type="button" class="btn cbi-button cbi-button-neutral native-modal-close" aria-label="关闭">×</button></div><div class="native-modal-body">' +
       '<div id="access-device-row">' + row('选择设备', '<select id="access-device" class="native-plain-select"><option value="">-- 请选择 --</option></select>') + '</div>' +
@@ -1158,6 +1158,66 @@
     var dirty = false;
     var accessLoadGeneration = 0;
     function activeList() { return draft[value('access-policy') === 'allow' ? 'allow' : 'deny']; }
+    function portableEntries(items) {
+      return asArray(items).map(function (item) {
+        return { name: String(item && item.name || '').trim(), mac: normalizeMac(item && (item.mac || item.macaddr)) };
+      });
+    }
+    function validatedImportList(items, label) {
+      if (!Array.isArray(items)) throw new Error(label + '格式不正确');
+      if (items.length > 2048) throw new Error(label + '超过 2048 台设备限制');
+      var result = [], seen = {};
+      items.forEach(function (item, index) {
+        if (typeof item === 'string') item = { mac: item };
+        if (!item || typeof item !== 'object') throw new Error(label + '第 ' + (index + 1) + ' 项格式不正确');
+        var mac = normalizeMac(item.mac || item.macaddr);
+        if (!/^([0-9A-F]{2}:){5}[0-9A-F]{2}$/.test(mac))
+          throw new Error(label + '第 ' + (index + 1) + ' 项 MAC 地址无效');
+        if (seen[mac]) return;
+        seen[mac] = true;
+        var name = String(item.name || '').trim();
+        if (name.length > 64) name = name.slice(0, 64);
+        result.push({ name: name || deviceDisplayName('', mac), mac: mac });
+      });
+      return result;
+    }
+    function exportAccessLists() {
+      var payload = {
+        format: 'be6500-access-list', version: 1, exported_at: new Date().toISOString(),
+        enabled: checked('access-enabled') ? 1 : 0,
+        policy: value('access-policy') === 'allow' ? 'allow' : 'deny',
+        blacklist: portableEntries(draft.deny), whitelist: portableEntries(draft.allow)
+      };
+      var blob = new Blob([JSON.stringify(payload, null, 2) + '\n'], { type: 'application/json;charset=utf-8' });
+      var link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = 'be6500-access-list-' + new Date().toISOString().slice(0, 10) + '.json';
+      document.body.appendChild(link); link.click(); document.body.removeChild(link);
+      window.setTimeout(function () { URL.revokeObjectURL(link.href); }, 1000);
+    }
+    function importAccessFile(file) {
+      if (!file) return;
+      if (file.size > 512 * 1024) return notify('名单文件不能超过 512 KiB', false);
+      var reader = new FileReader();
+      reader.onload = function () {
+        try {
+          var payload = JSON.parse(String(reader.result || ''));
+          if (!payload || payload.format !== 'be6500-access-list' || Number(payload.version) !== 1)
+            throw new Error('不是受支持的 BE6500 访问控制名单文件');
+          var deny = validatedImportList(payload.blacklist, '黑名单');
+          var allow = validatedImportList(payload.whitelist, '白名单');
+          draft.deny = deny; draft.allow = allow;
+          set('access-policy', payload.policy === 'allow' ? 'allow' : 'deny');
+          check('access-enabled', Number(payload.enabled) ? 1 : 0);
+          dirty = true; render();
+          inlineNotification('名单已导入到待保存区：黑名单 ' + deny.length + ' 项，白名单 ' + allow.length + ' 项。请检查后点击“保存并应用”。', true);
+        } catch (error) {
+          notify(error.message || '名单文件解析失败', false);
+        }
+      };
+      reader.onerror = function () { notify('名单文件读取失败', false); };
+      reader.readAsText(file, 'utf-8');
+    }
     function deviceFor(mac) {
       mac = normalizeMac(mac);
       return asArray(state.devices).filter(function (device) { return normalizeMac(device.uid || device.id || device.mac) === mac; })[0] || {};
@@ -1297,6 +1357,9 @@
     id('access-enabled').addEventListener('change', function () { dirty = true; });
     id('access-device').addEventListener('change', function () { var option = this.options[this.selectedIndex]; set('access-mac', this.value); set('access-name', option ? option.dataset.name : ''); });
     bindClick('#access-manual-open', function () { modal(true, 'manual'); }); bindClick('#access-device-open', function () { modal(true, 'device'); });
+    bindClick('#access-export', exportAccessLists);
+    bindClick('#access-import', function () { id('access-import-file').value = ''; id('access-import-file').click(); });
+    id('access-import-file').addEventListener('change', function () { importAccessFile(this.files && this.files[0]); });
     bindClick('.native-modal-close', function () { modal(false); }); bindClick('.native-modal-mask', function () { modal(false); });
     bindClick('#access-mode-save', function () {
       var enabled = checked('access-enabled');
@@ -1809,7 +1872,7 @@
 
   var oemAccessStyle = document.createElement('style');
   oemAccessStyle.textContent = '\
-    .native-hidden{display:none!important}.native-access-mode{display:flex;align-items:center;width:100%;height:46px;margin:30px 0 24px}.native-access-label{display:flex;align-items:center;width:120px;height:100%;color:#999}.native-access-options{display:flex;align-items:center;flex:1;height:100%;gap:10px}.native-access-options button{display:flex;align-items:center;justify-content:center;width:300px;height:46px;border:1px solid #ddd;border-radius:4px;background:#fff;color:#666;cursor:pointer}.native-access-options button i{display:inline-block;width:16px;height:16px;margin-right:10px;border:1px solid #bbb;border-radius:50%}.native-access-options button.active{border-color:#4762fe;color:#4762fe}.native-access-options button.active i{border:5px solid #4762fe}.native-access-list{margin-top:38px;padding-top:24px;border-top:1px solid #eee}.native-access-list h3{margin:0 0 20px;font-size:14px;font-weight:550}.native-access-actions{display:flex;gap:12px;margin-top:20px}.native-access-actions button{width:175px;height:46px;border:1px solid #ddd;border-radius:4px;background:#f4f6fa;color:#666;cursor:pointer}.native-plain-select{display:block;width:100%;height:46px;padding:6px 12px;border:1px solid #ccc;border-radius:4px;background:#fff;color:#555}.native-access-list .native-table li{float:none!important}.native-access-list .native-table-row{min-height:54px}\
+    .native-hidden{display:none!important}.native-access-mode{display:flex;align-items:center;width:100%;height:46px;margin:30px 0 24px}.native-access-label{display:flex;align-items:center;width:120px;height:100%;color:#999}.native-access-options{display:flex;align-items:center;flex:1;height:100%;gap:10px}.native-access-options button{display:flex;align-items:center;justify-content:center;width:300px;height:46px;border:1px solid #ddd;border-radius:4px;background:#fff;color:#666;cursor:pointer}.native-access-options button i{display:inline-block;width:16px;height:16px;margin-right:10px;border:1px solid #bbb;border-radius:50%}.native-access-options button.active{border-color:#4762fe;color:#4762fe}.native-access-options button.active i{border:5px solid #4762fe}.native-access-list{margin-top:38px;padding-top:24px;border-top:1px solid #eee}.native-access-list h3{margin:0 0 20px;font-size:14px;font-weight:550}.native-access-actions{display:flex;flex-wrap:wrap;gap:12px;margin-top:20px}.native-access-actions button{width:175px;height:46px;border:1px solid #ddd;border-radius:4px;background:#f4f6fa;color:#666;cursor:pointer}.native-plain-select{display:block;width:100%;height:46px;padding:6px 12px;border:1px solid #ccc;border-radius:4px;background:#fff;color:#555}.native-access-list .native-table li{float:none!important}.native-access-list .native-table-row{min-height:54px}\
     @media(max-width:760px){.native-access-mode{display:block;height:auto}.native-access-label{width:100%;height:38px}.native-access-options{display:block;height:auto}.native-access-options button{width:100%;margin-bottom:10px}.native-access-actions button{flex:1}}';
   document.head.appendChild(oemAccessStyle);
 

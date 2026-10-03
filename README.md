@@ -5,9 +5,9 @@ ZhaoYun BE6500. A successful build does not establish hardware bootability.
 
 ## Current installation and recovery release
 
-Use the v77 stock-to-ImmortalWrt bundle. It includes the pinned JDCloud
+Use the v78 stock-to-ImmortalWrt bundle. It includes the pinned JDCloud
 RE-CS-06 uBootKit binary, guarded APPSBL/GPT backup-and-install scripts, the RAM
-installer and the final persistent sysupgrade image. v77 retains the v73 MLO
+installer and the final persistent sysupgrade image. v78 retains the v73 MLO
 client fix and the v74 complete USB modem/tethering stack: CDC Ethernet,
 RNDIS, NCM, MBIM, `ipheth`, QMI WWAN, RMNET, Huawei NCM, USB serial and
 `usb-wdm`. It also adds pinned QModem Next with Chinese modem/SMS pages,
@@ -35,6 +35,13 @@ now validates the IPQ5332 `8a00000` root hubs under
 `/sys/bus/usb/devices/usb*`, migrates the false guard state exactly once and
 retains crash-loop protection for real incomplete probes.
 
+v78 disables the generated `immortalwrt_qmodem` opkg source because QModem is
+built into this firmware and ImmortalWrt does not publish that feed; the stale
+URL otherwise returns HTTP 404 and makes every `opkg update` fail. The access
+control page also exports and imports a versioned JSON backup containing both
+ordered lists, device names, policy and enabled state. Import is validated and
+staged until the user explicitly saves, so it cannot restart Wi-Fi by itself.
+
 The inherited v73 change fixed MLO client association failures caused by the
 QCN9274 firmware reporting a zero ML-peer
 limit to the Linux 6.6 ath12k driver. The board-local fallback uses the same
@@ -47,7 +54,7 @@ derives each physical radio's displayed channel and frequency from its own UCI
 band/channel. Channel 108 is shown as 5.540 GHz instead of the invalid 6.490
 GHz. This board has no 6 GHz path. The v69 access-control and certificate fixes,
 the safe device editor and the fast hostname/identity pipeline remain included.
-See [`releases/2026-09-30-usb-host-autostart-fix-v77/README.md`](releases/2026-09-30-usb-host-autostart-fix-v77/README.md).
+See [`releases/2026-10-03-opkg-access-list-v78/README.md`](releases/2026-10-03-opkg-access-list-v78/README.md).
 
 ## Current status (2026-09-12)
 
