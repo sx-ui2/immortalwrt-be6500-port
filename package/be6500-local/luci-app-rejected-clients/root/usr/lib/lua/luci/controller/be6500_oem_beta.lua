@@ -4102,6 +4102,143 @@ local function extended_jdcapi(method, args, uci)
     return false
 end
 
+local function samba_mount_unescape(value)
+    return tostring(value or ""):gsub("\\(%d%d%d)", function(octal)
+        return string.char(tonumber(octal, 8) or 0)
+    end)
+end
+
+local function samba_removable_mounts()
+    local mounts, file = {}, io.open("/proc/mounts", "r")
+    if not file then return mounts end
+    for line in file:lines() do
+        local device, path, filesystem, options = line:match("^(%S+)%s+(%S+)%s+(%S+)%s+(%S+)")
+        device, path = samba_mount_unescape(device), samba_mount_unescape(path)
+        if device:match("^/dev/sd[a-z]+%d*$") and path:match("^/mnt/[^/]+$") then
+            mounts[#mounts + 1] = {
+                device = device,
+                path = path,
+                filesystem = filesystem or "unknown",
+                read_only = ("," .. tostring(options or "") .. ","):find(",ro,", 1, true) and 1 or 0
+            }
+        end
+    end
+    file:close()
+    table.sort(mounts, function(first, second) return first.path < second.path end)
+    return mounts
+end
+
+local function normalize_samba_path(value)
+    value = trim(value)
+    if value == "" or value:find("[%z\1-\31]") or value:sub(1, 1) ~= "/" then return nil end
+    local parts = {}
+    for part in value:gmatch("[^/]+") do
+        if part == ".." then
+            if #parts == 0 then return nil end
+            table.remove(parts)
+        elseif part ~= "." and part ~= "" then
+            parts[#parts + 1] = part
+        end
+    end
+    local path = "/" .. table.concat(parts, "/")
+    if not path:match("^/mnt/[^/]+") then return nil end
+    return path
+end
+
+local function samba_mount_for_path(path, mounts)
+    local selected
+    for _, mount in ipairs(mounts or samba_removable_mounts()) do
+        if path == mount.path or path:sub(1, #mount.path + 1) == mount.path .. "/" then
+            if not selected or #mount.path > #selected.path then selected = mount end
+        end
+    end
+    return selected
+end
+
+local function samba_safe_directory(path, mount)
+    local ok, fs = pcall(require, "nixio.fs")
+    if not ok or not fs or not mount then return false end
+    local suffix = path:sub(#mount.path + 1)
+    local cursor = mount.path
+    local root = fs.lstat(cursor)
+    if not root or root.type ~= "dir" then return false end
+    for part in suffix:gmatch("[^/]+") do
+        cursor = cursor .. "/" .. part
+        local stat = fs.lstat(cursor)
+        if not stat or stat.type ~= "dir" then return false end
+    end
+    return true
+end
+
+local function samba_password_user_exists(username)
+    local file = io.open("/etc/samba/smbpasswd", "r")
+    if not file then return false end
+    for line in file:lines() do
+        if line:match("^" .. username:gsub("([^%w])", "%%%1") .. ":") then
+            file:close()
+            return true
+        end
+    end
+    file:close()
+    return false
+end
+
+local function samba_shell_quote(value)
+    return "'" .. tostring(value or ""):gsub("'", "'\\''") .. "'"
+end
+
+local function samba_set_password(username, password)
+    if username == "root" or not username:match("^[a-z][a-z0-9_-]*$") or #username > 31 then
+        return false, "共享账号只能使用小写字母、数字、下划线和连字符，并且不能使用 root"
+    end
+    if password:find("[%z\r\n]") or #password < 6 or #password > 127 then
+        return false, "共享密码必须为 6–127 个字符且不能包含换行"
+    end
+    local quoted_user = samba_shell_quote(username)
+    if luci.sys.call("id " .. quoted_user .. " >/dev/null 2>&1") ~= 0 then
+        if luci.sys.call("/usr/sbin/useradd -M -N -g users -s /bin/false " .. quoted_user .. " >/dev/null 2>&1") ~= 0 then
+            return false, "创建共享账号失败，请确认账号管理组件已安装"
+        end
+    end
+    local nixio = require "nixio"
+    local temp = "/tmp/.be6500-samba-password-" .. tostring(nixio.getpid())
+    local file = io.open(temp, "wb")
+    if not file then return false, "无法创建临时密码文件" end
+    file:write(password, "\n", password, "\n")
+    file:close()
+    luci.sys.call("chmod 0600 " .. samba_shell_quote(temp))
+    local result = luci.sys.call("/usr/bin/smbpasswd -a -s " .. quoted_user .. " < " ..
+        samba_shell_quote(temp) .. " >/dev/null 2>&1")
+    os.remove(temp)
+    if result ~= 0 then return false, "保存 Samba 密码失败" end
+    return true
+end
+
+local function samba_share_payload(uci)
+    local mounts, shares = samba_removable_mounts(), {}
+    uci:foreach("samba4", "sambashare", function(section)
+        local raw_path = tostring(section.path or "")
+        local path = normalize_samba_path(raw_path)
+        if not path and raw_path:match("^/dev/sd[a-z]+%d*$") then
+            for _, candidate in ipairs(mounts) do
+                if candidate.device == raw_path then path = candidate.path break end
+            end
+        end
+        path = path or raw_path
+        local mount = samba_mount_for_path(path, mounts)
+        local users = section.users
+        if type(users) == "table" then users = users[1] end
+        users = tostring(users or ""):match("^%s*([^%s]+)") or ""
+        shares[#shares + 1] = {
+            id = section[".name"], name = section.name or "", path = path,
+            username = users, password_set = users ~= "" and samba_password_user_exists(users) and 1 or 0,
+            read_only = (section.read_only == "yes" or (mount and mount.read_only == 1)) and 1 or 0,
+            filesystem = mount and mount.filesystem or "", mounted = mount and 1 or 0
+        }
+    end)
+    return { status = 0, shares = shares, mounts = mounts }
+end
+
 local function native_method_is_write(method)
     return method:match("^set_") ~= nil
         or method:match("^web_set_") ~= nil
@@ -4165,6 +4302,105 @@ function action_jdcapi()
         payload = { role = 0, mesh_role = 0, status = 0 }
     elseif method == "get_mesh_re_status" then
         payload = { enabled = 0, status = 0 }
+    elseif method == "get_samba_shares" then
+        payload = samba_share_payload(uci)
+    elseif method == "list_samba_directories" then
+        local mounts = samba_removable_mounts()
+        local path = normalize_samba_path(args.path)
+        local mount = path and samba_mount_for_path(path, mounts) or nil
+        if not path or not mount or not samba_safe_directory(path, mount) then
+            payload = { status = 1, message = "请选择已挂载 USB 磁盘中的文件夹" }
+        else
+            local ok, fs = pcall(require, "nixio.fs")
+            local directories = {}
+            if ok and fs then
+                local iterator = fs.dir(path)
+                if iterator then
+                    for name in iterator do
+                        if name ~= "." and name ~= ".." and name:sub(1, 1) ~= "." then
+                            local child = path .. "/" .. name
+                            local stat = fs.lstat(child)
+                            if stat and stat.type == "dir" then
+                                directories[#directories + 1] = { name = name, path = child }
+                                if #directories >= 512 then break end
+                            end
+                        end
+                    end
+                end
+            end
+            table.sort(directories, function(first, second)
+                return first.name:lower() < second.name:lower()
+            end)
+            local parent = path ~= mount.path and path:match("^(.+)/[^/]+$") or ""
+            if parent ~= "" and not samba_mount_for_path(parent, { mount }) then parent = "" end
+            payload = { status = 0, path = path, parent = parent, directories = directories,
+                mount = mount, mounts = mounts }
+        end
+    elseif method == "save_samba_share" then
+        local mounts = samba_removable_mounts()
+        local section_id = trim(args.id)
+        local name = trim(args.name)
+        local path = normalize_samba_path(args.path)
+        local username = trim(args.username):lower()
+        local password = tostring(args.password or "")
+        local mount = path and samba_mount_for_path(path, mounts) or nil
+        if section_id ~= "" and not section_id:match("^[%w_]+$") then
+            payload = { status = 1, message = "共享配置编号无效" }
+        elseif name == "" or #name > 64 or name:find("[%z\1-\31/%[%]:;=]") then
+            payload = { status = 1, message = "共享名称不能为空，且不能包含 / [ ] : ; =" }
+        elseif not mount or not samba_safe_directory(path, mount) then
+            payload = { status = 1, message = "共享路径必须是已挂载 USB 磁盘中的现有文件夹" }
+        elseif username == "root" or not username:match("^[a-z][a-z0-9_-]*$") or #username > 31 then
+            payload = { status = 1, message = "账号只能使用小写字母、数字、下划线和连字符，并且不能使用 root" }
+        elseif password == "" and not samba_password_user_exists(username) then
+            payload = { status = 1, message = "新账号必须设置至少 6 位密码" }
+        else
+            local password_ok, password_error = true, nil
+            if password ~= "" then password_ok, password_error = samba_set_password(username, password) end
+            if not password_ok then
+                payload = { status = 1, message = password_error or "保存共享账号失败" }
+            else
+                if not uci:get("samba4", "@samba[0]") then
+                    uci:section("samba4", "samba", nil, { workgroup = "WORKGROUP", interface = "lan" })
+                end
+                local exists = section_id ~= "" and uci:get("samba4", section_id)
+                if not exists then section_id = uci:section("samba4", "sambashare", nil, {}) end
+                uci:set("samba4", section_id, "name", name)
+                uci:set("samba4", section_id, "path", path)
+                uci:set("samba4", section_id, "browseable", "yes")
+                uci:set("samba4", section_id, "guest_ok", "no")
+                uci:set("samba4", section_id, "guest_only", "no")
+                uci:set("samba4", section_id, "users", username)
+                uci:set("samba4", section_id, "force_root", "yes")
+                uci:set("samba4", section_id, "read_only",
+                    (mount.read_only == 1 or tonumber(args.read_only) == 1) and "yes" or "no")
+                uci:set("samba4", section_id, "create_mask", "0666")
+                uci:set("samba4", section_id, "dir_mask", "0777")
+                if not uci:commit("samba4") then
+                    payload = { status = 1, message = "共享配置保存失败" }
+                elseif luci.sys.call("/etc/init.d/samba4 restart >/tmp/be6500-samba.log 2>&1") ~= 0 then
+                    payload = { status = 1, message = "共享已保存，但 Samba 服务重启失败，请查看系统日志" }
+                else
+                    payload = samba_share_payload(uci)
+                    payload.message = "网络共享已保存并立即生效"
+                end
+            end
+        end
+    elseif method == "delete_samba_share" then
+        local section_id = trim(args.id)
+        if section_id == "" or not section_id:match("^[%w_]+$") or
+            uci:get("samba4", section_id) ~= "sambashare" then
+            payload = { status = 1, message = "没有找到需要删除的网络共享" }
+        else
+            uci:delete("samba4", section_id)
+            if not uci:commit("samba4") then
+                payload = { status = 1, message = "删除共享配置失败" }
+            else
+                luci.sys.call("/etc/init.d/samba4 restart >/tmp/be6500-samba.log 2>&1")
+                payload = samba_share_payload(uci)
+                payload.message = "网络共享已删除"
+            end
+        end
     elseif method == "web_get_smart_gaming" or method == "get_game_info" then
         local enabled = uci:get("be6500_oem", "game", "enable") == "1" and 1 or 0
         local port = uci:get("be6500_oem", "game", "port") or "lan2"

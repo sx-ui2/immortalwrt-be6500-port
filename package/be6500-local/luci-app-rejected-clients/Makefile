@@ -18,6 +18,7 @@ define Package/luci-app-rejected-clients
 	+luci-i18n-nlbwmon-zh-cn +luci-i18n-sqm-zh-cn +luci-i18n-upnp-zh-cn \
 	+luci-i18n-diskman-zh-cn +luci-i18n-usb-printer-zh-cn \
 	+udpxy +tcpdump +coreutils-timeout +kmod-macvlan +arp-scan-database +zram-swap +losetup \
+	+samba4-server +shadow-useradd \
 	+qca-ssdk-shell +kmod-qca-nss-ppe-vp +kmod-qca-nss-ppe-ds \
 	+kmod-qca-nss-ppe-bridge-mgr +kmod-qca-nss-ppe-vlan-mgr \
 	+kmod-qca-nss-ppe-pppoe-mgr \

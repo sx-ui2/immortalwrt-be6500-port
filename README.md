@@ -5,10 +5,10 @@ ZhaoYun BE6500. A successful build does not establish hardware bootability.
 
 ## Current installation and recovery release
 
-Use the v79 stock-to-ImmortalWrt bundle. It includes the pinned JDCloud
+Use the v80 stock-to-ImmortalWrt bundle. It includes the pinned JDCloud
 RE-CS-06 uBootKit binary, guarded APPSBL/GPT backup-and-install scripts, the RAM
-installer and the final persistent sysupgrade image. v78 retains the v73 MLO
-client fix and the v74 complete USB modem/tethering stack: CDC Ethernet,
+installer and the final persistent sysupgrade image. v80 retains the v79 APFS
+support, the v73 MLO client fix and the v74 complete USB modem/tethering stack: CDC Ethernet,
 RNDIS, NCM, MBIM, `ipheth`, QMI WWAN, RMNET, Huawei NCM, USB serial and
 `usb-wdm`. It also adds pinned QModem Next with Chinese modem/SMS pages,
 ZeroTier, ttyd, Wake on LAN, htop, dig and bash. PCIe modem scanning and
@@ -50,6 +50,14 @@ the existing ext4 and Btrfs support. The module was verified on the router with
 a macOS-created APFS image: UUID/type probing, read-only mounting and file
 reading succeeded, while a write attempt was rejected by the kernel.
 
+v80 adds **Router Settings → Network Sharing**. The page browses real mounted
+USB folders, creates authenticated Samba shares with user-selected accounts and
+passwords, supports multiple editable shares, and deletes only the share
+configuration rather than user files. Paths are confined to mounted `/dev/sd*`
+volumes and symlink traversal is rejected. APFS shares are forcibly read-only;
+other supported filesystems follow their mount mode. Applying a share restarts
+only Samba and does not reload Wi-Fi or the network.
+
 The inherited v73 change fixed MLO client association failures caused by the
 QCN9274 firmware reporting a zero ML-peer
 limit to the Linux 6.6 ath12k driver. The board-local fallback uses the same
@@ -62,7 +70,7 @@ derives each physical radio's displayed channel and frequency from its own UCI
 band/channel. Channel 108 is shown as 5.540 GHz instead of the invalid 6.490
 GHz. This board has no 6 GHz path. The v69 access-control and certificate fixes,
 the safe device editor and the fast hostname/identity pipeline remain included.
-See [`releases/2026-10-10-apfs-storage-v79/README.md`](releases/2026-10-10-apfs-storage-v79/README.md).
+See [`releases/2026-10-10-network-share-ui-v80/README.md`](releases/2026-10-10-network-share-ui-v80/README.md).
 
 ## Current status (2026-09-12)
 

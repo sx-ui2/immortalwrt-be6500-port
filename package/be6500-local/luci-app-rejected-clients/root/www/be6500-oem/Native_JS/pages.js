@@ -1671,6 +1671,99 @@
     rpc('web_get_custom_hosts', {}).then(function (result) { id('hosts-text').value = result.hosts || ''; }).catch(function (error) { notify(error.message, false); });
   }
 
+  function sharesPage() {
+    page('网络共享',
+      '<style>.native-share-table{margin-top:18px;overflow-x:auto}.native-share-table ul{min-width:920px}.native-share-table li{width:auto!important}.native-share-table li:nth-child(1){flex:0 0 16%}.native-share-table li:nth-child(2){flex:1}.native-share-table li:nth-child(3){flex:0 0 15%}.native-share-table li:nth-child(4){flex:0 0 13%}.native-share-table li:nth-child(5){flex:0 0 17%;padding-right:0}.native-share-table .edit{margin-right:6px}.native-folder-toolbar{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;margin:12px 0}.native-folder-current{padding:11px 13px;border-radius:4px;background:var(--be-section-alt,#f6f7f9);overflow-wrap:anywhere}.native-folder-list{max-height:300px;overflow:auto;border:1px solid var(--be-border,#ddd);border-radius:4px}.native-folder-list button{display:block;width:100%;min-height:42px;padding:8px 14px;border:0;border-bottom:1px solid var(--be-border,#eee);background:transparent;color:inherit;text-align:left;cursor:pointer}.native-folder-list button:last-child{border-bottom:0}.native-folder-list button:hover{background:var(--be-section-alt,#f6f7f9)}.native-folder-list .native-empty{padding:24px!important}.native-share-readonly{color:#d79b16}.native-share-online{color:#35ad78}@media(max-width:760px){.native-folder-toolbar{grid-template-columns:1fr}.native-share-table ul{min-width:820px}}</style>' +
+      '<div class="native-info">选择路由器上已经挂载的 USB 磁盘文件夹，并为 Windows/macOS 设置独立的共享账号和密码。密码仅写入 Samba 密码库，不会显示或保存在普通配置中。</div>' +
+      '<div class="native-inline-actions"><button type="button" class="btn cbi-button cbi-button-add" id="share-add">新增网络共享</button></div>' +
+      '<div class="native-table native-share-table"><ul class="native-table-head"><li>共享名称</li><li>共享文件夹</li><li>账号</li><li>状态</li><li>操作</li></ul><div id="share-list"><div class="native-empty">正在读取共享…</div></div></div>' +
+      '<div class="native-modal-mask" id="share-modal-mask"></div><div class="modal cbi-modal native-modal" id="share-modal"><div class="native-modal-head"><h4 id="share-modal-title">新增网络共享</h4><button type="button" class="btn cbi-button cbi-button-neutral native-modal-close" id="share-modal-close" aria-label="关闭">×</button></div><div class="native-modal-body">' +
+      '<div id="share-editor-panel">' + row('共享名称', input('share-name', 'text', '例如：移动硬盘', 'maxlength="64"')) +
+      row('共享文件夹', '<div class="native-inline-control"><input id="share-path" class="cbi-input-text" type="text" readonly placeholder="请选择 USB 磁盘文件夹"><button type="button" class="btn cbi-button cbi-button-neutral" id="share-browse">选择文件夹</button></div>') +
+      row('访问账号', input('share-username', 'text', '例如：smbuser', 'maxlength="31" autocomplete="username"')) +
+      row('访问密码', password('share-password', '新增账号必填；编辑时留空保持原密码')) +
+      row('只读共享', toggle('share-readonly', '禁止电脑修改或删除文件'), 'APFS 磁盘会自动锁定为只读') +
+      buttons(['share-save', '保存并启用']) + '</div>' +
+      '<div id="share-folder-panel" class="native-hidden"><div class="native-folder-toolbar"><select id="share-mount" class="cbi-input-select"></select><button type="button" class="btn cbi-button cbi-button-neutral" id="share-folder-back">返回设置</button></div><div id="share-folder-current" class="native-folder-current">正在读取目录…</div><div id="share-folder-list" class="native-folder-list"><div class="native-empty">正在读取文件夹…</div></div>' +
+      buttons(['share-folder-choose', '选择当前文件夹']) + '</div></div></div>');
+
+    var shares = [], mounts = [], editingId = '', folderState = null;
+    function closeModal() {
+      id('share-modal-mask').classList.remove('open'); id('share-modal').classList.remove('open');
+      editingId = ''; folderState = null;
+    }
+    function showEditor() { show('#share-editor-panel', true); show('#share-folder-panel', false); id('share-modal-title').textContent = editingId ? '编辑网络共享' : '新增网络共享'; }
+    function openEditor(item) {
+      item = item || {};
+      editingId = item.id || '';
+      set('share-name', item.name || ''); set('share-path', item.path || (mounts[0] && mounts[0].path) || '');
+      set('share-username', item.username || 'smbuser'); set('share-password', '');
+      check('share-readonly', item.read_only || 0);
+      id('share-password').placeholder = editingId && item.password_set ? '留空保持现有密码' : '请输入至少 6 位密码';
+      showEditor(); id('share-modal-mask').classList.add('open'); id('share-modal').classList.add('open');
+    }
+    function renderShares(result) {
+      shares = asArray(result && result.shares); mounts = asArray(result && result.mounts);
+      id('share-list').innerHTML = shares.length ? shares.map(function (item) {
+        var status = Number(item.mounted) ? '<span class="native-share-online">已挂载</span>' : '<span class="native-share-readonly">磁盘未挂载</span>';
+        if (Number(item.read_only)) status += '<small>只读</small>';
+        return '<ul class="native-table-row"><li><b>' + esc(item.name || '未命名共享') + '</b></li><li><code>' + esc(item.path || '—') + '</code><small>' + esc(item.filesystem || '') + '</small></li><li>' + esc(item.username || '未设置') + '</li><li>' + status + '</li><li><button class="edit share-edit" data-id="' + esc(item.id) + '">编辑</button><button class="edit share-delete" data-id="' + esc(item.id) + '">删除</button></li></ul>';
+      }).join('') : '<div class="native-empty">当前没有网络共享</div>';
+      document.querySelectorAll('.share-edit').forEach(function (button) { bindClick(button, function () { openEditor(shares.filter(function (item) { return item.id === button.dataset.id; })[0]); }); });
+      document.querySelectorAll('.share-delete').forEach(function (button) { bindClick(button, function () {
+        var item = shares.filter(function (entry) { return entry.id === button.dataset.id; })[0] || {};
+        confirmDialog('删除网络共享', '确定删除“' + (item.name || '未命名共享') + '”吗？磁盘中的文件不会被删除。').then(function (confirmed) {
+          if (!confirmed) return;
+          rpc('delete_samba_share', { id: button.dataset.id }).then(function (next) { renderShares(next); inlineNotification('网络共享已删除，磁盘文件未受影响', true); }).catch(function (error) { notify(error.message, false); });
+        });
+      }); });
+    }
+    function renderFolder(result) {
+      folderState = result; mounts = asArray(result.mounts);
+      id('share-mount').innerHTML = mounts.map(function (mount) { return '<option value="' + esc(mount.path) + '">' + esc(mount.device.replace('/dev/', '') + ' · ' + String(mount.filesystem || '').toUpperCase() + (Number(mount.read_only) ? ' · 只读' : '')) + '</option>'; }).join('');
+      set('share-mount', result.mount && result.mount.path || '');
+      id('share-folder-current').textContent = result.path;
+      var rows = [];
+      if (result.parent) rows.push('<button type="button" data-folder="' + esc(result.parent) + '">↰ 返回上一级</button>');
+      asArray(result.directories).forEach(function (directory) { rows.push('<button type="button" data-folder="' + esc(directory.path) + '">📁 ' + esc(directory.name) + '</button>'); });
+      id('share-folder-list').innerHTML = rows.length ? rows.join('') : '<div class="native-empty">当前文件夹中没有子文件夹</div>';
+      id('share-folder-list').querySelectorAll('[data-folder]').forEach(function (button) { bindClick(button, function () { browseFolder(button.dataset.folder); }); });
+    }
+    function browseFolder(path) {
+      show('#share-editor-panel', false); show('#share-folder-panel', true); id('share-modal-title').textContent = '选择共享文件夹';
+      id('share-folder-list').innerHTML = '<div class="native-empty">正在读取文件夹…</div>';
+      rpc('list_samba_directories', { path: path }).then(renderFolder).catch(function (error) { notify(error.message, false); showEditor(); });
+    }
+    bindClick('#share-add', function () {
+      if (!mounts.length) return notify('没有检测到已挂载的 USB 磁盘，请先连接并挂载磁盘', false);
+      openEditor();
+    });
+    bindClick('#share-modal-close', closeModal); bindClick('#share-modal-mask', closeModal);
+    bindClick('#share-browse', function () {
+      if (!mounts.length) return notify('没有可选择的 USB 磁盘', false);
+      browseFolder(value('share-path') || mounts[0].path);
+    });
+    id('share-mount').addEventListener('change', function () { if (this.value) browseFolder(this.value); });
+    bindClick('#share-folder-back', showEditor);
+    bindClick('#share-folder-choose', function () {
+      if (!folderState || !folderState.path) return;
+      set('share-path', folderState.path);
+      if (folderState.mount && Number(folderState.mount.read_only)) check('share-readonly', 1);
+      showEditor();
+    });
+    bindClick('#share-save', function () {
+      if (!value('share-name')) return notify('请输入共享名称', false);
+      if (!value('share-path')) return notify('请选择共享文件夹', false);
+      if (!/^[a-z][a-z0-9_-]{0,30}$/.test(value('share-username'))) return notify('账号只能使用小写字母、数字、下划线和连字符', false);
+      var button = this;
+      busy(button, rpc('save_samba_share', { id: editingId, name: value('share-name'), path: value('share-path'),
+        username: value('share-username'), password: id('share-password').value, read_only: checked('share-readonly') ? 1 : 0 }), '共享已启用').then(function (result) {
+          closeModal(); renderShares(result); inlineNotification('网络共享已保存，Windows 可立即连接', true);
+        });
+    });
+    rpc('get_samba_shares', {}).then(renderShares).catch(function (error) { notify(error.message, false); });
+  }
+
   function ledPage() {
     page('灯光控制',
       row('指示灯', toggle('led-enabled', '开启机身指示灯')) +
@@ -1920,6 +2013,7 @@
     else if (/UPnP\.html$/.test(path)) upnpPage();
     else if (/CustomHosts\.html$/.test(path)) hostsPage();
     else if (/NATSet\.html$/.test(path)) natPage();
+    else if (/shares\.html$/.test(path)) sharesPage();
     else if (/Firewall\.html$/.test(path)) firewallPage();
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start); else start();
