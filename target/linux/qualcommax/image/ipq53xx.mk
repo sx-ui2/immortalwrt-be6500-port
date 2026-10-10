@@ -49,7 +49,7 @@ define Device/jdcloud_be6500
 		luci-proto-mbim luci-i18n-proto-mbim-zh-cn \
 		luci-app-qmodem-next luci-i18n-qmodem-next-zh-cn \
 		kmod-fs-btrfs kmod-fs-ext4 kmod-fs-exfat kmod-fs-vfat \
-		kmod-fs-ntfs3 ntfs3-mount \
+		kmod-fs-ntfs3 ntfs3-mount kmod-fs-apfs \
 		luci-app-diskman luci-app-samba4 luci-app-hd-idle luci-app-usb-printer \
 		luci-i18n-diskman-zh-cn luci-i18n-samba4-zh-cn \
 		luci-i18n-usb-printer-zh-cn \

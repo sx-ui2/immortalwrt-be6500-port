@@ -5,7 +5,7 @@ ZhaoYun BE6500. A successful build does not establish hardware bootability.
 
 ## Current installation and recovery release
 
-Use the v78 stock-to-ImmortalWrt bundle. It includes the pinned JDCloud
+Use the v79 stock-to-ImmortalWrt bundle. It includes the pinned JDCloud
 RE-CS-06 uBootKit binary, guarded APPSBL/GPT backup-and-install scripts, the RAM
 installer and the final persistent sysupgrade image. v78 retains the v73 MLO
 client fix and the v74 complete USB modem/tethering stack: CDC Ethernet,
@@ -42,6 +42,14 @@ control page also exports and imports a versioned JSON backup containing both
 ordered lists, device names, policy and enabled state. Import is validated and
 staged until the user explicitly saves, so it cannot restart Wi-Fi by itself.
 
+v79 adds a pinned Linux APFS 0.3.21 kernel module for removable storage. Plain,
+unencrypted APFS containers are detected by `block` and mounted read-only; the
+experimental write option is deliberately not enabled because upstream warns
+that it can corrupt a container. NTFS3 and exFAT remain read-write, alongside
+the existing ext4 and Btrfs support. The module was verified on the router with
+a macOS-created APFS image: UUID/type probing, read-only mounting and file
+reading succeeded, while a write attempt was rejected by the kernel.
+
 The inherited v73 change fixed MLO client association failures caused by the
 QCN9274 firmware reporting a zero ML-peer
 limit to the Linux 6.6 ath12k driver. The board-local fallback uses the same
@@ -54,7 +62,7 @@ derives each physical radio's displayed channel and frequency from its own UCI
 band/channel. Channel 108 is shown as 5.540 GHz instead of the invalid 6.490
 GHz. This board has no 6 GHz path. The v69 access-control and certificate fixes,
 the safe device editor and the fast hostname/identity pipeline remain included.
-See [`releases/2026-10-03-opkg-access-list-v78/README.md`](releases/2026-10-03-opkg-access-list-v78/README.md).
+See [`releases/2026-10-10-apfs-storage-v79/README.md`](releases/2026-10-10-apfs-storage-v79/README.md).
 
 ## Current status (2026-09-12)
 
