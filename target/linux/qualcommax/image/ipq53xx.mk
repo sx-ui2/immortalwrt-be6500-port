@@ -12,22 +12,28 @@ define Device/jdcloud_be6500
 	DEVICE_DTS := ipq5332-jdcloud-be6500-full-radio-mht-test-initramfs
 	DEVICE_DTS_CONFIG := config@mi01.6
 	SOC := ipq5332
-		DEVICE_PACKAGES := \
-			kmod-ath12k \
-			kmod-dsa-qca8k \
-			kmod-qca-ssdk \
-			kmod-qca-nss-dp \
-			kmod-qca-nss-ppe-ds \
-			kmod-qca-nss-ppe-bridge-mgr \
-			kmod-qca-nss-ppe-vlan-mgr \
-			kmod-qca-nss-ppe-pppoe-mgr \
-			kmod-qca-nss-ppe-ath-clients \
-			kmod-qca-nss-wifi-plugins \
-			kmod-qca-nss-ecm \
-			kmod-qca-nss-ecm-wifi-plugin \
-			be6500-oem-wifi-firmware \
+	# Keep the validated runtime services profile-owned. Depending on a build
+	# host .config once dropped dnsmasq-full and produced an image without DHCP.
+	DEVICE_PACKAGES := \
+		kmod-ath12k \
+		kmod-dsa-qca8k \
+		kmod-qca-ssdk \
+		kmod-qca-nss-dp \
+		kmod-qca-nss-ppe-ds \
+		kmod-qca-nss-ppe-bridge-mgr \
+		kmod-qca-nss-ppe-vlan-mgr \
+		kmod-qca-nss-ppe-pppoe-mgr \
+		kmod-qca-nss-ppe-ath-clients \
+		kmod-qca-nss-wifi-plugins \
+		kmod-qca-nss-ecm \
+		kmod-qca-nss-ecm-wifi-plugin \
+		be6500-oem-wifi-firmware \
 		luci-app-rejected-clients \
 		be6500-current-config \
+		-dnsmasq dnsmasq-full arp-scan swconfig \
+		be6500-luci-zh-default \
+		nikki luci-app-nikki luci-i18n-nikki-zh-cn \
+		mihomo-meta mwan3 be6500-nikki-feed be6500-yq \
 		openssh-sftp-server \
 		bash htop bind-dig \
 		zerotier luci-app-zerotier luci-i18n-zerotier-zh-cn \

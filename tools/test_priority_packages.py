@@ -85,6 +85,27 @@ class PriorityPackageTests(unittest.TestCase):
         ):
             self.assertIn(package, self.profile)
 
+    def test_validated_runtime_services_are_profile_owned(self):
+        # These used to be selected only by the build host's .config.  A clean
+        # rebuild consequently omitted dnsmasq-full (breaking DHCP) and the
+        # previously shipped Nikki suite.  Keep them in the device profile so
+        # every future image contains the same runtime services as v81.
+        for package in (
+            "dnsmasq-full",
+            "arp-scan",
+            "swconfig",
+            "be6500-luci-zh-default",
+            "nikki",
+            "luci-app-nikki",
+            "luci-i18n-nikki-zh-cn",
+            "mihomo-meta",
+            "mwan3",
+            "be6500-nikki-feed",
+            "be6500-yq",
+        ):
+            with self.subTest(package=package):
+                self.assertIn(package, self.profile)
+
     def test_qmodem_feed_is_immutable(self):
         pin = "c49654efc870f53712ee8e25bf181722eb1466d9"
         self.assertIn(f"QMODEM_COMMIT={pin}", PINS.read_text(encoding="utf-8"))

@@ -5,7 +5,7 @@ ZhaoYun BE6500. A successful build does not establish hardware bootability.
 
 ## Current installation and recovery release
 
-Use the v82 stock-to-ImmortalWrt bundle. It includes the pinned JDCloud
+Use the v83 stock-to-ImmortalWrt bundle. It includes the pinned JDCloud
 RE-CS-06 uBootKit binary, guarded APPSBL/GPT backup-and-install scripts, the RAM
 installer and the final persistent sysupgrade image. v80 retains the v79 APFS
 support, the v73 MLO client fix and the v74 complete USB modem/tethering stack: CDC Ethernet,
@@ -76,6 +76,13 @@ reload in about 13 seconds with no new DFS CAC, and clients returned 0–8 secon
 after the APs became ready. The sysupgrade kernel remains byte-identical to
 v81.
 
+The initially published v82 full rebuild was withdrawn because its rootfs
+omitted `dnsmasq-full`, preventing DHCP leases. v83 is instead constructed from
+the known-good v81 rootfs and changes only the wireless defaults, the one-time
+legacy-width migration, and the matching LuCI frontend/backend guards. The
+device profile now explicitly owns `dnsmasq-full` and the other validated v81
+runtime services so a clean future rebuild cannot silently omit them.
+
 The inherited v73 change fixed MLO client association failures caused by the
 QCN9274 firmware reporting a zero ML-peer
 limit to the Linux 6.6 ath12k driver. The board-local fallback uses the same
@@ -88,7 +95,7 @@ derives each physical radio's displayed channel and frequency from its own UCI
 band/channel. Channel 108 is shown as 5.540 GHz instead of the invalid 6.490
 GHz. This board has no 6 GHz path. The v69 access-control and certificate fixes,
 the safe device editor and the fast hostname/identity pipeline remain included.
-See [`releases/2026-10-11-nondfs-fast-connect-v82/README.md`](releases/2026-10-11-nondfs-fast-connect-v82/README.md).
+See [`releases/2026-10-11-nondfs-fast-connect-v83/README.md`](releases/2026-10-11-nondfs-fast-connect-v83/README.md).
 
 ## Current status (2026-09-12)
 
