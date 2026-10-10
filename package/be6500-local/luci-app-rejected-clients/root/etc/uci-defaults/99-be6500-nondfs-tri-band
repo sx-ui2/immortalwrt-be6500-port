@@ -1,0 +1,78 @@
+#!/bin/sh
+
+# The previous tri-band defaults used 160 MHz on channels 36/48 and 108.
+# Both chandefs overlap DFS spectrum, so every boot or Wi-Fi save started a
+# 60-second CAC while clients repeatedly retried authentication.  Migrate only
+# that legacy 160 MHz profile; explicit 20/40/80 MHz user choices are retained.
+
+config_dir="${BE6500_UCI_CONFIG_DIR:-}"
+board="${BE6500_BOARD_NAME:-$(cat /tmp/sysinfo/board_name 2>/dev/null)}"
+changed=0
+
+[ "$board" = "jdcloud,be6500" ] || exit 0
+
+uci_call() {
+	if [ -n "$config_dir" ]; then
+		uci -q -c "$config_dir" "$@"
+	else
+		uci -q "$@"
+	fi
+}
+
+[ "$(uci_call get wireless.main.freq_mode)" = "1" ] || exit 0
+
+radio_device() {
+	local index="$1"
+	if uci_call get "wireless.radio${index}" >/dev/null 2>&1; then
+		printf 'radio%s\n' "$index"
+	elif uci_call get "wireless.wifi${index}" >/dev/null 2>&1; then
+		printf 'wifi%s\n' "$index"
+	fi
+}
+
+mode80() {
+	case "$1" in
+		EHT160) printf '%s\n' EHT80 ;;
+		HE160) printf '%s\n' HE80 ;;
+		VHT160) printf '%s\n' VHT80 ;;
+		HT160) printf '%s\n' HT80 ;;
+		*) return 1 ;;
+	esac
+}
+
+radio1="$(radio_device 1)"
+if [ -n "$radio1" ]; then
+	old_mode="$(uci_call get "wireless.$radio1.htmode")"
+	new_mode="$(mode80 "$old_mode")" || new_mode=""
+	case "$(uci_call get "wireless.$radio1.channel")" in
+		36|40|44|48)
+			if [ -n "$new_mode" ]; then
+				uci_call set "wireless.$radio1.htmode=$new_mode" || exit 1
+				changed=1
+			fi
+			;;
+	esac
+fi
+
+radio2="$(radio_device 2)"
+if [ -n "$radio2" ]; then
+	old_mode="$(uci_call get "wireless.$radio2.htmode")"
+	new_mode="$(mode80 "$old_mode")" || new_mode=""
+	case "$(uci_call get "wireless.$radio2.channel")" in
+		100|104|108|112|116|120|124|128|132|136|140|144)
+			if [ -n "$new_mode" ]; then
+				uci_call set "wireless.$radio2.channel=149" || exit 1
+				uci_call set "wireless.$radio2.htmode=$new_mode" || exit 1
+				changed=1
+			fi
+			;;
+	esac
+fi
+
+if [ "$changed" -eq 1 ]; then
+	uci_call commit wireless || exit 1
+	logger -t be6500-wireless-migrate \
+		"migrated legacy tri-band DFS/160 MHz defaults to non-DFS 80 MHz" 2>/dev/null || true
+fi
+
+exit 0

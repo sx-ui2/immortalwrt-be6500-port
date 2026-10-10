@@ -328,6 +328,7 @@
       bandFields('2g','2.4GHz', [1,2,3,4,5,6,7,8,9,10,11,12,13], [['20','抗干扰模式 (20/40MHz)'],['40','高性能模式 (40MHz)']]) +
       bandFields('5g','5.2GHz', [36,40,44,48,52,56,60,64], [['20','抗干扰模式 (20/40MHz)'],['40','高性能模式 (40MHz)'],['80','超高性能模式 (80MHz)'],['160','顶级性能模式 (160/80MHz)']]) +
       bandFields('52g','5.8GHz', [100,104,108,112,116,120,124,128,132,136,140,144,149,153,157,161,165], [['20','抗干扰模式 (20/40MHz)'],['40','高性能模式 (40MHz)'],['80','超高性能模式 (80MHz)'],['160','顶级性能模式 (160/80MHz)']]) +
+      '<p class="native-info">三频模式下两路 5GHz 最大使用 80MHz；推荐 5.2GHz 使用信道 48、5.8GHz 使用信道 149，可避免 DFS 检测导致的约 60 秒等待。</p>' +
       section('Wi-Fi 5 兼容模式',
         '<p class="native-info">启用后会将所选频段组合切换为兼容模式；2.4GHz 使用 802.11n，5GHz 使用 802.11ac。适用于无法连接 Wi-Fi 6/7 的旧设备。</p>' +
         row('启用', toggle('wifi5-compatible', '启用兼容模式')) +
@@ -338,7 +339,8 @@
     function normalizeWifiWidth(key) {
       var channel = Number(value('wifi-' + key + '-channel'));
       var width = Number(value('wifi-' + key + '-bandwidth'));
-      if (width === 160 && ((key === '52g' && channel >= 149) || (key === '5g' && channel > 64)))
+      var tri = Number(value('wifi-mode')) === 1;
+      if (width === 160 && (tri || (key === '52g' && channel >= 149) || (key === '5g' && channel > 64)))
         set('wifi-' + key + '-bandwidth', '80');
     }
     var endpoint='/cgi-bin/luci/admin/network/be6500_oem_beta/native_wifi';
@@ -378,6 +380,8 @@
         channel.innerHTML = '<option value="0">auto（可能选择 DFS 信道）</option>' + list.map(function (item) { return '<option value="' + item + '">' + channelLabel(item) + '</option>'; }).join('');
         channel.value = list.indexOf(Number(selected)) >= 0 ? selected : '0';
       }
+      normalizeWifiWidth('5g');
+      if (tri) normalizeWifiWidth('52g');
       renderWifi5Bands(tri);
       var mloAllowed = unified && !checked('wifi5-compatible') &&
         ['2g','5g','52g'].filter(function(key){ return (key !== '52g' || tri) && checked('wifi-' + key + '-enabled'); }).length >= 2;

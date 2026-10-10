@@ -924,8 +924,15 @@ local function wifi_protocol_htmode(uci, device, compatible, requested_width)
     -- A 160 MHz block starting at 149 reaches channel 177, which this board
     -- marks disabled. Channels 132–144 are retained for driver validation.
     local channel = tonumber(uci:get("wireless", device, "channel")) or 0
+	local tri = tonumber(uci:get("wireless", "main", "freq_mode")) == 1
+	-- In the QWRT/OEM three-radio topology each QCN9224 pdev owns one 5 GHz
+	-- range.  A 160 MHz chandef on either range crosses DFS channels and makes
+	-- every Wi-Fi save wait for a 60-second CAC.  Keep 160 MHz available in
+	-- dual-band mode, but cap both dedicated 5 GHz links at 80 MHz in tri-band
+	-- mode so the AP can accept clients immediately after startup/reload.
+	if width >= 160 and tri and (tostring(device):match("1$") or tostring(device):match("2$")) then width = 80 end
     if width >= 160 and tostring(device):match("2$") and channel >= 149 then width = 80 end
-    if width >= 160 and tostring(device):match("1$") and tonumber(uci:get("wireless", "main", "freq_mode")) == 1 and channel > 64 then width = 80 end
+    if width >= 160 and tostring(device):match("1$") and tri and channel > 64 then width = 80 end
     if compatible then
         return (tostring(device):match("0$") and "HT" or "VHT") .. tostring(width)
     end
@@ -1103,9 +1110,12 @@ local function action_native_wifi_impl()
                 -- hardware radio2, whose data path is not active in dual-band
                 -- mode.  Resolve "auto" to a safe non-DFS channel for each 5 GHz
                 -- logical radio instead of allowing that cross-radio migration.
-                -- Preserve ACS/auto instead of converting it to a fixed channel;
-                -- top-performance width is resolved by the driver after ACS.
-                if device == radio_device(uci, 1) and tonumber(uci:get("wireless", "main", "freq_mode")) == 1 and channel > 64 then channel = 36 end
+				-- In three-radio mode, resolve ACS to one non-DFS primary per
+				-- hardware range.  Explicit channel choices remain available.
+				local tri = tonumber(uci:get("wireless", "main", "freq_mode")) == 1
+				if tri and device == radio_device(uci, 1) and channel == 0 then channel = 48 end
+				if tri and device == radio_device(uci, 1) and channel > 64 then channel = 48 end
+				if tri and device == radio_device(uci, 2) and channel == 0 then channel = 149 end
                 set_value(device, "channel", channel == 0 and "auto" or tostring(channel), device)
                 local power = normalize_wifi_power(band.power)
                 set_value(device, "be6500_power", tostring(power), device)

@@ -1,7 +1,7 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=luci-app-rejected-clients
-PKG_RELEASE:=70
+PKG_RELEASE:=71
 PKG_MAINTAINER:=Codex
 
 include $(INCLUDE_DIR)/package.mk
@@ -78,6 +78,7 @@ define Package/luci-app-rejected-clients/install
 	$(INSTALL_BIN) ./root/etc/uci-defaults/99-be6500-switch-port-labels $(1)/etc/uci-defaults/99-be6500-switch-port-labels
 	$(INSTALL_BIN) ./root/etc/uci-defaults/99-be6500-runtime-services $(1)/etc/uci-defaults/99-be6500-runtime-services
 	$(INSTALL_BIN) ./root/etc/uci-defaults/99-be6500-band-steering $(1)/etc/uci-defaults/99-be6500-band-steering
+	$(INSTALL_BIN) ./root/etc/uci-defaults/99-be6500-nondfs-tri-band $(1)/etc/uci-defaults/99-be6500-nondfs-tri-band
 	$(INSTALL_DIR) $(1)/etc/sysctl.d
 	$(INSTALL_CONF) ./root/etc/sysctl.d/99-be6500-ppe.conf $(1)/etc/sysctl.d/99-be6500-ppe.conf
 	$(INSTALL_DIR) $(1)/etc/rc.button

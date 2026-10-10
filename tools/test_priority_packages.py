@@ -112,7 +112,7 @@ class PriorityPackageTests(unittest.TestCase):
         self.assertIn("qmodem.main.enable_usb_scan='0'", defaults)
         self.assertIn("qmodem.main.enable_pcie_scan='0'", defaults)
         self.assertIn("qmodem.main.try_preset_pcie='0'", defaults)
-        self.assertIn("PKG_RELEASE:=13", makefile)
+        self.assertIn("PKG_RELEASE:=14", makefile)
         self.assertIn(
             "./files/95-be6500-qmodem-ondemand "
             "$(1)/etc/uci-defaults/95-be6500-qmodem-ondemand",

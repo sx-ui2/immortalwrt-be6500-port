@@ -294,7 +294,7 @@ class NetworkPortUiTests(unittest.TestCase):
         default = IFNAME_DEFAULT.read_text()
         makefile = (CURRENT_CONFIG / "Makefile").read_text()
 
-        self.assertIn("PKG_RELEASE:=13", makefile)
+        self.assertIn("PKG_RELEASE:=14", makefile)
         self.assertIn("be6500-migrate-network-ifname", makefile)
         self.assertIn("Package/be6500-current-config/postinst", makefile)
         self.assertIn("migrate_bridge_interfaces", source)
@@ -321,7 +321,7 @@ class NetworkPortUiTests(unittest.TestCase):
 
     def test_package_installs_factory_port_helpers_and_network_patcher(self):
         makefile = MAKEFILE.read_text()
-        self.assertIn("PKG_RELEASE:=70", makefile)
+        self.assertIn("PKG_RELEASE:=71", makefile)
         self.assertIn("+coreutils-timeout", makefile)
         self.assertIn("be6500-luci-overrides/package-manager-call", makefile)
         self.assertIn("be6500-patch-luci-network", makefile)

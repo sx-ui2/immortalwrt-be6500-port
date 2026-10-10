@@ -5,7 +5,7 @@ ZhaoYun BE6500. A successful build does not establish hardware bootability.
 
 ## Current installation and recovery release
 
-Use the v81 stock-to-ImmortalWrt bundle. It includes the pinned JDCloud
+Use the v82 stock-to-ImmortalWrt bundle. It includes the pinned JDCloud
 RE-CS-06 uBootKit binary, guarded APPSBL/GPT backup-and-install scripts, the RAM
 installer and the final persistent sysupgrade image. v80 retains the v79 APFS
 support, the v73 MLO client fix and the v74 complete USB modem/tethering stack: CDC Ethernet,
@@ -65,6 +65,17 @@ now returns, re-discovers the current 2.4 GHz MLO link and resumes without
 restarting Wi-Fi or the network. The firmware is otherwise byte-for-byte based
 on v80, including its unchanged kernel and wireless stack.
 
+v82 fixes the remaining slow/multi-attempt association cause. The previous
+three-radio profile configured both 5 GHz links for 160 MHz, so each chandef
+crossed DFS spectrum and every boot or Wi-Fi save waited for an approximately
+60-second CAC. Tri-band mode now defaults to channel 48 / 80 MHz and channel
+149 / 80 MHz, caps both dedicated 5 GHz pdevs at 80 MHz, and migrates only the
+legacy 160 MHz profile when settings are preserved. Explicit 20/40/80 MHz and
+manual DFS selections remain available. Live validation completed a Wi-Fi
+reload in about 13 seconds with no new DFS CAC, and clients returned 0–8 seconds
+after the APs became ready. The sysupgrade kernel remains byte-identical to
+v81.
+
 The inherited v73 change fixed MLO client association failures caused by the
 QCN9274 firmware reporting a zero ML-peer
 limit to the Linux 6.6 ath12k driver. The board-local fallback uses the same
@@ -77,7 +88,7 @@ derives each physical radio's displayed channel and frequency from its own UCI
 band/channel. Channel 108 is shown as 5.540 GHz instead of the invalid 6.490
 GHz. This board has no 6 GHz path. The v69 access-control and certificate fixes,
 the safe device editor and the fast hostname/identity pipeline remain included.
-See [`releases/2026-10-11-band-steering-rebind-v81/README.md`](releases/2026-10-11-band-steering-rebind-v81/README.md).
+See [`releases/2026-10-11-nondfs-fast-connect-v82/README.md`](releases/2026-10-11-nondfs-fast-connect-v82/README.md).
 
 ## Current status (2026-09-12)
 
