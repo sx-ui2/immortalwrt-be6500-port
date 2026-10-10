@@ -284,9 +284,13 @@ listen() {
 	while steering_enabled; do
 		source="$(find_2g_iface)"
 		if [ -n "$source" ]; then
-			exec "$HOSTAPD_CLI" -r -p "$HOSTAPD_CTRL" -i "$source" -a "$ACTION"
+			# Do not let hostapd_cli reconnect forever to the old control
+			# socket name.  A Wi-Fi reload can rename the MLD from the
+			# temporary phy*.ap0 interface to be6500-mld0_link0.  Returning
+			# here lets the loop discover the current 2.4 GHz link again.
+			"$HOSTAPD_CLI" -p "$HOSTAPD_CTRL" -i "$source" -a "$ACTION"
 		fi
-		sleep 5
+		sleep 1
 	done
 	return 0
 }

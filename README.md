@@ -5,7 +5,7 @@ ZhaoYun BE6500. A successful build does not establish hardware bootability.
 
 ## Current installation and recovery release
 
-Use the v80 stock-to-ImmortalWrt bundle. It includes the pinned JDCloud
+Use the v81 stock-to-ImmortalWrt bundle. It includes the pinned JDCloud
 RE-CS-06 uBootKit binary, guarded APPSBL/GPT backup-and-install scripts, the RAM
 installer and the final persistent sysupgrade image. v80 retains the v79 APFS
 support, the v73 MLO client fix and the v74 complete USB modem/tethering stack: CDC Ethernet,
@@ -58,6 +58,13 @@ volumes and symlink traversal is rejected. APFS shares are forcibly read-only;
 other supported filesystems follow their mount mode. Applying a share restarts
 only Samba and does not reload Wi-Fi or the network.
 
+v81 fixes the remaining post-reload band-steering listener bug. A Wi-Fi reload
+can rename the temporary 2.4 GHz hostapd control interface to the final MLO
+link, but the old listener reconnected forever to the stale name. The listener
+now returns, re-discovers the current 2.4 GHz MLO link and resumes without
+restarting Wi-Fi or the network. The firmware is otherwise byte-for-byte based
+on v80, including its unchanged kernel and wireless stack.
+
 The inherited v73 change fixed MLO client association failures caused by the
 QCN9274 firmware reporting a zero ML-peer
 limit to the Linux 6.6 ath12k driver. The board-local fallback uses the same
@@ -70,7 +77,7 @@ derives each physical radio's displayed channel and frequency from its own UCI
 band/channel. Channel 108 is shown as 5.540 GHz instead of the invalid 6.490
 GHz. This board has no 6 GHz path. The v69 access-control and certificate fixes,
 the safe device editor and the fast hostname/identity pipeline remain included.
-See [`releases/2026-10-10-network-share-ui-v80/README.md`](releases/2026-10-10-network-share-ui-v80/README.md).
+See [`releases/2026-10-11-band-steering-rebind-v81/README.md`](releases/2026-10-11-band-steering-rebind-v81/README.md).
 
 ## Current status (2026-09-12)
 

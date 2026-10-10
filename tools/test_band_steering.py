@@ -198,6 +198,15 @@ class BandSteeringTests(unittest.TestCase):
         self.assertIn("AP-STA-CONNECTED", ACTION.read_text())
         self.assertIn("printf '%s_link%s", STEERING.read_text())
 
+    def test_listener_rediscovers_mld_interface_after_wifi_reload(self):
+        steering = STEERING.read_text()
+        self.assertNotIn('exec "$HOSTAPD_CLI" -r', steering)
+        self.assertIn(
+            '"$HOSTAPD_CLI" -p "$HOSTAPD_CTRL" -i "$source" -a "$ACTION"',
+            steering,
+        )
+        self.assertIn("sleep 1", steering[steering.index("listen() {") :])
+
 
 if __name__ == "__main__":
     unittest.main()
